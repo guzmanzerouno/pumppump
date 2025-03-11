@@ -183,12 +183,13 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
 // 🔥 Cargar suscriptores
 loadSubscribers();
 
-// 🔹 Escuchar firmas en mensajes
+// 🔹 Escuchar firmas en mensajes y consultar transacción
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    if (/^[A-Za-z0-9]{87}$/.test(text)) {
+    // 🛠️ Nueva validación de firmas en Base58 para Solana (87-88 caracteres, pero pueden haber casos con más)
+    if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
         bot.sendMessage(chatId, "🔄 Consultando transacción...");
         const details = await getTransactionDetails(text);
         bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
