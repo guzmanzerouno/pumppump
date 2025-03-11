@@ -22,17 +22,49 @@ function loadSubscribers() {
     }
 }
 
-// 📝 Guardar suscriptores en el archivo JSON
-function saveSubscribers() {
-    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...activeUsers], null, 2));
+// 🔹 Obtener datos del token desde DexScreener API
+async function getDexScreenerData(mintAddress) {
+    try {
+        const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+        if (response.data && response.data.length > 0) {
+            const tokenData = response.data[0];
+
+            return {
+                name: tokenData.baseToken.name || "Desconocido",
+                symbol: tokenData.baseToken.symbol || "N/A",
+                priceUsd: tokenData.priceUsd || "N/A",
+                priceSol: tokenData.priceNative || "N/A",
+                liquidity: tokenData.liquidity?.usd || "N/A",
+                marketCap: tokenData.marketCap || "N/A",
+                fdv: tokenData.fdv || "N/A",
+                pairAddress: tokenData.pairAddress || "N/A",
+                dex: tokenData.dexId || "N/A",
+                chain: tokenData.chainId || "solana",
+                creationTimestamp: tokenData.pairCreatedAt || null
+            };
+        }
+    } catch (error) {
+        console.error("⚠️ Error al obtener datos desde DexScreener:", error.message);
+    }
+    return null;
 }
 
-// 🔹 Obtener datos del token desde una transacción
+// 🔹 Calcular el tiempo desde la creación del par en minutos y segundos
+function calculateAge(timestamp) {
+    if (!timestamp) return "N/A";
+    const now = Date.now();
+    const elapsedMs = now - timestamp;
+    const minutes = Math.floor(elapsedMs / 60000);
+    const seconds = Math.floor((elapsedMs % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+}
+
+// 🔹 Obtener detalles de la transacción con DexScreener
 async function getTransactionDetails(signature) {
     try {
         const transaction = await connection.getTransaction(signature, {
             commitment: "confirmed",
-            maxSupportedTransactionVersion: 0  // 🔥 Evita el error de versión no soportada
+            maxSupportedTransactionVersion: 0
         });
 
         if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
@@ -49,30 +81,41 @@ async function getTransactionDetails(signature) {
         let message = `📜 **Detalles del Token:**\n\n`;
 
         for (const [index, token] of tokenInfo.entries()) {
-            const metadata = await getTokenMetadata(token.mint);
-            const priceData = await getTokenPrice(token.mint);
+            const dexData = await getDexScreenerData(token.mint);
             
-            message += `🔹 **Token #${index + 1}**\n`;
-            message += `🪙 **Mint Address:** \`${token.mint}\`\n`;
-            message += `📛 **Nombre:** ${metadata.name || "Desconocido"}\n`;
-            message += `💲 **Símbolo:** ${metadata.symbol || "N/A"}\n`;
-            message += `🔢 **Decimales:** ${metadata.decimals || "N/A"}\n`;
-            message += `🌍 **URL Logo:** ${metadata.logo || "N/A"}\n`;
-            message += `🏦 **Total Supply:** ${metadata.supply || "N/A"}\n`;
-            message += `📉 **Precio Actual:** $${priceData.price || "N/A"} (Fuente: BirdEye)\n`;
-            message += `📈 **Market Cap:** $${priceData.marketCap || "N/A"}\n`;
-            message += `👤 **Owner:** \`${token.owner || "N/A"}\`\n`;
-            message += `💰 **Cantidad:** ${token.uiTokenAmount}\n\n`;
+            if (!dexData) {
+                message += `🔹 **Token #${index + 1}**\n`;
+                message += `🪙 **Mint Address:** \`${token.mint}\`\n`;
+                message += `📛 **Nombre:** No disponible\n`;
+                message += `💲 **Símbolo:** No disponible\n`;
+                message += `📈 **Datos de precio no disponibles**\n\n`;
+                continue;
+            }
+
+            message += `💎 **Símbolo:** ${dexData.symbol}\n`;
+            message += `💎 **Nombre:** ${dexData.name}\n`;
+            message += `💲 **USD:** ${dexData.priceUsd}\n`;
+            message += `💰 **SOL:** ${dexData.priceSol}\n`;
+            message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
+            message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
+            message += `💹 **FDV:** $${dexData.fdv}\n\n`;
+
+            // Obtener detalles adicionales de la transacción
+            const slotTime = await connection.getBlockTime(transaction.slot);
+            const date = slotTime ? new Date(slotTime * 1000).toLocaleString() : "Desconocida";
+            const feePaid = transaction.meta.fee / 1e9; // Convertir a SOL
+
+            message += `📆 **Fecha de Transacción:** ${date}\n`;
+            message += `🔄 **Estado:** Confirmado ✅\n\n`;
+
+            // Agregar información del par
+            message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
+            message += `🔗 **Token:** \`${token.mint}\`\n\n`;
+
+            // Agregar detalles de DEX
+            message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
+            message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** N/A`;
         }
-
-        // Obtener detalles adicionales de la transacción
-        const slotTime = await connection.getBlockTime(transaction.slot);
-        const date = slotTime ? new Date(slotTime * 1000).toLocaleString() : "Desconocida";
-        const feePaid = transaction.meta.fee / 1e9; // Convertir a SOL
-
-        message += `📆 **Fecha de Transacción:** ${date}\n`;
-        message += `⛽ **Fee Pagado:** ${feePaid} SOL\n`;
-        message += `🔄 **Estado:** Confirmado ✅`;
 
         return message;
     } catch (error) {
