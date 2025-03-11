@@ -8,7 +8,11 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SUBSCRIBERS_FILE = "subscribers.json";
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+const connection = new Connection(SOLANA_RPC_URL, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0, // ✅ Se asegura la compatibilidad con nuevas versiones de transacciones
+});
+
 let activeUsers = new Set();
 
 // 🔥 Cargar suscriptores desde el archivo JSON
@@ -28,8 +32,18 @@ function saveSubscribers() {
 // 🔹 Obtener datos del token desde una transacción
 async function getTransactionDetails(signature) {
     try {
-        const transaction = await connection.getTransaction(signature, { commitment: "confirmed" });
-        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
+        console.log(`🔍 Consultando transacción: ${signature}`);
+
+        const transaction = await connection.getTransaction(signature, {
+            commitment: "confirmed",
+            maxSupportedTransactionVersion: 0, // ✅ Se asegura la compatibilidad
+        });
+
+        if (!transaction) {
+            return "❌ Transacción no encontrada. Verifica la firma.";
+        }
+
+        if (!transaction.meta || !transaction.meta.preTokenBalances) {
             return "⚠️ No se encontraron datos de token en esta transacción.";
         }
 
