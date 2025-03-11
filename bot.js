@@ -30,7 +30,11 @@ function saveSubscribers() {
 // 🔹 Obtener datos del token desde una transacción
 async function getTransactionDetails(signature) {
     try {
-        const transaction = await connection.getTransaction(signature, { commitment: "confirmed" });
+        const transaction = await connection.getTransaction(signature, {
+            commitment: "confirmed",
+            maxSupportedTransactionVersion: 0  // 🔥 Evita el error de versión no soportada
+        });
+
         if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
             return "⚠️ No se encontraron datos de token en esta transacción.";
         }
