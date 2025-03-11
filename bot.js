@@ -40,7 +40,7 @@ async function getMintAddressFromTransaction(signature) {
         }
 
         const mintAddress = transaction.meta.preTokenBalances[0]?.mint || null;
-        return mintAddress;
+        return { mintAddress, date: new Date(transaction.blockTime * 1000).toLocaleString() };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
         return null;
@@ -116,16 +116,16 @@ function calculateAge(timestamp) {
 // 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
 async function getTransactionDetails(signature) {
     try {
-        const mintAddress = await getMintAddressFromTransaction(signature);
-        if (!mintAddress) {
+        const mintData = await getMintAddressFromTransaction(signature);
+        if (!mintData || !mintData.mintAddress) {
             return "⚠️ No se pudo obtener el Mint Address de esta transacción.";
         }
 
-        const dexData = await getDexScreenerData(mintAddress);
-        const rugCheckData = await fetchRugCheckData(mintAddress);
+        const dexData = await getDexScreenerData(mintData.mintAddress);
+        const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
 
         if (!dexData) {
-            return `⚠️ No se pudo obtener información del token ${mintAddress}`;
+            return `⚠️ No se pudo obtener información del token ${mintData.mintAddress}`;
         }
 
         const priceChange24h = dexData.priceChange24h !== "N/A"
@@ -139,11 +139,21 @@ async function getTransactionDetails(signature) {
         message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
         message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
         message += `💹 **FDV:** $${dexData.fdv}\n\n`;
-        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
-        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
-        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n`;
 
-        await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintAddress);
+        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
+        
+        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
+        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n\n`;
+
+        // 🔹 Agregar información adicional
+        message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
+        message += `📆 **Fecha de Transacción:** ${mintData.date}\n`;
+        message += `🔄 **Estado:** Confirmado ✅\n\n`;
+
+        message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
+        message += `🔗 **Token:** \`${mintData.mintAddress}\`\n\n`;
+
+        await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
     } catch (error) {
         console.error("❌ Error al consultar la transacción:", error);
         return "❌ Error al obtener la información del token.";
