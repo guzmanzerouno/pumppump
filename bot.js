@@ -11,15 +11,15 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-let activeUsers = new Set();
+let subscribers = new Set();
 
-// 🔥 Cargar suscriptores desde el archivo JSON al iniciar
+// 🔥 Cargar suscriptores desde el archivo JSON
 function loadSubscribers() {
     if (fs.existsSync(SUBSCRIBERS_FILE)) {
         try {
             const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-            activeUsers = new Set(JSON.parse(data));
-            console.log(`✅ ${activeUsers.size} usuarios suscritos cargados.`);
+            subscribers = new Set(JSON.parse(data));
+            console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
         } catch (error) {
             console.error("❌ Error cargando suscriptores:", error);
         }
@@ -29,7 +29,7 @@ function loadSubscribers() {
 // 📝 Guardar suscriptores en el archivo JSON
 function saveSubscribers() {
     try {
-        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...activeUsers], null, 2));
+        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
         console.log("📂 Subscriptores actualizados.");
     } catch (error) {
         console.error("❌ Error guardando suscriptores:", error);
@@ -39,9 +39,8 @@ function saveSubscribers() {
 // 🔹 Comando `/start` para suscribirse a notificaciones
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    
-    if (!activeUsers.has(chatId)) {
-        activeUsers.add(chatId);
+    if (!subscribers.has(chatId)) {
+        subscribers.add(chatId);
         saveSubscribers();
         bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
     } else {
@@ -52,9 +51,8 @@ bot.onText(/\/start/, (msg) => {
 // 🔹 Comando `/stop` para cancelar suscripción
 bot.onText(/\/stop/, (msg) => {
     const chatId = msg.chat.id;
-
-    if (activeUsers.has(chatId)) {
-        activeUsers.delete(chatId);
+    if (subscribers.has(chatId)) {
+        subscribers.delete(chatId);
         saveSubscribers();
         bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
     } else {
@@ -62,29 +60,7 @@ bot.onText(/\/stop/, (msg) => {
     }
 });
 
-// 🔹 Escuchar firmas en mensajes y consultar transacción
-bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text.trim();
-
-    // Evitar procesar mensajes que son comandos
-    if (text.startsWith("/")) return;
-
-    // 🛠️ Validación de firmas Base58 en Solana (87-88 caracteres o más)
-    if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
-        bot.sendMessage(chatId, "🔄 Consultando transacción...");
-        const details = await getTransactionDetails(text);
-        bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
-    } else {
-        bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
-    }
-});
-
-// 🔥 Cargar suscriptores y mostrar mensaje en consola
-loadSubscribers();
-console.log("🤖 Bot de Telegram iniciado. Esperando firmas de transacción...");
-
-// 🔹 Extraer Mint Address desde una transacción
+// 🔹 Obtener Mint Address desde una transacción
 async function getMintAddressFromTransaction(signature) {
     try {
         const transaction = await connection.getTransaction(signature, {
@@ -96,8 +72,10 @@ async function getMintAddressFromTransaction(signature) {
             return null;
         }
 
-        const mintAddress = transaction.meta.preTokenBalances[0]?.mint || null;
-        return { mintAddress, date: new Date(transaction.blockTime * 1000).toLocaleString() };
+        return {
+            mintAddress: transaction.meta.preTokenBalances[0]?.mint || null,
+            date: new Date(transaction.blockTime * 1000).toLocaleString()
+        };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
         return null;
@@ -141,78 +119,35 @@ async function fetchRugCheckData(tokenAddress) {
         }
 
         const data = response.data;
-        const name = data.fileMeta?.name || "N/A";
-        const symbol = data.fileMeta?.symbol || "N/A";
-        const imageUrl = data.fileMeta?.image || "";
-        const riskScore = data.score || 9999;
-        const riskLevel = riskScore <= 1000 ? "GOOD" : "WARNING";
-        const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
-        let lpLocked = "N/A";
-
-        if (data.markets && data.markets.length > 0) {
-            lpLocked = data.markets[0].lp?.lpLockedPct || "N/A";
-        }
-
-        return { name, symbol, imageUrl, riskLevel, riskDescription, lpLocked };
+        return {
+            name: data.fileMeta?.name || "N/A",
+            symbol: data.fileMeta?.symbol || "N/A",
+            imageUrl: data.fileMeta?.image || "",
+            riskLevel: data.score <= 1000 ? "GOOD" : "WARNING",
+            riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+            lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
+        };
     } catch (error) {
         console.error("❌ Error al obtener datos desde RugCheck:", error);
         return null;
     }
 }
 
-// 🔹 Calcular el tiempo desde la creación del par en minutos y segundos
-function calculateAge(timestamp) {
-    if (!timestamp) return "N/A";
-    const now = Date.now();
-    const elapsedMs = now - timestamp;
-    const minutes = Math.floor(elapsedMs / 60000);
-    const seconds = Math.floor((elapsedMs % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
-}
-
-// 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
+// 🔹 Obtener detalles de la transacción
 async function getTransactionDetails(signature) {
     try {
         const mintData = await getMintAddressFromTransaction(signature);
-        if (!mintData || !mintData.mintAddress) {
-            return "⚠️ No se pudo obtener el Mint Address de esta transacción.";
-        }
+        if (!mintData || !mintData.mintAddress) return "⚠️ No se pudo obtener el Mint Address.";
 
         const dexData = await getDexScreenerData(mintData.mintAddress);
         const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
 
-        if (!dexData) {
-            return `⚠️ No se pudo obtener información del token ${mintData.mintAddress}`;
-        }
-
-        const priceChange24h = dexData.priceChange24h !== "N/A"
-            ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
-            : "N/A";
-
-        let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
-        message += `💎 **Nombre:** ${dexData.name}\n`;
-        message += `💲 **USD:** ${dexData.priceUsd}\n`;
-        message += `💰 **SOL:** ${dexData.priceSol}\n`;
-        message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
-        message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
-        message += `💹 **FDV:** $${dexData.fdv}\n\n`;
-
-        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
-        
-        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
-        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n\n`;
-
-        // 🔹 Agregar información adicional
-        message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
-        message += `📆 **Fecha de Transacción:** ${mintData.date}\n`;
-        message += `🔄 **Estado:** Confirmado ✅\n\n`;
-
-        message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
-        message += `🔗 **Token:** \`${mintData.mintAddress}\`\n\n`;
+        let message = `💎 **Símbolo:** ${dexData.symbol}\n💎 **Nombre:** ${dexData.name}\n💲 **USD:** ${dexData.priceUsd}\n💰 **SOL:** ${dexData.priceSol}\n📈 **Market Cap:** $${dexData.marketCap}\n📆 **Fecha de Transacción:** ${mintData.date}\n🔄 **Estado:** Confirmado ✅\n\n🔗 **Pair:** \`${dexData.pairAddress}\`\n🔗 **Token:** \`${mintData.mintAddress}\`\n`;
 
         await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
+        return message;
     } catch (error) {
-        console.error("❌ Error al consultar la transacción:", error);
+        console.error("❌ Error al obtener la información del token:", error);
         return "❌ Error al obtener la información del token.";
     }
 }
@@ -237,12 +172,14 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
+// 🔥 Cargar suscriptores al iniciar
+loadSubscribers();
+
 // 🔹 Escuchar firmas en mensajes y consultar transacción
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    // 🛠️ Nueva validación de firmas en Base58 para Solana (87-88 caracteres, pero pueden haber casos con más)
     if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
         bot.sendMessage(chatId, "🔄 Consultando transacción...");
         const details = await getTransactionDetails(text);
