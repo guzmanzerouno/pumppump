@@ -138,6 +138,16 @@ async function fetchRugCheckData(tokenAddress) {
     }
 }
 
+// 🔹 Calcular el tiempo desde la creación del par en minutos y segundos
+function calculateAge(timestamp) {
+    if (!timestamp) return "N/A";
+    const now = Date.now();
+    const elapsedMs = now - timestamp;
+    const minutes = Math.floor(elapsedMs / 60000);
+    const seconds = Math.floor((elapsedMs % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+}
+
 // 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
 async function getTransactionDetails(signature) {
     try {
