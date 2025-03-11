@@ -1,26 +1,28 @@
-import TelegramBot from "node-telegram-bot-api";
-import { Connection, PublicKey } from "@solana/web3.js";
-import fs from "fs-extra";
 import axios from "axios";
+import fs from "fs";
+import TelegramBot from "node-telegram-bot-api";
 
-// 🔹 Configuración del bot y RPC
-const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
+// 🔹 Configuración
+const TELEGRAM_BOT_TOKEN = "TU_BOT_TOKEN";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
-const BIRDEYE_API_URL = "https://public-api.birdeye.so/public/token-price";
-const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const SUBSCRIBERS_FILE = "subscribers.json";
+const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-let activeUsers = new Set();
+let subscribers = new Set();
 
-// 🔥 Cargar suscriptores desde el archivo JSON
+// 🔹 Cargar suscriptores desde archivo
 function loadSubscribers() {
     if (fs.existsSync(SUBSCRIBERS_FILE)) {
         const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-        activeUsers = new Set(JSON.parse(data));
-        console.log(`✅ ${activeUsers.size} usuarios suscritos cargados.`);
+        subscribers = new Set(JSON.parse(data));
+        console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
     }
+}
+
+// 🔹 Guardar suscriptores en archivo
+function saveSubscribers() {
+    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
 }
 
 // 🔹 Obtener datos del token desde DexScreener API
@@ -90,60 +92,34 @@ function calculateAge(timestamp) {
 }
 
 // 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
-async function getTransactionDetails(signature) {
+async function getTransactionDetails(mintAddress) {
     try {
-        const transaction = await connection.getTransaction(signature, {
-            commitment: "confirmed",
-            maxSupportedTransactionVersion: 0
-        });
+        const dexData = await getDexScreenerData(mintAddress);
+        const rugCheckData = await fetchRugCheckData(mintAddress);
 
-        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
-            return "⚠️ No se encontraron datos de token en esta transacción.";
+        if (!dexData) {
+            return `⚠️ No se pudo obtener información del token ${mintAddress}`;
         }
 
-        const tokenInfo = transaction.meta.preTokenBalances.map(token => ({
-            mint: token.mint,
-            owner: token.owner,
-            uiTokenAmount: token.uiTokenAmount.uiAmountString
-        }));
+        const priceChange24h = dexData.priceChange24h !== "N/A"
+            ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+            : "N/A";
 
-        for (const token of tokenInfo) {
-            const dexData = await getDexScreenerData(token.mint);
-            const rugCheckData = await fetchRugCheckData(token.mint);
+        let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
+        message += `💎 **Nombre:** ${dexData.name}\n`;
+        message += `💲 **USD:** ${dexData.priceUsd}\n`;
+        message += `💰 **SOL:** ${dexData.priceSol}\n`;
+        message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
+        message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
+        message += `💹 **FDV:** $${dexData.fdv}\n\n`;
+        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
+        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
+        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n`;
 
-            if (!dexData) {
-                return `⚠️ No se pudo obtener información del token ${token.mint}`;
-            }
-
-            const priceChange24h = dexData.priceChange24h !== "N/A"
-                ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
-                : "N/A";
-
-            const slotTime = await connection.getBlockTime(transaction.slot);
-            const date = slotTime ? new Date(slotTime * 1000).toLocaleString() : "Desconocida";
-            const feePaid = transaction.meta.fee / 1e9;
-
-            let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
-            message += `💎 **Nombre:** ${dexData.name}\n`;
-            message += `💲 **USD:** ${dexData.priceUsd}\n`;
-            message += `💰 **SOL:** ${dexData.priceSol}\n`;
-            message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
-            message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
-            message += `💹 **FDV:** $${dexData.fdv}\n\n`;
-            message += `📆 **Fecha de Transacción:** ${date}\n`;
-            message += `🔄 **Estado:** Confirmado ✅\n\n`;
-            message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
-            message += `🔗 **Token:** \`${token.mint}\`\n\n`;
-            message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
-            message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
-            message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
-            message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n`;
-
-            await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, token.mint);
-        }
+        await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintAddress);
     } catch (error) {
         console.error("❌ Error al consultar la transacción:", error);
-        return "❌ Error al obtener la información de la transacción.";
+        return "❌ Error al obtener la información del token.";
     }
 }
 
@@ -151,7 +127,11 @@ async function getTransactionDetails(signature) {
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     try {
         for (const userId of subscribers) {
-            await bot.telegram.sendPhoto(userId, imageUrl || "https://default-image.com/no-image.jpg", {
+            if (!message.trim()) {
+                console.error("⚠️ Error: Mensaje vacío, no se envió.");
+                continue;
+            }
+            await bot.sendPhoto(userId, imageUrl || "https://default-image.com/no-image.jpg", {
                 caption: message,
                 parse_mode: "Markdown",
                 reply_markup: {
@@ -167,22 +147,13 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
-// 🔹 Obtener metadata del token
-async function getTokenMetadata(mintAddress) {
-    try {
-        const metadataUrl = `https://public-api.solscan.io/token/meta?tokenAddress=${mintAddress}`;
-        const response = await axios.get(metadataUrl);
-        return response.data || {};
-    } catch (error) {
-        console.error("❌ Error al obtener metadata del token:", error);
-        return {};
-    }
-}
+// 🔥 Cargar suscriptores
+loadSubscribers();
 
 // 🔹 Comando `/start` para suscribirse a notificaciones
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    activeUsers.add(chatId);
+    subscribers.add(chatId);
     saveSubscribers();
     bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
 });
@@ -190,25 +161,23 @@ bot.onText(/\/start/, (msg) => {
 // 🔹 Comando `/stop` para cancelar suscripción
 bot.onText(/\/stop/, (msg) => {
     const chatId = msg.chat.id;
-    activeUsers.delete(chatId);
+    subscribers.delete(chatId);
     saveSubscribers();
     bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
 });
 
-// 🔹 Escuchar firmas de transacción en mensajes
+// 🔹 Escuchar mint address en mensajes
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    if (/^[A-Za-z0-9]{87}$/.test(text)) {
-        bot.sendMessage(chatId, "🔄 Consultando datos de la transacción...");
+    if (/^[A-Za-z0-9]{44}$/.test(text)) {
+        bot.sendMessage(chatId, "🔄 Consultando datos del token...");
         const details = await getTransactionDetails(text);
         bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
     } else {
-        bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
+        bot.sendMessage(chatId, "❌ Envía un Mint Address válido.");
     }
 });
 
-// 🔥 Cargar suscriptores y mostrar mensaje en consola
-loadSubscribers();
-console.log("🤖 Bot de Telegram iniciado. Esperando firmas de transacción...");
+console.log("🤖 Bot de Telegram iniciado.");
