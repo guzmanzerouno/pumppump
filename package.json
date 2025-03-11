@@ -1,0 +1,15 @@
+{
+  "name": "solana-migration-bot",
+  "version": "1.0.0",
+  "description": "Bot de Telegram para rastrear migraciones de tokens en Solana",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "pm2": "pm2 start bot.js --name solana-bot"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.90.0",
+    "node-telegram-bot-api": "^0.61.0",
+    "fs-extra": "^11.1.0"
+  }
+}
