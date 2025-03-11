@@ -3,7 +3,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 
 // 🔹 Configuración
-const TELEGRAM_BOT_TOKEN = "TU_BOT_TOKEN";
+const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SUBSCRIBERS_FILE = "subscribers.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
