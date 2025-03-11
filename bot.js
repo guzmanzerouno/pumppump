@@ -1,12 +1,14 @@
 import axios from "axios";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
+import { Connection } from "@solana/web3.js";
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SUBSCRIBERS_FILE = "subscribers.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
+const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 let subscribers = new Set();
@@ -23,6 +25,26 @@ function loadSubscribers() {
 // 🔹 Guardar suscriptores en archivo
 function saveSubscribers() {
     fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
+}
+
+// 🔹 Extraer Mint Address desde una transacción
+async function getMintAddressFromTransaction(signature) {
+    try {
+        const transaction = await connection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: "confirmed"
+        });
+
+        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
+            return null;
+        }
+
+        const mintAddress = transaction.meta.preTokenBalances[0]?.mint || null;
+        return mintAddress;
+    } catch (error) {
+        console.error("❌ Error al obtener Mint Address:", error);
+        return null;
+    }
 }
 
 // 🔹 Obtener datos del token desde DexScreener API
@@ -92,8 +114,13 @@ function calculateAge(timestamp) {
 }
 
 // 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
-async function getTransactionDetails(mintAddress) {
+async function getTransactionDetails(signature) {
     try {
+        const mintAddress = await getMintAddressFromTransaction(signature);
+        if (!mintAddress) {
+            return "⚠️ No se pudo obtener el Mint Address de esta transacción.";
+        }
+
         const dexData = await getDexScreenerData(mintAddress);
         const rugCheckData = await fetchRugCheckData(mintAddress);
 
@@ -127,10 +154,6 @@ async function getTransactionDetails(mintAddress) {
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     try {
         for (const userId of subscribers) {
-            if (!message.trim()) {
-                console.error("⚠️ Error: Mensaje vacío, no se envió.");
-                continue;
-            }
             await bot.sendPhoto(userId, imageUrl || "https://default-image.com/no-image.jpg", {
                 caption: message,
                 parse_mode: "Markdown",
@@ -150,33 +173,17 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
 // 🔥 Cargar suscriptores
 loadSubscribers();
 
-// 🔹 Comando `/start` para suscribirse a notificaciones
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    subscribers.add(chatId);
-    saveSubscribers();
-    bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
-});
-
-// 🔹 Comando `/stop` para cancelar suscripción
-bot.onText(/\/stop/, (msg) => {
-    const chatId = msg.chat.id;
-    subscribers.delete(chatId);
-    saveSubscribers();
-    bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
-});
-
-// 🔹 Escuchar mint address en mensajes
+// 🔹 Escuchar firmas en mensajes
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    if (/^[A-Za-z0-9]{44}$/.test(text)) {
-        bot.sendMessage(chatId, "🔄 Consultando datos del token...");
+    if (/^[A-Za-z0-9]{87}$/.test(text)) {
+        bot.sendMessage(chatId, "🔄 Consultando transacción...");
         const details = await getTransactionDetails(text);
         bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
     } else {
-        bot.sendMessage(chatId, "❌ Envía un Mint Address válido.");
+        bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
     }
 });
 
