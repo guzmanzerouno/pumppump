@@ -88,7 +88,7 @@ async function fetchRugCheckData(tokenAddress) {
         const symbol = data.fileMeta?.symbol || "N/A";
         const imageUrl = data.fileMeta?.image || "";
         const riskScore = data.score || 9999;
-        const riskLevel = riskScore <= 1000 ? "🟢 GOOD" : "🔴 WARNING";
+        const riskLevel = riskScore <= 1000 ? "GOOD" : "WARNING";
         const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
         let lpLocked = "N/A";
 
