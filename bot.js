@@ -119,35 +119,68 @@ async function fetchRugCheckData(tokenAddress) {
         }
 
         const data = response.data;
-        return {
-            name: data.fileMeta?.name || "N/A",
-            symbol: data.fileMeta?.symbol || "N/A",
-            imageUrl: data.fileMeta?.image || "",
-            riskLevel: data.score <= 1000 ? "GOOD" : "WARNING",
-            riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
-            lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
-        };
+        const name = data.fileMeta?.name || "N/A";
+        const symbol = data.fileMeta?.symbol || "N/A";
+        const imageUrl = data.fileMeta?.image || "";
+        const riskScore = data.score || 9999;
+        const riskLevel = riskScore <= 1000 ? "GOOD" : "WARNING";
+        const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
+        let lpLocked = "N/A";
+
+        if (data.markets && data.markets.length > 0) {
+            lpLocked = data.markets[0].lp?.lpLockedPct || "N/A";
+        }
+
+        return { name, symbol, imageUrl, riskLevel, riskDescription, lpLocked };
     } catch (error) {
         console.error("❌ Error al obtener datos desde RugCheck:", error);
         return null;
     }
 }
 
-// 🔹 Obtener detalles de la transacción
+// 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
 async function getTransactionDetails(signature) {
     try {
         const mintData = await getMintAddressFromTransaction(signature);
-        if (!mintData || !mintData.mintAddress) return "⚠️ No se pudo obtener el Mint Address.";
+        if (!mintData || !mintData.mintAddress) {
+            return "⚠️ No se pudo obtener el Mint Address de esta transacción.";
+        }
 
         const dexData = await getDexScreenerData(mintData.mintAddress);
         const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
 
-        let message = `💎 **Símbolo:** ${dexData.symbol}\n💎 **Nombre:** ${dexData.name}\n💲 **USD:** ${dexData.priceUsd}\n💰 **SOL:** ${dexData.priceSol}\n📈 **Market Cap:** $${dexData.marketCap}\n📆 **Fecha de Transacción:** ${mintData.date}\n🔄 **Estado:** Confirmado ✅\n\n🔗 **Pair:** \`${dexData.pairAddress}\`\n🔗 **Token:** \`${mintData.mintAddress}\`\n`;
+        if (!dexData) {
+            return `⚠️ No se pudo obtener información del token ${mintData.mintAddress}`;
+        }
+
+        const priceChange24h = dexData.priceChange24h !== "N/A"
+            ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+            : "N/A";
+
+        let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
+        message += `💎 **Nombre:** ${dexData.name}\n`;
+        message += `💲 **USD:** ${dexData.priceUsd}\n`;
+        message += `💰 **SOL:** ${dexData.priceSol}\n`;
+        message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
+        message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
+        message += `💹 **FDV:** $${dexData.fdv}\n\n`;
+
+        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
+        
+        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
+        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n\n`;
+
+        // 🔹 Agregar información adicional
+        message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
+        message += `📆 **Fecha de Transacción:** ${mintData.date}\n`;
+        message += `🔄 **Estado:** Confirmado ✅\n\n`;
+
+        message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
+        message += `🔗 **Token:** \`${mintData.mintAddress}\`\n\n`;
 
         await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
-        return message;
     } catch (error) {
-        console.error("❌ Error al obtener la información del token:", error);
+        console.error("❌ Error al consultar la transacción:", error);
         return "❌ Error al obtener la información del token.";
     }
 }
