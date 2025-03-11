@@ -11,21 +11,78 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-let subscribers = new Set();
+let activeUsers = new Set();
 
-// 🔹 Cargar suscriptores desde archivo
+// 🔥 Cargar suscriptores desde el archivo JSON al iniciar
 function loadSubscribers() {
     if (fs.existsSync(SUBSCRIBERS_FILE)) {
-        const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-        subscribers = new Set(JSON.parse(data));
-        console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
+        try {
+            const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
+            activeUsers = new Set(JSON.parse(data));
+            console.log(`✅ ${activeUsers.size} usuarios suscritos cargados.`);
+        } catch (error) {
+            console.error("❌ Error cargando suscriptores:", error);
+        }
     }
 }
 
-// 🔹 Guardar suscriptores en archivo
+// 📝 Guardar suscriptores en el archivo JSON
 function saveSubscribers() {
-    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
+    try {
+        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...activeUsers], null, 2));
+        console.log("📂 Subscriptores actualizados.");
+    } catch (error) {
+        console.error("❌ Error guardando suscriptores:", error);
+    }
 }
+
+// 🔹 Comando `/start` para suscribirse a notificaciones
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    
+    if (!activeUsers.has(chatId)) {
+        activeUsers.add(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
+    }
+});
+
+// 🔹 Comando `/stop` para cancelar suscripción
+bot.onText(/\/stop/, (msg) => {
+    const chatId = msg.chat.id;
+
+    if (activeUsers.has(chatId)) {
+        activeUsers.delete(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
+    }
+});
+
+// 🔹 Escuchar firmas en mensajes y consultar transacción
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text.trim();
+
+    // Evitar procesar mensajes que son comandos
+    if (text.startsWith("/")) return;
+
+    // 🛠️ Validación de firmas Base58 en Solana (87-88 caracteres o más)
+    if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
+        bot.sendMessage(chatId, "🔄 Consultando transacción...");
+        const details = await getTransactionDetails(text);
+        bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
+    } else {
+        bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
+    }
+});
+
+// 🔥 Cargar suscriptores y mostrar mensaje en consola
+loadSubscribers();
+console.log("🤖 Bot de Telegram iniciado. Esperando firmas de transacción...");
 
 // 🔹 Extraer Mint Address desde una transacción
 async function getMintAddressFromTransaction(signature) {
@@ -179,9 +236,6 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
         console.error("❌ Error enviando mensaje a Telegram:", error);
     }
 }
-
-// 🔥 Cargar suscriptores
-loadSubscribers();
 
 // 🔹 Escuchar firmas en mensajes y consultar transacción
 bot.on("message", async (msg) => {
