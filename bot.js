@@ -7,6 +7,7 @@ import axios from "axios";
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const BIRDEYE_API_URL = "https://public-api.birdeye.so/public/token-price";
+const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const SUBSCRIBERS_FILE = "subscribers.json";
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
@@ -40,13 +41,42 @@ async function getDexScreenerData(mintAddress) {
                 pairAddress: tokenData.pairAddress || "N/A",
                 dex: tokenData.dexId || "N/A",
                 chain: tokenData.chainId || "solana",
-                creationTimestamp: tokenData.pairCreatedAt || null
+                creationTimestamp: tokenData.pairCreatedAt || null,
+                priceChange24h: tokenData.priceChange?.h24 || "N/A"
             };
         }
     } catch (error) {
         console.error("⚠️ Error al obtener datos desde DexScreener:", error.message);
     }
     return null;
+}
+
+// 🔹 Obtener datos de riesgo desde RugCheck API
+async function fetchRugCheckData(tokenAddress) {
+    try {
+        const response = await axios.get(`${RUGCHECK_API_BASE}/${tokenAddress}/report`);
+        if (!response.data) {
+            return null;
+        }
+
+        const data = response.data;
+        const name = data.fileMeta?.name || "N/A";
+        const symbol = data.fileMeta?.symbol || "N/A";
+        const imageUrl = data.fileMeta?.image || "";
+        const riskScore = data.score || 9999;
+        const riskLevel = riskScore <= 1000 ? "🟢 GOOD" : "🔴 WARNING";
+        const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
+        let lpLocked = "N/A";
+
+        if (data.markets && data.markets.length > 0) {
+            lpLocked = data.markets[0].lp?.lpLockedPct || "N/A";
+        }
+
+        return { name, symbol, imageUrl, riskLevel, riskDescription, lpLocked };
+    } catch (error) {
+        console.error("❌ Error al obtener datos desde RugCheck:", error);
+        return null;
+    }
 }
 
 // 🔹 Calcular el tiempo desde la creación del par en minutos y segundos
@@ -59,7 +89,7 @@ function calculateAge(timestamp) {
     return `${minutes}m ${seconds}s`;
 }
 
-// 🔹 Obtener detalles de la transacción con DexScreener
+// 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
 async function getTransactionDetails(signature) {
     try {
         const transaction = await connection.getTransaction(signature, {
@@ -71,56 +101,69 @@ async function getTransactionDetails(signature) {
             return "⚠️ No se encontraron datos de token en esta transacción.";
         }
 
-        // 🔹 Extraer información del token
         const tokenInfo = transaction.meta.preTokenBalances.map(token => ({
             mint: token.mint,
             owner: token.owner,
             uiTokenAmount: token.uiTokenAmount.uiAmountString
         }));
 
-        let message = `📜 **Detalles del Token:**\n\n`;
-
-        for (const [index, token] of tokenInfo.entries()) {
+        for (const token of tokenInfo) {
             const dexData = await getDexScreenerData(token.mint);
-            
+            const rugCheckData = await fetchRugCheckData(token.mint);
+
             if (!dexData) {
-                message += `🔹 **Token #${index + 1}**\n`;
-                message += `🪙 **Mint Address:** \`${token.mint}\`\n`;
-                message += `📛 **Nombre:** No disponible\n`;
-                message += `💲 **Símbolo:** No disponible\n`;
-                message += `📈 **Datos de precio no disponibles**\n\n`;
-                continue;
+                return `⚠️ No se pudo obtener información del token ${token.mint}`;
             }
 
-            message += `💎 **Símbolo:** ${dexData.symbol}\n`;
+            const priceChange24h = dexData.priceChange24h !== "N/A"
+                ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+                : "N/A";
+
+            const slotTime = await connection.getBlockTime(transaction.slot);
+            const date = slotTime ? new Date(slotTime * 1000).toLocaleString() : "Desconocida";
+            const feePaid = transaction.meta.fee / 1e9;
+
+            let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
             message += `💎 **Nombre:** ${dexData.name}\n`;
             message += `💲 **USD:** ${dexData.priceUsd}\n`;
             message += `💰 **SOL:** ${dexData.priceSol}\n`;
             message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
             message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
             message += `💹 **FDV:** $${dexData.fdv}\n\n`;
-
-            // Obtener detalles adicionales de la transacción
-            const slotTime = await connection.getBlockTime(transaction.slot);
-            const date = slotTime ? new Date(slotTime * 1000).toLocaleString() : "Desconocida";
-            const feePaid = transaction.meta.fee / 1e9; // Convertir a SOL
-
             message += `📆 **Fecha de Transacción:** ${date}\n`;
             message += `🔄 **Estado:** Confirmado ✅\n\n`;
-
-            // Agregar información del par
             message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
             message += `🔗 **Token:** \`${token.mint}\`\n\n`;
-
-            // Agregar detalles de DEX
             message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
-            message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** N/A`;
-        }
+            message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
+            message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
+            message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n`;
 
-        return message;
+            await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, token.mint);
+        }
     } catch (error) {
         console.error("❌ Error al consultar la transacción:", error);
         return "❌ Error al obtener la información de la transacción.";
+    }
+}
+
+// 🔹 Notificar a los suscriptores con imagen y botones
+async function notifySubscribers(message, imageUrl, pairAddress, mint) {
+    try {
+        for (const userId of subscribers) {
+            await bot.telegram.sendPhoto(userId, imageUrl || "https://default-image.com/no-image.jpg", {
+                caption: message,
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                        [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                    ]
+                }
+            });
+        }
+    } catch (error) {
+        console.error("❌ Error enviando mensaje a Telegram:", error);
     }
 }
 
@@ -132,17 +175,6 @@ async function getTokenMetadata(mintAddress) {
         return response.data || {};
     } catch (error) {
         console.error("❌ Error al obtener metadata del token:", error);
-        return {};
-    }
-}
-
-// 🔹 Obtener precio del token
-async function getTokenPrice(mintAddress) {
-    try {
-        const response = await axios.get(`${BIRDEYE_API_URL}?address=${mintAddress}`);
-        return response.data.data || {};
-    } catch (error) {
-        console.error("❌ Error al obtener precio del token:", error);
         return {};
     }
 }
