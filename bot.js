@@ -72,9 +72,14 @@ async function getMintAddressFromTransaction(signature) {
             return null;
         }
 
+        // Convertir la fecha a EST (Eastern Standard Time)
+        const dateEST = DateTime.fromSeconds(transaction.blockTime)
+            .setZone("America/New_York")
+            .toFormat("yyyy-MM-dd HH:mm:ss z");
+
         return {
             mintAddress: transaction.meta.preTokenBalances[0]?.mint || null,
-            date: new Date(transaction.blockTime * 1000).toLocaleString()
+            date: dateEST
         };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
