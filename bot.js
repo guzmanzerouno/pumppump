@@ -92,6 +92,10 @@ async function getMintAddressFromTransaction(signature) {
 }
 
 function escapeMarkdown(text) {
+    if (typeof text !== "string") {
+        return String(text || "N/A"); // Convierte a string o usa "N/A" si es null/undefined
+    }
+    
     return text
         .replace(/_/g, "\\_")
         .replace(/\*/g, "\\*")
@@ -223,30 +227,29 @@ async function getTransactionDetails(signature) {
             ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
             : "N/A";
 
-        const age = calculateAge(dexData.creationTimestamp);
-        const graduations = calculateGraduations(mintData.date, age);
+        const age = calculateAge(dexData.creationTimestamp) || "N/A";
+const graduations = calculateGraduations(mintData.date, age) || "N/A";
 
-        let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-        message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-        message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-        message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-        message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n`;
-        message += `📈 **Market Cap:** $${escapeMarkdown(dexData.marketCap)}\n`;
-        message += `💹 **FDV:** $${escapeMarkdown(dexData.fdv)}\n\n`;
+let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
+message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
+message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
+message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
+message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
+message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
+message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
 
-        message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H Change:** ${escapeMarkdown(priceChange24h)}\n\n`;
+message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H Change:** ${escapeMarkdown(priceChange24h)}\n\n`;
 
-        message += ` **${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-        message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n\n`;
+message += ` **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
+message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
 
-        // 🔹 Agregar información adicional
-        message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-        message += `📆 **Migration Date:** ${escapeMarkdown(mintData.date)}\n`;
-        message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
-        message += `🔄 **Status:** ${escapeMarkdown(mintData.status)}\n\n`;
+message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
+message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
+message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
+message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
 
-        message += `🔗 **Pair:** \`${escapeMarkdown(dexData.pairAddress)}\`\n`;
-        message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
+message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
 
         await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
     } catch (error) {
