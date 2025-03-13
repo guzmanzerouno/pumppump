@@ -139,7 +139,23 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-const DELAY_BEFORE_ANALYSIS = 70 * 1000; // 50 segundos (ajústalo según sea necesario)
+let DELAY_BEFORE_ANALYSIS = 50 * 1000; // 50 segundos (valor por defecto)
+
+// 🔹 Comando `/delay X` para cambiar el tiempo de espera dinámicamente
+bot.onText(/\/delay (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const newDelay = parseInt(match[1]); // Extrae el número enviado por el usuario
+
+    if (isNaN(newDelay) || newDelay < 10 || newDelay > 300) {
+        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 10 y 300 segundos.", { parse_mode: "Markdown" });
+        return;
+    }
+
+    DELAY_BEFORE_ANALYSIS = newDelay * 1000; // Convierte segundos a milisegundos
+    bot.sendMessage(chatId, `⏳ *Nuevo tiempo de espera configurado:* ${newDelay} segundos.`, { parse_mode: "Markdown" });
+
+    console.log(`🔧 Delay actualizado a ${newDelay} segundos por el usuario.`);
+});
 
 // 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
