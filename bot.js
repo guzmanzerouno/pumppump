@@ -93,9 +93,9 @@ async function getMintAddressFromTransaction(signature) {
 
 function escapeMarkdown(text) {
     if (typeof text !== "string") {
-        return String(text || "N/A"); // Convierte a string o usa "N/A" si es null/undefined
+        return String(text || "N/A"); // Asegurar que siempre sea string
     }
-    
+
     return text
         .replace(/_/g, "\\_")
         .replace(/\*/g, "\\*")
@@ -113,8 +113,7 @@ function escapeMarkdown(text) {
         .replace(/\|/g, "\\|")
         .replace(/\{/g, "\\{")
         .replace(/\}/g, "\\}")
-        .replace(/\./g, "\\.")
-        .replace(/!/g, "\\!");
+        .replace(/!/g, "\\!");  // 👈 Eliminamos el escape de los puntos `.`
 }
 
 // 🔹 Calcular la diferencia en segundos para "Graduations"
