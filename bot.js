@@ -17,22 +17,55 @@ const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const LOG_FILE = "transactions.log";
 
 let ws;
-let activeUsers = new Set();
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+let subscribers = new Set();
 
-// Cargar suscriptores
+// 🔥 Cargar suscriptores desde el archivo JSON
 function loadSubscribers() {
     if (fs.existsSync(SUBSCRIBERS_FILE)) {
-        const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-        activeUsers = new Set(JSON.parse(data));
-        console.log(`✅ ${activeUsers.size} usuarios suscritos cargados.`);
+        try {
+            const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
+            subscribers = new Set(JSON.parse(data));
+            console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
+        } catch (error) {
+            console.error("❌ Error cargando suscriptores:", error);
+        }
     }
 }
 
-// Guardar suscriptores
+// 📝 Guardar suscriptores en el archivo JSON
 function saveSubscribers() {
-    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...activeUsers], null, 2));
+    try {
+        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
+        console.log("📂 Subscriptores actualizados.");
+    } catch (error) {
+        console.error("❌ Error guardando suscriptores:", error);
+    }
 }
+
+// 🔹 Comando `/start` para suscribirse a notificaciones
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    if (!subscribers.has(chatId)) {
+        subscribers.add(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
+    }
+});
+
+// 🔹 Comando `/stop` para cancelar suscripción
+bot.onText(/\/stop/, (msg) => {
+    const chatId = msg.chat.id;
+    if (subscribers.has(chatId)) {
+        subscribers.delete(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
+    }
+});
 
 // Función para iniciar WebSocket
 function connectWebSocket() {
@@ -352,30 +385,6 @@ bot.on("message", async (msg) => {
         bot.sendMessage(chatId, details, { parse_mode: "Markdown" });
     } else {
         bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
-    }
-});
-
-// 🔹 Comando `/start` para suscribirse a notificaciones
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    if (!subscribers.has(chatId)) {
-        subscribers.add(chatId);
-        saveSubscribers();
-        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
-    } else {
-        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
-    }
-});
-
-// 🔹 Comando `/stop` para cancelar suscripción
-bot.onText(/\/stop/, (msg) => {
-    const chatId = msg.chat.id;
-    if (subscribers.has(chatId)) {
-        subscribers.delete(chatId);
-        saveSubscribers();
-        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
-    } else {
-        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
     }
 });
 
