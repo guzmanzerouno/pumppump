@@ -67,10 +67,14 @@ bot.onText(/\/stop/, (msg) => {
     }
 });
 
-// Función para iniciar WebSocket
+// 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
+    if (ws) {
+        ws.removeAllListeners();
+    }
+
     ws = new WebSocket(INSTANTNODES_WS_URL);
-    
+
     ws.on("open", () => {
         console.log("✅ Conectado al WebSocket de InstantNodes");
 
@@ -79,16 +83,14 @@ function connectWebSocket() {
             id: 1,
             method: "logsSubscribe",
             params: [
-                {
-                    mentions: [MIGRATION_PROGRAM_ID]
-                },
-                {
-                    commitment: "finalized"
-                }
+                { mentions: [MIGRATION_PROGRAM_ID] },
+                { commitment: "finalized" }
             ]
         };
-    
-        ws.send(JSON.stringify(subscribeMessage));
+
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(subscribeMessage));
+        }
     });
 
     ws.on("message", (data) => {
@@ -102,17 +104,48 @@ function connectWebSocket() {
         }
     });
 
-    ws.on("close", () => {
-        console.log("⚠️ Conexión cerrada, intentando reconectar...");
-        setTimeout(connectWebSocket, 5000);
+    ws.on("close", (code, reason) => {
+        console.warn(`⚠️ Conexión cerrada (Código: ${code}, Razón: ${reason || "Desconocida"})`);
+        setTimeout(() => {
+            console.log("🔄 Intentando reconectar...");
+            connectWebSocket();
+        }, 5000);
     });
 
     ws.on("error", (error) => {
         console.error("❌ Error en WebSocket:", error);
     });
+
+    // 💓 Mantener conexión viva
+    ws.on("pong", () => {
+        console.log("💓 Recibido PONG desde el servidor.");
+    });
 }
 
-// Función para procesar las transacciones y buscar "Program log: Create"
+// 🔥 Cargar suscriptores antes de iniciar el WebSocket y Heartbeat
+loadSubscribers();
+connectWebSocket();
+
+// 💓 Enviar ping al WebSocket y notificar en Telegram
+function startHeartbeat() {
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+            console.log("💓 Enviando ping al WebSocket");
+
+            const message = "💓 *Bot Activo:* Ping enviado al WebSocket correctamente.";
+            subscribers.forEach(userId => {
+                bot.sendMessage(userId, message, { parse_mode: "Markdown" })
+                    .catch(err => console.error("❌ Error enviando mensaje a Telegram:", err));
+            });
+        }
+    }, 30000);
+}
+
+// 🔥 Iniciar Heartbeat después de cargar suscriptores
+startHeartbeat();
+
+// 🔹 Procesar transacciones WebSocket y enviar alerta si detectamos "Create"
 function processTransaction(transaction) {
     try {
         const logs = transaction?.params?.result?.value?.logs || [];
@@ -120,15 +153,14 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
-        // Buscar "Program log: Create"
         if (logs.some(log => log.includes("Program log: Create"))) {
             const message = `📢 **Nueva Transacción con "Create"**\n\n🔗 **Firma:** ${signature}\n📜 **Logs:**\n\`\`\`${logs.join("\n")}\`\`\``;
             
             // Guardar en el archivo de log
             fs.appendFileSync(LOG_FILE, `${signature}\n${logs.join("\n")}\n\n`);
 
-            // Enviar mensaje a los usuarios suscritos en Telegram
-            activeUsers.forEach(chatId => {
+            // 🔥 Usamos `subscribers.forEach()` en lugar de `activeUsers.forEach()`
+            subscribers.forEach(chatId => {
                 bot.sendMessage(chatId, message, { parse_mode: "Markdown" })
                     .catch(err => console.error("❌ Error enviando mensaje a Telegram:", err));
             });
@@ -138,16 +170,6 @@ function processTransaction(transaction) {
     } catch (error) {
         console.error("❌ Error en processTransaction:", error);
     }
-}
-
-// Enviar un ping cada 30 segundos para mantener la conexión activa
-function startHeartbeat() {
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ method: "ping" }));
-            console.log("💓 Enviando ping al WebSocket");
-        }
-    }, 30000);
 }
 
 // 🔹 Obtener Mint Address desde una transacción
