@@ -107,13 +107,13 @@ function escapeMarkdown(text) {
         .replace(/`/g, "\\`")
         .replace(/>/g, "\\>")
         .replace(/#/g, "\\#")
-        .replace(/\+/g, "\\+")
+        // 🔥 Eliminamos el escape de `+` para evitar `\+`
         .replace(/-/g, "\\-")
         .replace(/=/g, "\\=")
         .replace(/\|/g, "\\|")
         .replace(/\{/g, "\\{")
         .replace(/\}/g, "\\}")
-        .replace(/!/g, "\\!");  // 👈 Eliminamos el escape de los puntos `.`
+        .replace(/!/g, "\\!");
 }
 
 // 🔹 Calcular la diferencia en segundos para "Graduations"
