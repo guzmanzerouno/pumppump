@@ -123,7 +123,7 @@ async function fetchRugCheckData(tokenAddress) {
         const symbol = data.fileMeta?.symbol || "N/A";
         const imageUrl = data.fileMeta?.image || "";
         const riskScore = data.score || 9999;
-        const riskLevel = riskScore <= 1000 ? "GOOD" : "WARNING";
+        const riskLevel = riskScore <= 1000 ? "🟢 GOOD" : "🔴 WARNING";
         const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
         let lpLocked = "N/A";
 
@@ -177,7 +177,7 @@ async function getTransactionDetails(signature) {
 
         message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
         
-        message += `🟢 **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
+        message += ` **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
         message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n\n`;
 
         // 🔹 Agregar información adicional
