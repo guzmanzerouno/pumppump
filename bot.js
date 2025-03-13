@@ -10,6 +10,7 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SUBSCRIBERS_FILE = "subscribers.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+const graduations = calculateGraduations(mintData.date, calculateAge(dexData.creationTimestamp));
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 let subscribers = new Set();
@@ -114,6 +115,31 @@ function escapeMarkdown(text) {
         .replace(/!/g, "\\!");
 }
 
+// 🔹 Calcular la diferencia en segundos para "Graduations"
+function calculateGraduations(migrationDate, age) {
+    try {
+        const migrationDateTime = DateTime.fromFormat(migrationDate, "MM/dd/yyyy HH:mm:ss 'EST'", { zone: "America/New_York" });
+
+        const ageParts = age.match(/(\d+)m (\d+)s/);
+        if (!ageParts) return "N/A";
+
+        const minutes = parseInt(ageParts[1], 10);
+        const seconds = parseInt(ageParts[2], 10);
+
+        // Calcular la fecha final sumando la edad al tiempo de migración
+        const finalTime = migrationDateTime.plus({ minutes, seconds });
+
+        // Obtener la diferencia con el tiempo actual en EST
+        const nowEST = DateTime.now().setZone("America/New_York");
+        const diffSeconds = Math.abs(nowEST.diff(finalTime, "seconds").seconds);
+
+        return `${diffSeconds} Seg`;
+    } catch (error) {
+        console.error("❌ Error calculando Graduations:", error);
+        return "N/A";
+    }
+}
+
 // 🔹 Obtener datos del token desde DexScreener API
 async function getDexScreenerData(mintAddress) {
     try {
@@ -215,6 +241,7 @@ async function getTransactionDetails(signature) {
         // 🔹 Agregar información adicional
         message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
         message += `📆 **Migration Date:** ${escapeMarkdown(mintData.date)}\n`;
+        message += `🎓 **Graduations:** ${graduations}\n`;
         message += `🔄 **Status:** ${mintData.status}\n\n`;
 
         message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
