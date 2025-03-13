@@ -199,8 +199,8 @@ async function getTransactionDetails(signature) {
             ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
             : "N/A";
 
-        let message = `💎 **Símbolo:** ${dexData.symbol}\n`;
-        message += `💎 **Nombre:** ${dexData.name}\n`;
+        let message = `💎 **Symbol:** ${dexData.symbol}\n`;
+        message += `💎 **Name:** ${dexData.name}\n`;
         message += `💲 **USD:** ${dexData.priceUsd}\n`;
         message += `💰 **SOL:** ${dexData.priceSol}\n`;
         message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
