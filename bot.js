@@ -61,6 +61,8 @@ bot.onText(/\/stop/, (msg) => {
     }
 });
 
+import { DateTime } from "luxon";
+
 // 🔹 Obtener Mint Address desde una transacción
 async function getMintAddressFromTransaction(signature) {
     try {
@@ -69,9 +71,12 @@ async function getMintAddressFromTransaction(signature) {
             commitment: "confirmed"
         });
 
-        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
+        if (!transaction) {
             return null;
         }
+
+        // Determinar el estado de la transacción
+        const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
 
         // Convertir a zona horaria EST y formato MM/DD/YYYY HH:mm:ss EST
         const dateEST = DateTime.fromSeconds(transaction.blockTime)
@@ -79,8 +84,9 @@ async function getMintAddressFromTransaction(signature) {
             .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
         return {
-            mintAddress: transaction.meta.preTokenBalances[0]?.mint || null,
-            date: dateEST
+            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || null,
+            date: dateEST,
+            status: status
         };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
@@ -210,8 +216,8 @@ async function getTransactionDetails(signature) {
 
         // 🔹 Agregar información adicional
         message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
-        message += `📆 **Fecha de Transacción:** ${escapeMarkdown(mintData.date)}\n`;
-        message += `🔄 **Estado:** Confirmado ✅\n\n`;
+        message += `📆 **Migration Date:** ${escapeMarkdown(mintData.date)}\n`;
+        message += `🔄 **Status:** ${mintData.status}\n\n`;
 
         message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
         message += `🔗 **Token:** \`${mintData.mintAddress}\`\n\n`;
