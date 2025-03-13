@@ -196,14 +196,21 @@ async function fetchRugCheckData(tokenAddress) {
     }
 }
 
-// 🔹 Calcular el tiempo desde la creación del par en minutos y segundos
+// 🔹 Calcular el tiempo desde la creación del par en horas, minutos y segundos
 function calculateAge(timestamp) {
     if (!timestamp) return "N/A";
     const now = Date.now();
     const elapsedMs = now - timestamp;
-    const minutes = Math.floor(elapsedMs / 60000);
+
+    const hours = Math.floor(elapsedMs / 3600000); // 1 hora = 3600000 ms
+    const minutes = Math.floor((elapsedMs % 3600000) / 60000);
     const seconds = Math.floor((elapsedMs % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`; // Si hay horas, las mostramos
+    } else {
+        return `${minutes}m ${seconds}s`; // Si no hay horas, solo minutos y segundos
+    }
 }
 
 // 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
@@ -236,7 +243,7 @@ message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`
 message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
 message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
 
-message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H Change:** ${escapeMarkdown(priceChange24h)}\n\n`;
+message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
 
 message += ` **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
 message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
