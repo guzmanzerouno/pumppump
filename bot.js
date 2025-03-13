@@ -126,23 +126,16 @@ function connectWebSocket() {
 loadSubscribers();
 connectWebSocket();
 
-// 💓 Enviar ping al WebSocket y notificar en Telegram
+// 💓 Mantener la conexión activa enviando ping cada 30s
 function startHeartbeat() {
     setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.ping();
+            ws.ping(); // 🔥 Ahora usa `ping()` en lugar de `ws.send("ping")`
             console.log("💓 Enviando ping al WebSocket");
-
-            const message = "💓 *Bot Activo:* Ping enviado al WebSocket correctamente.";
-            subscribers.forEach(userId => {
-                bot.sendMessage(userId, message, { parse_mode: "Markdown" })
-                    .catch(err => console.error("❌ Error enviando mensaje a Telegram:", err));
-            });
         }
     }, 30000);
 }
 
-// 🔥 Iniciar Heartbeat después de cargar suscriptores
 startHeartbeat();
 
 // 🔹 Procesar transacciones WebSocket y enviar alerta si detectamos "Create"
