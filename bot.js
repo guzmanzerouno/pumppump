@@ -139,7 +139,7 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-const DELAY_BEFORE_ANALYSIS = 50 * 1000; // 50 segundos (ajústalo según sea necesario)
+const DELAY_BEFORE_ANALYSIS = 65 * 1000; // 50 segundos (ajústalo según sea necesario)
 
 // 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
