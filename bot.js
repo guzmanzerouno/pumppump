@@ -1,4 +1,5 @@
 import axios from "axios";
+import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
@@ -11,55 +12,110 @@ const SUBSCRIBERS_FILE = "subscribers.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-let subscribers = new Set();
+const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const LOG_FILE = "transactions.log";
 
-// 🔥 Cargar suscriptores desde el archivo JSON
+let ws;
+let activeUsers = new Set();
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+
+// Cargar suscriptores
 function loadSubscribers() {
     if (fs.existsSync(SUBSCRIBERS_FILE)) {
-        try {
-            const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-            subscribers = new Set(JSON.parse(data));
-            console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
-        } catch (error) {
-            console.error("❌ Error cargando suscriptores:", error);
-        }
+        const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
+        activeUsers = new Set(JSON.parse(data));
+        console.log(`✅ ${activeUsers.size} usuarios suscritos cargados.`);
     }
 }
 
-// 📝 Guardar suscriptores en el archivo JSON
+// Guardar suscriptores
 function saveSubscribers() {
+    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...activeUsers], null, 2));
+}
+
+// Función para iniciar WebSocket
+function connectWebSocket() {
+    ws = new WebSocket(INSTANTNODES_WS_URL);
+    
+    ws.on("open", () => {
+        console.log("✅ Conectado al WebSocket de InstantNodes");
+
+        const subscribeMessage = {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "logsSubscribe",
+            params: [
+                {
+                    mentions: [MIGRATION_PROGRAM_ID]
+                },
+                {
+                    commitment: "finalized"
+                }
+            ]
+        };
+    
+        ws.send(JSON.stringify(subscribeMessage));
+    });
+
+    ws.on("message", (data) => {
+        try {
+            const transaction = JSON.parse(data);
+            if (transaction) {
+                processTransaction(transaction);
+            }
+        } catch (error) {
+            console.error("❌ Error al procesar el mensaje:", error);
+        }
+    });
+
+    ws.on("close", () => {
+        console.log("⚠️ Conexión cerrada, intentando reconectar...");
+        setTimeout(connectWebSocket, 5000);
+    });
+
+    ws.on("error", (error) => {
+        console.error("❌ Error en WebSocket:", error);
+    });
+}
+
+// Función para procesar las transacciones y buscar "Program log: Create"
+function processTransaction(transaction) {
     try {
-        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
-        console.log("📂 Subscriptores actualizados.");
+        const logs = transaction?.params?.result?.value?.logs || [];
+        const signature = transaction?.params?.result?.value?.signature;
+
+        if (!logs.length || !signature) return;
+
+        // Buscar "Program log: Create"
+        if (logs.some(log => log.includes("Program log: Create"))) {
+            const message = `📢 **Nueva Transacción con "Create"**\n\n🔗 **Firma:** ${signature}\n📜 **Logs:**\n\`\`\`${logs.join("\n")}\`\`\``;
+            
+            // Guardar en el archivo de log
+            fs.appendFileSync(LOG_FILE, `${signature}\n${logs.join("\n")}\n\n`);
+
+            // Enviar mensaje a los usuarios suscritos en Telegram
+            activeUsers.forEach(chatId => {
+                bot.sendMessage(chatId, message, { parse_mode: "Markdown" })
+                    .catch(err => console.error("❌ Error enviando mensaje a Telegram:", err));
+            });
+
+            console.log("📤 Mensaje enviado a Telegram y guardado en el log.");
+        }
     } catch (error) {
-        console.error("❌ Error guardando suscriptores:", error);
+        console.error("❌ Error en processTransaction:", error);
     }
 }
 
-// 🔹 Comando `/start` para suscribirse a notificaciones
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    if (!subscribers.has(chatId)) {
-        subscribers.add(chatId);
-        saveSubscribers();
-        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
-    } else {
-        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
-    }
-});
-
-// 🔹 Comando `/stop` para cancelar suscripción
-bot.onText(/\/stop/, (msg) => {
-    const chatId = msg.chat.id;
-    if (subscribers.has(chatId)) {
-        subscribers.delete(chatId);
-        saveSubscribers();
-        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
-    } else {
-        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
-    }
-});
+// Enviar un ping cada 30 segundos para mantener la conexión activa
+function startHeartbeat() {
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ method: "ping" }));
+            console.log("💓 Enviando ping al WebSocket");
+        }
+    }, 30000);
+}
 
 // 🔹 Obtener Mint Address desde una transacción
 async function getMintAddressFromTransaction(signature) {
@@ -285,9 +341,6 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
-// 🔥 Cargar suscriptores al iniciar
-loadSubscribers();
-
 // 🔹 Escuchar firmas en mensajes y consultar transacción
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
@@ -301,5 +354,32 @@ bot.on("message", async (msg) => {
         bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
     }
 });
+
+// 🔹 Comando `/start` para suscribirse a notificaciones
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    if (!subscribers.has(chatId)) {
+        subscribers.add(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
+    }
+});
+
+// 🔹 Comando `/stop` para cancelar suscripción
+bot.onText(/\/stop/, (msg) => {
+    const chatId = msg.chat.id;
+    if (subscribers.has(chatId)) {
+        subscribers.delete(chatId);
+        saveSubscribers();
+        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
+    } else {
+        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
+    }
+});
+
+// 🔥 Cargar suscriptores al iniciar
+loadSubscribers();
 
 console.log("🤖 Bot de Telegram iniciado.");
