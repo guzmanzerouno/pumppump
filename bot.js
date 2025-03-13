@@ -107,8 +107,7 @@ function escapeMarkdown(text) {
         .replace(/`/g, "\\`")
         .replace(/>/g, "\\>")
         .replace(/#/g, "\\#")
-        // 🔥 Eliminamos el escape de `+` para evitar `\+`
-        .replace(/-/g, "\\-")
+        // 🔥 Eliminamos el escape de `+` y `-` para evitar `\+` y `\-`
         .replace(/=/g, "\\=")
         .replace(/\|/g, "\\|")
         .replace(/\{/g, "\\{")
