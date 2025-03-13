@@ -61,8 +61,6 @@ bot.onText(/\/stop/, (msg) => {
     }
 });
 
-import { DateTime } from "luxon";
-
 // 🔹 Obtener Mint Address desde una transacción
 async function getMintAddressFromTransaction(signature) {
     try {
