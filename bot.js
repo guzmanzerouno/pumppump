@@ -10,7 +10,6 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SUBSCRIBERS_FILE = "subscribers.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-const graduations = calculateGraduations(mintData.date, calculateAge(dexData.creationTimestamp));
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 let subscribers = new Set();
@@ -70,20 +69,19 @@ async function getMintAddressFromTransaction(signature) {
             commitment: "confirmed"
         });
 
-        if (!transaction) {
-            return null;
+        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
+            console.error("❌ No se pudo obtener la transacción.");
+            return null; // 👈 Devuelve null si no hay datos
         }
 
-        // Determinar el estado de la transacción
         const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
 
-        // Convertir a zona horaria EST y formato MM/DD/YYYY HH:mm:ss EST
         const dateEST = DateTime.fromSeconds(transaction.blockTime)
             .setZone("America/New_York")
             .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
         return {
-            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || null,
+            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || "N/A",
             date: dateEST,
             status: status
         };
@@ -225,27 +223,30 @@ async function getTransactionDetails(signature) {
             ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
             : "N/A";
 
-        let message = `💎 **Symbol:** ${dexData.symbol}\n`;
-        message += `💎 **Name:** ${dexData.name}\n`;
-        message += `💲 **USD:** ${dexData.priceUsd}\n`;
-        message += `💰 **SOL:** ${dexData.priceSol}\n`;
-        message += `💧 **Liquidity:** $${dexData.liquidity}\n`;
-        message += `📈 **Market Cap:** $${dexData.marketCap}\n`;
-        message += `💹 **FDV:** $${dexData.fdv}\n\n`;
+        const age = calculateAge(dexData.creationTimestamp);
+        const graduations = calculateGraduations(mintData.date, age);
 
-        message += `⏳ **Age:** ${calculateAge(dexData.creationTimestamp)} 📊 **24H Change:** ${priceChange24h}\n\n`;
-        
-        message += ` **${rugCheckData.riskLevel}:** ${rugCheckData.riskDescription}\n`;
-        message += `🔒 **LPLOCKED:** ${rugCheckData.lpLocked}%\n\n`;
+        let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+        message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+        message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+        message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+        message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n`;
+        message += `📈 **Market Cap:** $${escapeMarkdown(dexData.marketCap)}\n`;
+        message += `💹 **FDV:** $${escapeMarkdown(dexData.fdv)}\n\n`;
+
+        message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H Change:** ${escapeMarkdown(priceChange24h)}\n\n`;
+
+        message += ` **${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
+        message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n\n`;
 
         // 🔹 Agregar información adicional
-        message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
+        message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
         message += `📆 **Migration Date:** ${escapeMarkdown(mintData.date)}\n`;
-        message += `🎓 **Graduations:** ${graduations}\n`;
-        message += `🔄 **Status:** ${mintData.status}\n\n`;
+        message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
+        message += `🔄 **Status:** ${escapeMarkdown(mintData.status)}\n\n`;
 
-        message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
-        message += `🔗 **Token:** \`${mintData.mintAddress}\`\n\n`;
+        message += `🔗 **Pair:** \`${escapeMarkdown(dexData.pairAddress)}\`\n`;
+        message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
 
         await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
     } catch (error) {
