@@ -138,7 +138,10 @@ function startHeartbeat() {
 
 startHeartbeat();
 
-// 🔹 Procesar transacciones WebSocket y enviar alerta si detectamos "Create"
+// ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
+const DELAY_BEFORE_ANALYSIS = 50 * 1000; // 50 segundos (ajústalo según sea necesario)
+
+// 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
     try {
         const logs = transaction?.params?.result?.value?.logs || [];
@@ -146,19 +149,18 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
+        // 🔥 Si la transacción contiene "Program log: Create", se activa el análisis con delay
         if (logs.some(log => log.includes("Program log: Create"))) {
-            const message = `📢 **Nueva Transacción con "Create"**\n\n🔗 **Firma:** ${signature}\n📜 **Logs:**\n\`\`\`${logs.join("\n")}\`\`\``;
-            
-            // Guardar en el archivo de log
-            fs.appendFileSync(LOG_FILE, `${signature}\n${logs.join("\n")}\n\n`);
+            console.log(`📌 Transacción detectada: ${signature}`);
+            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
 
-            // 🔥 Usamos `subscribers.forEach()` en lugar de `activeUsers.forEach()`
-            subscribers.forEach(chatId => {
-                bot.sendMessage(chatId, message, { parse_mode: "Markdown" })
-                    .catch(err => console.error("❌ Error enviando mensaje a Telegram:", err));
-            });
-
-            console.log("📤 Mensaje enviado a Telegram y guardado en el log.");
+            setTimeout(async () => {
+                console.log(`🚀 Ejecutando análisis para la transacción: ${signature}`);
+                const result = await getTransactionDetails(signature);
+                if (result) {
+                    console.log("✅ Análisis completado y enviado a Telegram.");
+                }
+            }, DELAY_BEFORE_ANALYSIS);
         }
     } catch (error) {
         console.error("❌ Error en processTransaction:", error);
