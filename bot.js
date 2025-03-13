@@ -120,18 +120,20 @@ function calculateGraduations(migrationDate, age) {
     try {
         const migrationDateTime = DateTime.fromFormat(migrationDate, "MM/dd/yyyy HH:mm:ss 'EST'", { zone: "America/New_York" });
 
-        const ageParts = age.match(/(\d+)m (\d+)s/);
+        // Extraer horas, minutos y segundos correctamente
+        const ageParts = age.match(/(?:(\d+)h )?(\d+)m (\d+)s/);
         if (!ageParts) return "N/A";
 
-        const minutes = parseInt(ageParts[1], 10);
-        const seconds = parseInt(ageParts[2], 10);
+        const hours = ageParts[1] ? parseInt(ageParts[1], 10) : 0;
+        const minutes = parseInt(ageParts[2], 10);
+        const seconds = parseInt(ageParts[3], 10);
 
         // Calcular la fecha final sumando la edad al tiempo de migración
-        const finalTime = migrationDateTime.plus({ minutes, seconds });
+        const finalTime = migrationDateTime.plus({ hours, minutes, seconds });
 
         // Obtener la diferencia con el tiempo actual en EST
         const nowEST = DateTime.now().setZone("America/New_York");
-        const diffSeconds = Math.abs(Math.round(nowEST.diff(finalTime, "seconds").seconds)); // 👈 Redondea a número entero
+        const diffSeconds = Math.abs(Math.round(nowEST.diff(finalTime, "seconds").seconds)); // Redondea a número entero
 
         return `${diffSeconds} Seg`;
     } catch (error) {
