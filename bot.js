@@ -2,6 +2,7 @@ import axios from "axios";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
+import { DateTime } from "luxon";
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
@@ -72,9 +73,14 @@ async function getMintAddressFromTransaction(signature) {
             return null;
         }
 
+        // Convertir la fecha a EST (Eastern Standard Time)
+        const dateEST = DateTime.fromSeconds(transaction.blockTime)
+            .setZone("America/New_York")
+            .toFormat("yyyy-MM-dd HH:mm:ss z");
+
         return {
             mintAddress: transaction.meta.preTokenBalances[0]?.mint || null,
-            date: new Date(transaction.blockTime * 1000).toLocaleString()
+            date: dateEST
         };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
