@@ -133,7 +133,7 @@ function calculateGraduations(migrationDate, age) {
 
         // Obtener la diferencia con el tiempo actual en EST
         const nowEST = DateTime.now().setZone("America/New_York");
-        const diffSeconds = Math.abs(nowEST.diff(finalTime, "seconds").seconds);
+        const diffSeconds = Math.abs(Math.round(nowEST.diff(finalTime, "seconds").seconds)); // 👈 Redondea a número entero
 
         return `${diffSeconds} Seg`;
     } catch (error) {
