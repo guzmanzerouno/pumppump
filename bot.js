@@ -88,6 +88,28 @@ async function getMintAddressFromTransaction(signature) {
     }
 }
 
+function escapeMarkdown(text) {
+    return text
+        .replace(/_/g, "\\_")
+        .replace(/\*/g, "\\*")
+        .replace(/\[/g, "\\[")
+        .replace(/\]/g, "\\]")
+        .replace(/\(/g, "\\(")
+        .replace(/\)/g, "\\)")
+        .replace(/~/g, "\\~")
+        .replace(/`/g, "\\`")
+        .replace(/>/g, "\\>")
+        .replace(/#/g, "\\#")
+        .replace(/\+/g, "\\+")
+        .replace(/-/g, "\\-")
+        .replace(/=/g, "\\=")
+        .replace(/\|/g, "\\|")
+        .replace(/\{/g, "\\{")
+        .replace(/\}/g, "\\}")
+        .replace(/\./g, "\\.")
+        .replace(/!/g, "\\!");
+}
+
 // 🔹 Obtener datos del token desde DexScreener API
 async function getDexScreenerData(mintAddress) {
     try {
@@ -188,7 +210,7 @@ async function getTransactionDetails(signature) {
 
         // 🔹 Agregar información adicional
         message += `⛓️ **Chain:** ${dexData.chain} ⚡ **Dex:** ${dexData.dex}\n`;
-        message += `📆 **Fecha de Transacción:** ${mintData.date}\n`;
+        message += `📆 **Fecha de Transacción:** ${escapeMarkdown(mintData.date)}\n`;
         message += `🔄 **Estado:** Confirmado ✅\n\n`;
 
         message += `🔗 **Pair:** \`${dexData.pairAddress}\`\n`;
