@@ -73,10 +73,10 @@ async function getMintAddressFromTransaction(signature) {
             return null;
         }
 
-        // Convertir la fecha a EST (Eastern Standard Time)
+        // Convertir a zona horaria EST y formato MM/DD/YYYY HH:mm:ss EST
         const dateEST = DateTime.fromSeconds(transaction.blockTime)
             .setZone("America/New_York")
-            .toFormat("yyyy-MM-dd HH:mm:ss z");
+            .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
         return {
             mintAddress: transaction.meta.preTokenBalances[0]?.mint || null,
