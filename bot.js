@@ -139,19 +139,19 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 50 * 1000; // 50 segundos (valor por defecto)
+let DELAY_BEFORE_ANALYSIS = 30 * 1000; // 30 segundos por defecto
 
 // 🔹 Comando `/delay X` para cambiar el tiempo de espera dinámicamente
 bot.onText(/\/delay (\d+)/, (msg, match) => {
     const chatId = msg.chat.id;
-    const newDelay = parseInt(match[1]); // Extrae el número enviado por el usuario
+    const newDelay = parseInt(match[1]);
 
     if (isNaN(newDelay) || newDelay < 10 || newDelay > 300) {
         bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 10 y 300 segundos.", { parse_mode: "Markdown" });
         return;
     }
 
-    DELAY_BEFORE_ANALYSIS = newDelay * 1000; // Convierte segundos a milisegundos
+    DELAY_BEFORE_ANALYSIS = newDelay * 1000;
     bot.sendMessage(chatId, `⏳ *Nuevo tiempo de espera configurado:* ${newDelay} segundos.`, { parse_mode: "Markdown" });
 
     console.log(`🔧 Delay actualizado a ${newDelay} segundos por el usuario.`);
@@ -165,17 +165,13 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
-        // 🔥 Si la transacción contiene "Program log: Create", se activa el análisis con delay
         if (logs.some(log => log.includes("Program log: Create"))) {
             console.log(`📌 Transacción detectada: ${signature}`);
             console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
 
             setTimeout(async () => {
                 console.log(`🚀 Ejecutando análisis para la transacción: ${signature}`);
-                const result = await getTransactionDetails(signature);
-                if (result) {
-                    console.log("✅ Análisis completado y enviado a Telegram.");
-                }
+                await analyzeTransaction(signature);
             }, DELAY_BEFORE_ANALYSIS);
         }
     } catch (error) {
@@ -183,7 +179,7 @@ function processTransaction(transaction) {
     }
 }
 
-// 🔹 Obtener Mint Address desde una transacción
+// 🔹 Obtener Mint Address desde una transacción en Solana
 async function getMintAddressFromTransaction(signature) {
     try {
         const transaction = await connection.getTransaction(signature, {
@@ -193,7 +189,7 @@ async function getMintAddressFromTransaction(signature) {
 
         if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
             console.error("❌ No se pudo obtener la transacción.");
-            return null; // 👈 Devuelve null si no hay datos
+            return null;
         }
 
         const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
@@ -264,32 +260,49 @@ function calculateGraduations(migrationDate, age) {
     }
 }
 
-// 🔹 Obtener datos del token desde DexScreener API
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea `"raydium"`
 async function getDexScreenerData(mintAddress) {
-    try {
-        const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-        if (response.data && response.data.length > 0) {
-            const tokenData = response.data[0];
-
-            return {
-                name: tokenData.baseToken.name || "Desconocido",
-                symbol: tokenData.baseToken.symbol || "N/A",
-                priceUsd: tokenData.priceUsd || "N/A",
-                priceSol: tokenData.priceNative || "N/A",
-                liquidity: tokenData.liquidity?.usd || "N/A",
-                marketCap: tokenData.marketCap || "N/A",
-                fdv: tokenData.fdv || "N/A",
-                pairAddress: tokenData.pairAddress || "N/A",
-                dex: tokenData.dexId || "N/A",
-                chain: tokenData.chainId || "solana",
-                creationTimestamp: tokenData.pairCreatedAt || null,
-                priceChange24h: tokenData.priceChange?.h24 || "N/A"
-            };
+    let dexData = null;
+    
+    console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
+    
+    while (!dexData || dexData.dexId !== "raydium") {
+        try {
+            const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+            if (response.data && response.data.length > 0) {
+                dexData = response.data[0];
+                console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+            }
+        } catch (error) {
+            console.error("⚠️ Error en DexScreener:", error.message);
         }
-    } catch (error) {
-        console.error("⚠️ Error al obtener datos desde DexScreener:", error.message);
+
+        if (!dexData || dexData.dexId !== "raydium") {
+            console.log("⏳ Esperando 1 segundo para volver a intentar...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
-    return null;
+
+    console.log("✅ DexScreener confirmado en Raydium.");
+
+    return {
+        name: dexData.baseToken?.name || "Desconocido",
+        symbol: dexData.baseToken?.symbol || "N/A",
+        priceUsd: dexData.priceUsd || "N/A",
+        priceSol: dexData.priceNative || "N/A",
+        liquidity: dexData.liquidity?.usd || "N/A",
+        marketCap: dexData.marketCap || "N/A",
+        fdv: dexData.fdv || "N/A",
+        pairAddress: dexData.pairAddress || "N/A",
+        dex: dexData.dexId || "N/A",
+        chain: dexData.chainId || "solana",
+        creationTimestamp: dexData.pairCreatedAt || null,
+        priceChange24h: dexData.priceChange?.h24 || "N/A",
+        volume24h: dexData.volume?.h24 || "N/A",
+        buys24h: dexData.txns?.h24?.buys || "N/A",
+        sells24h: dexData.txns?.h24?.sells || "N/A",
+        website: dexData.info?.websites?.[0]?.url || "N/A"
+    };
 }
 
 // 🔹 Obtener datos de riesgo desde RugCheck API
@@ -337,73 +350,102 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Obtener detalles de la transacción con DexScreener y RugCheck
-async function getTransactionDetails(signature) {
-    try {
-        const mintData = await getMintAddressFromTransaction(signature);
-        if (!mintData || !mintData.mintAddress) {
-            return "⚠️ No se pudo obtener el Mint Address de esta transacción.";
-        }
+// 🔹 Función principal que ejecuta todo el proceso
+async function analyzeTransaction(signature) {
+    console.log(`🔍 Analizando transacción: ${signature}`);
 
-        const dexData = await getDexScreenerData(mintData.mintAddress);
-        const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-
-        if (!dexData) {
-            return `⚠️ No se pudo obtener información del token ${mintData.mintAddress}`;
-        }
-
-        const priceChange24h = dexData.priceChange24h !== "N/A"
-            ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
-            : "N/A";
-
-        const age = calculateAge(dexData.creationTimestamp) || "N/A";
-const graduations = calculateGraduations(mintData.date, age) || "N/A";
-
-let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
-message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
-message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
-message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
-message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
-message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
-message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
-
-message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
-
-message += ` **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
-message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
-
-message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
-message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
-message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
-
-message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
-message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
-
-        await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
-    } catch (error) {
-        console.error("❌ Error al consultar la transacción:", error);
-        return "❌ Error al obtener la información del token.";
+    // 1️⃣ Obtener datos del Mint Address desde Solana
+    const mintData = await getMintAddressFromTransaction(signature);
+    if (!mintData || !mintData.mintAddress) {
+        console.log("⚠️ No se pudo obtener el Mint Address.");
+        return;
     }
+    console.log(`✅ Mint Address obtenido: ${mintData.mintAddress}`);
+
+    // 2️⃣ Obtener datos de DexScreener (esperando hasta que el dexId sea "raydium")
+    const dexData = await getDexScreenerData(mintData.mintAddress);
+    if (!dexData) {
+        console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
+        return;
+    }
+    console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
+
+    // 3️⃣ Obtener datos de RugCheck API
+    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+    if (!rugCheckData) {
+        console.log(`⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress}`);
+        return;
+    }
+    console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
+
+    // 4️⃣ Calcular los valores adicionales
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+        ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+        : "N/A";
+
+    const age = calculateAge(dexData.creationTimestamp) || "N/A";
+    const graduations = calculateGraduations(mintData.date, age) || "N/A";
+
+    // 5️⃣ Formatear mensaje para Telegram
+    let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
+    message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
+    message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
+    message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
+    message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
+
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
+
+    message += ` **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
+
+    message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
+    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
+    message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
+    message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
+
+    message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+
+    // 6️⃣ Enviar mensaje a los suscriptores en Telegram
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
 // 🔹 Notificar a los suscriptores con imagen y botones
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
-    try {
-        for (const userId of subscribers) {
-            await bot.sendPhoto(userId, imageUrl || "https://default-image.com/no-image.jpg", {
-                caption: message,
-                parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                        [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                    ]
-                }
-            });
+    for (const userId of subscribers) {
+        try {
+            if (imageUrl) {
+                // 🔥 Intentar enviar el mensaje con imagen
+                await bot.sendPhoto(userId, imageUrl, {
+                    caption: message,
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                        ]
+                    }
+                });
+            } else {
+                // 🔥 Si no hay imagen, enviar solo el mensaje de texto
+                await bot.sendMessage(userId, message, {
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                        ]
+                    }
+                });
+            }
+
+            console.log(`✅ Mensaje enviado a ${userId}`);
+
+        } catch (error) {
+            console.error(`❌ Error enviando mensaje a ${userId}:`, error);
         }
-    } catch (error) {
-        console.error("❌ Error enviando mensaje a Telegram:", error);
     }
 }
 
