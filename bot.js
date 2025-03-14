@@ -354,17 +354,19 @@ function calculateAge(timestamp) {
 const processedSignatures = new Set();
 
 // 🔹 Función principal que ejecuta todo el proceso
-async function analyzeTransaction(signature) {
+async function analyzeTransaction(signature, fromTelegram = false) {
     console.log(`🔍 Analizando transacción: ${signature}`);
 
-    // 🛑 Verificar si la firma ya fue procesada
-    if (processedSignatures.has(signature)) {
+    // 🛑 Verificar si la firma ya fue procesada (solo si NO es de Telegram)
+    if (!fromTelegram && processedSignatures.has(signature)) {
         console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
 
-    // 📌 Agregar la firma al conjunto de procesadas
-    processedSignatures.add(signature);
+    // 📌 Agregar la firma al conjunto de procesadas (excepto si viene de Telegram)
+    if (!fromTelegram) {
+        processedSignatures.add(signature);
+    }
 
     // 1️⃣ Obtener datos del Mint Address desde Solana
     const mintData = await getMintAddressFromTransaction(signature);
@@ -401,6 +403,7 @@ async function analyzeTransaction(signature) {
     const priceChange24h = dexData.priceChange24h !== "N/A"
         ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
         : "N/A";
+}
 
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
