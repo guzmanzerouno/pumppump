@@ -435,7 +435,7 @@ async function analyzeTransaction(signature) {
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
-            const buyTokenLink = `https://phantom.app/ul/browse/jup.ag/swap/SOL-${mint}?amount=0.2`; // 🔥 Swap con 0.2 SOL predefinido
+            const buyTokenLink = `phantom://browser/https://jup.ag/swap/SOL-${mint}?inputAmount=0.2&exactIn=true`; // 🔥 Forzar apertura en Phantom
             const dexscreenerLink = `https://dexscreener.com/solana/${pairAddress}`;
 
             if (imageUrl) {
