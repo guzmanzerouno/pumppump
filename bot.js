@@ -4,7 +4,6 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { DateTime } from "luxon";
-import fetch from "node-fetch";
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
@@ -351,69 +350,6 @@ function calculateAge(timestamp) {
     }
 }
 
-async function getPhantomSwapLink(mint, solAmount = 0.5) {
-    try {
-        const lamports = solAmount * 1_000_000_000; // Convertir SOL a lamports (1 SOL = 1,000,000,000 lamports)
-        
-        // 🔥 1️⃣ Obtener cotización de Jupiter
-        const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${mint}&amount=${lamports}&slippage=1`;
-        console.log(`🔍 Consultando Jupiter API para cotización: ${quoteUrl}`);
-        
-        const quoteResponse = await fetch(quoteUrl);
-        const quoteData = await quoteResponse.json();
-
-        // 📩 Log de la cotización recibida (para depuración)
-        console.log("📊 Cotización de Jupiter API:", JSON.stringify(quoteData, null, 2));
-
-        // ⚠️ Verificar que la cotización tiene datos válidos
-        if (!quoteData || !quoteData.routePlan) {
-            console.error("❌ Error: No se encontró `routePlan` en la respuesta de Jupiter.");
-            return `https://jup.ag/swap/SOL-${mint}`;
-        }
-
-        // 🔥 2️⃣ Generar transacción firmable desde Jupiter Swap API
-        const swapUrl = `https://quote-api.jup.ag/v6/swap`;
-        console.log(`🔍 Solicitando transacción firmable a Jupiter API: ${swapUrl}`);
-
-        const swapPayload = {
-            userPublicKey: "A6UmfHDJkqTFNbHyXV35LEf6wV5PP2FpXacJR46HdHna", // ⚠️ CAMBIA ESTO POR TU DIRECCIÓN SOLANA
-            wrapAndUnwrapSol: true,
-            useSharedAccounts: true,
-            feeAccount: null,
-            computeUnitPriceMicroLamports: null,
-            quoteResponse: quoteData // Enviar la cotización obtenida
-        };
-
-        const swapResponse = await fetch(swapUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(swapPayload)
-        });
-
-        const swapData = await swapResponse.json();
-
-        // 📩 Log de la respuesta de Swap API (para depuración)
-        console.log("🔄 Respuesta de Jupiter Swap API:", JSON.stringify(swapData, null, 2));
-
-        // ⚠️ Verificar que Jupiter nos devolvió la transacción firmable
-        if (!swapData || !swapData.swapTransaction) {
-            console.error("❌ Error: No se encontró `swapTransaction` en la respuesta de Jupiter Swap.");
-            return `https://jup.ag/swap/SOL-${mint}`;
-        }
-
-        // 🔗 Construir el enlace de Phantom con la transacción lista para firmar
-        const encodedTx = encodeURIComponent(swapData.swapTransaction);
-        const phantomLink = `phantom://action=signAndSendTransaction&message=${encodedTx}`;
-
-        console.log(`✅ Phantom link generado: ${phantomLink}`);
-        return phantomLink;
-        
-    } catch (error) {
-        console.error("❌ Error generando enlace Phantom:", error);
-        return `https://jup.ag/swap/SOL-${mint}`;
-    }
-}
-
 // 🔹 Conjunto para almacenar firmas ya procesadas
 const processedSignatures = new Set();
 
@@ -495,40 +431,34 @@ async function analyzeTransaction(signature) {
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
+// 🔹 Notificar a los suscriptores con imagen y botones
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
-            // ✅ Generar enlaces de compra para diferentes cantidades de SOL
-            const phantomLink_02 = await getPhantomSwapLink(mint, 0.2);
-            const phantomLink_05 = await getPhantomSwapLink(mint, 0.5);
-            const phantomLink_1 = await getPhantomSwapLink(mint, 1.0);
-
-            // 🔹 Botones inline con solo enlaces HTTP permitidos por Telegram
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }],
-                    [{ text: "🛒 Comprar en Jupiter", url: `https://jup.ag/swap/SOL-${mint}` }]
-                ]
-            };
-
-            // ✅ Enviar mensaje con imagen o solo texto
             if (imageUrl) {
+                // 🔥 Intentar enviar el mensaje con imagen
                 await bot.sendPhoto(userId, imageUrl, {
                     caption: message,
                     parse_mode: "Markdown",
-                    reply_markup: keyboard
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                        ]
+                    }
                 });
             } else {
+                // 🔥 Si no hay imagen, enviar solo el mensaje de texto
                 await bot.sendMessage(userId, message, {
                     parse_mode: "Markdown",
-                    reply_markup: keyboard
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                        ]
+                    }
                 });
             }
-
-            // ✅ Enviar el enlace Phantom como un mensaje separado
-            const phantomMsg = `🚀 **Compra directa en Phantom:**\n\n🔗 *Toca el enlace para abrir Phantom Wallet y confirmar la compra.*\n\n${phantomLink_1}`;
-
-            await bot.sendMessage(userId, phantomMsg, { parse_mode: "Markdown" });
 
             console.log(`✅ Mensaje enviado a ${userId}`);
 
