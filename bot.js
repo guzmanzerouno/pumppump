@@ -4,6 +4,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { DateTime } from "luxon";
+import fetch from "node-fetch";
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
@@ -350,6 +351,33 @@ function calculateAge(timestamp) {
     }
 }
 
+// 🔹 Generar enlace para comprar el token en Phantom
+async function getPhantomSwapLink(mint, solAmount = 0.5) {
+    try {
+        const lamports = solAmount * 1_000_000_000; // Convertir SOL a lamports (1 SOL = 1,000,000,000 lamports)
+        
+        // 🔥 Obtener cotización desde Jupiter API
+        const response = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${mint}&amount=${lamports}&slippage=1`);
+        const data = await response.json();
+
+        if (!data || !data.swapTransaction) {
+            console.error("❌ Error obteniendo transacción de Jupiter");
+            return `https://jup.ag/swap/SOL-${mint}`; // Enlace de fallback a Jupiter si falla
+        }
+
+        // 🔗 Construir el enlace de Phantom con la transacción precargada
+        const encodedTx = encodeURIComponent(data.swapTransaction);
+        const phantomLink = `phantom://action=signAndSendTransaction&message=${encodedTx}`;
+        
+        console.log(`✅ Phantom link generado: ${phantomLink}`);
+        return phantomLink;
+        
+    } catch (error) {
+        console.error("❌ Error generando enlace Phantom:", error);
+        return `https://jup.ag/swap/SOL-${mint}`;
+    }
+}
+
 // 🔹 Conjunto para almacenar firmas ya procesadas
 const processedSignatures = new Set();
 
@@ -431,32 +459,38 @@ async function analyzeTransaction(signature) {
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
-// 🔹 Notificar a los suscriptores con imagen y botones
+// 🔹 Notificar a los suscriptores en Telegram con los botones de compra
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
+            // ✅ Generar enlaces de compra para diferentes cantidades de SOL
+            const phantomLink_02 = await getPhantomSwapLink(mint, 0.2);
+            const phantomLink_05 = await getPhantomSwapLink(mint, 0.5);
+            const phantomLink_1 = await getPhantomSwapLink(mint, 1.0);
+
+            // 🔹 Botones inline en una sola línea
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: "💸 0.2 SOL", url: phantomLink_02 },
+                        { text: "💸 0.5 SOL", url: phantomLink_05 },
+                        { text: "💸 1 SOL", url: phantomLink_1 }
+                    ],
+                    [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                ]
+            };
+
+            // ✅ Enviar mensaje con imagen o solo texto
             if (imageUrl) {
-                // 🔥 Intentar enviar el mensaje con imagen
                 await bot.sendPhoto(userId, imageUrl, {
                     caption: message,
                     parse_mode: "Markdown",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                        ]
-                    }
+                    reply_markup: keyboard
                 });
             } else {
-                // 🔥 Si no hay imagen, enviar solo el mensaje de texto
                 await bot.sendMessage(userId, message, {
                     parse_mode: "Markdown",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                        ]
-                    }
+                    reply_markup: keyboard
                 });
             }
 
