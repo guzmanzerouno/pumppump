@@ -435,26 +435,29 @@ async function analyzeTransaction(signature) {
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
+            const buyTokenLink = `https://phantom.app/ul/browse/jup.ag/swap/SOL-${mint}?amount=0.2`; // 🔥 Swap con 0.2 SOL predefinido
+            const dexscreenerLink = `https://dexscreener.com/solana/${pairAddress}`;
+
             if (imageUrl) {
-                // 🔥 Intentar enviar el mensaje con imagen
+                // 🔥 Enviar mensaje con imagen
                 await bot.sendPhoto(userId, imageUrl, {
                     caption: message,
                     parse_mode: "Markdown",
                     reply_markup: {
                         inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                            [{ text: "💸 Buy 0.2 SOL", url: buyTokenLink }], // 🛠️ Botón con la cantidad fija
+                            [{ text: "📊 DexScreener", url: dexscreenerLink }]
                         ]
                     }
                 });
             } else {
-                // 🔥 Si no hay imagen, enviar solo el mensaje de texto
+                // 🔥 Enviar solo mensaje de texto
                 await bot.sendMessage(userId, message, {
                     parse_mode: "Markdown",
                     reply_markup: {
                         inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                            [{ text: "💸 Buy 0.2 SOL", url: buyTokenLink }],
+                            [{ text: "📊 DexScreener", url: dexscreenerLink }]
                         ]
                     }
                 });
