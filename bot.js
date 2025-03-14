@@ -360,6 +360,13 @@ async function analyzeTransaction(signature) {
         console.log("⚠️ No se pudo obtener el Mint Address.");
         return;
     }
+
+    // 🛑 Filtrar transacciones que no deben procesarse (Wrapped SOL)
+    if (mintData.mintAddress === "So11111111111111111111111111111111111111112") {
+        console.log("⏩ Transacción ignorada: Wrapped SOL detectado.");
+        return;
+    }
+
     console.log(`✅ Mint Address obtenido: ${mintData.mintAddress}`);
 
     // 2️⃣ Obtener datos de DexScreener (esperando hasta que el dexId sea "raydium")
