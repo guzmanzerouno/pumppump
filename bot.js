@@ -435,28 +435,35 @@ async function analyzeTransaction(signature) {
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
-            const buyTokenLink = `https://phantom.app/ul/browse/https://jup.ag/swap/SOL-${mint}?inputAmount=0.2&exactIn=true`; // 🔥 Swap con 0.2 SOL predefinido
+            const buyTokenLink = `https://jup.ag/swap/SOL-${mint}?inputAmount=0.2&exactIn=true`; // ✅ Enlace estándar
+            const phantomDeepLink = `phantom://browser/${buyTokenLink}`; // 🔹 Este será enviado en el texto, NO en botón
             const dexscreenerLink = `https://dexscreener.com/solana/${pairAddress}`;
+
+            // 📝 Agregar instrucción para abrir en Phantom
+            const messageWithInstructions = `${message}\n\n⚡ *Para abrir en Phantom Wallet:*  
+1️⃣ Copia este enlace:  
+\`${phantomDeepLink}\`  
+2️⃣ Ábrelo manualmente en Phantom.`;
 
             if (imageUrl) {
                 // 🔥 Enviar mensaje con imagen
                 await bot.sendPhoto(userId, imageUrl, {
-                    caption: message,
+                    caption: messageWithInstructions,
                     parse_mode: "Markdown",
                     reply_markup: {
                         inline_keyboard: [
-                            [{ text: "💸 Buy 0.2 SOL", url: buyTokenLink }], // 🛠️ Botón con la cantidad fija
+                            [{ text: "💸 Buy 0.2 SOL (Jupiter)", url: buyTokenLink }],
                             [{ text: "📊 DexScreener", url: dexscreenerLink }]
                         ]
                     }
                 });
             } else {
                 // 🔥 Enviar solo mensaje de texto
-                await bot.sendMessage(userId, message, {
+                await bot.sendMessage(userId, messageWithInstructions, {
                     parse_mode: "Markdown",
                     reply_markup: {
                         inline_keyboard: [
-                            [{ text: "💸 Buy 0.2 SOL", url: buyTokenLink }],
+                            [{ text: "💸 Buy 0.2 SOL (Jupiter)", url: buyTokenLink }],
                             [{ text: "📊 DexScreener", url: dexscreenerLink }]
                         ]
                     }
