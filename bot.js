@@ -354,19 +354,17 @@ function calculateAge(timestamp) {
 const processedSignatures = new Set();
 
 // 🔹 Función principal que ejecuta todo el proceso
-async function analyzeTransaction(signature, fromTelegram = false) {
+async function analyzeTransaction(signature) {
     console.log(`🔍 Analizando transacción: ${signature}`);
 
-    // 🛑 Verificar si la firma ya fue procesada (solo si NO es de Telegram)
-    if (!fromTelegram && processedSignatures.has(signature)) {
+    // 🛑 Verificar si la firma ya fue procesada
+    if (processedSignatures.has(signature)) {
         console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
 
-    // 📌 Agregar la firma al conjunto de procesadas (excepto si viene de Telegram)
-    if (!fromTelegram) {
-        processedSignatures.add(signature);
-    }
+    // 📌 Agregar la firma al conjunto de procesadas
+    processedSignatures.add(signature);
 
     // 1️⃣ Obtener datos del Mint Address desde Solana
     const mintData = await getMintAddressFromTransaction(signature);
@@ -403,7 +401,6 @@ async function analyzeTransaction(signature, fromTelegram = false) {
     const priceChange24h = dexData.priceChange24h !== "N/A"
         ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
         : "N/A";
-}
 
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
@@ -471,16 +468,24 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
-// 🔹 Escuchar firmas enviadas manualmente en Telegram
+// 🔹 Escuchar firmas en mensajes y consultar transacción manualmente
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
+    // 🛑 Verifica si el mensaje es una firma válida
     if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
         bot.sendMessage(chatId, "🔄 Consultando transacción...");
-        await analyzeTransaction(text, true);  // ✅ Enviamos `true` para forzar la verificación
+        
+        try {
+            await analyzeTransaction(text); // 🔄 Usa analyzeTransaction en lugar de getTransactionDetails
+            bot.sendMessage(chatId, "✅ Análisis completado y enviado.");
+        } catch (error) {
+            console.error("❌ Error al procesar la transacción manual:", error);
+            bot.sendMessage(chatId, "❌ Ocurrió un error al analizar la transacción.");
+        }
     } else {
-        bot.sendMessage(chatId, "❌ Envía una firma de transacción válida.");
+        bot.sendMessage(chatId, "⚠️ Por favor, envía una firma de transacción válida.");
     }
 });
 
