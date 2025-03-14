@@ -351,24 +351,32 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Generar enlace para comprar el token en Phantom
 async function getPhantomSwapLink(mint, solAmount = 0.5) {
     try {
         const lamports = solAmount * 1_000_000_000; // Convertir SOL a lamports (1 SOL = 1,000,000,000 lamports)
         
-        // 🔥 Obtener cotización desde Jupiter API
-        const response = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${mint}&amount=${lamports}&slippage=1`);
+        // 🔥 URL de Jupiter API para obtener la cotización
+        const url = `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${mint}&amount=${lamports}&slippage=1`;
+
+        console.log(`🔍 Consultando Jupiter API: ${url}`);
+
+        // 🔄 Hacer la solicitud a Jupiter API
+        const response = await fetch(url);
         const data = await response.json();
 
+        // 🔍 Log de la respuesta cruda de Jupiter (para depuración)
+        console.log("📩 Respuesta de Jupiter API:", JSON.stringify(data, null, 2));
+
+        // ⚠️ Verificar si la respuesta tiene errores o falta el swapTransaction
         if (!data || !data.swapTransaction) {
-            console.error("❌ Error obteniendo transacción de Jupiter");
+            console.error("❌ Error: No se encontró `swapTransaction` en la respuesta de Jupiter.");
             return `https://jup.ag/swap/SOL-${mint}`; // Enlace de fallback a Jupiter si falla
         }
 
         // 🔗 Construir el enlace de Phantom con la transacción precargada
         const encodedTx = encodeURIComponent(data.swapTransaction);
         const phantomLink = `phantom://action=signAndSendTransaction&message=${encodedTx}`;
-        
+
         console.log(`✅ Phantom link generado: ${phantomLink}`);
         return phantomLink;
         
