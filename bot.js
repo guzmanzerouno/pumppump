@@ -495,7 +495,6 @@ async function analyzeTransaction(signature) {
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
-// 🔹 Notificar a los suscriptores en Telegram con los botones de compra
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId of subscribers) {
         try {
@@ -504,15 +503,11 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
             const phantomLink_05 = await getPhantomSwapLink(mint, 0.5);
             const phantomLink_1 = await getPhantomSwapLink(mint, 1.0);
 
-            // 🔹 Botones inline en una sola línea
+            // 🔹 Botones inline con solo enlaces HTTP permitidos por Telegram
             const keyboard = {
                 inline_keyboard: [
-                    [
-                        { text: "💸 0.2 SOL", url: phantomLink_02 },
-                        { text: "💸 0.5 SOL", url: phantomLink_05 },
-                        { text: "💸 1 SOL", url: phantomLink_1 }
-                    ],
-                    [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                    [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }],
+                    [{ text: "🛒 Comprar en Jupiter", url: `https://jup.ag/swap/SOL-${mint}` }]
                 ]
             };
 
@@ -529,6 +524,11 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     reply_markup: keyboard
                 });
             }
+
+            // ✅ Enviar el enlace Phantom como un mensaje separado
+            const phantomMsg = `🚀 **Compra directa en Phantom:**\n\n🔗 *Toca el enlace para abrir Phantom Wallet y confirmar la compra.*\n\n${phantomLink_1}`;
+
+            await bot.sendMessage(userId, phantomMsg, { parse_mode: "Markdown" });
 
             console.log(`✅ Mensaje enviado a ${userId}`);
 
