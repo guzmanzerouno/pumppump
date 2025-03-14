@@ -350,9 +350,21 @@ function calculateAge(timestamp) {
     }
 }
 
+// 🔹 Conjunto para almacenar firmas ya procesadas
+const processedSignatures = new Set();
+
 // 🔹 Función principal que ejecuta todo el proceso
 async function analyzeTransaction(signature) {
     console.log(`🔍 Analizando transacción: ${signature}`);
+
+    // 🛑 Verificar si la firma ya fue procesada
+    if (processedSignatures.has(signature)) {
+        console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
+        return;
+    }
+
+    // 📌 Agregar la firma al conjunto de procesadas
+    processedSignatures.add(signature);
 
     // 1️⃣ Obtener datos del Mint Address desde Solana
     const mintData = await getMintAddressFromTransaction(signature);
