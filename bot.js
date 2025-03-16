@@ -393,7 +393,7 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Función para comprar tokens usando Jupiter API
+// 🔹 Función para comprar tokens usando Jupiter API con depuración
 async function buyToken(chatId, mint, amountSOL) {
     try {
         const user = users[chatId];
@@ -402,9 +402,17 @@ async function buyToken(chatId, mint, amountSOL) {
         }
 
         // 🔹 Obtener Keypair del usuario correctamente
-        const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey)); // ✅ CORREGIDO
+        const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
         const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
         const userPublicKey = userKeypair.publicKey.toBase58();
+
+        // 🔍 Depuración: Verificando valores antes de enviar a Jupiter
+        console.log(`🟡 Intentando obtener cotización en Jupiter...`);
+        console.log(`🔹 inputMint: SOL`);
+        console.log(`🔹 outputMint: ${mint}`);
+        console.log(`🔹 amountSOL: ${amountSOL} SOL`);
+        console.log(`🔹 amount en lamports: ${Math.floor(amountSOL * 1e9)}`);
+        console.log(`🔹 userPublicKey: ${userPublicKey}`);
 
         // 🔹 Obtener la mejor cotización desde Jupiter
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
@@ -417,13 +425,16 @@ async function buyToken(chatId, mint, amountSOL) {
             }
         });
 
+        // 🔍 Depuración: Verificando respuesta de Jupiter
+        console.log(`🔹 Respuesta de Jupiter:`, JSON.stringify(quoteResponse.data, null, 2));
+
         if (!quoteResponse.data || !quoteResponse.data.quote) {
             throw new Error("No se pudo obtener una cotización válida de Jupiter.");
         }
 
         // 🔹 Solicitar la transacción de swap a Jupiter usando `quote`
         const swapResponse = await axios.post("https://quote-api.jup.ag/v6/swap", {
-            quoteResponse: quoteResponse.data.quote, // ✅ CORREGIDO (antes usabas `route`)
+            quoteResponse: quoteResponse.data.quote, // ✅ Corrección
             userPublicKey: userPublicKey,
             wrapAndUnwrapSol: true
         });
@@ -435,11 +446,8 @@ async function buyToken(chatId, mint, amountSOL) {
         // 🔹 Decodificar, firmar y enviar la transacción
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
         const transaction = Transaction.from(transactionBuffer);
+        transaction.sign(userKeypair);
 
-        // Firmar transacción
-        transaction.sign(userKeypair); // ✅ CORREGIDO
-
-        // Enviar y confirmar la transacción
         const txId = await sendAndConfirmTransaction(connection, transaction, [userKeypair], {
             commitment: "confirmed"
         });
