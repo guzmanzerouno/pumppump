@@ -393,7 +393,7 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Función para comprar tokens usando Jupiter API con depuración
+// 🔹 Función para comprar tokens usando Jupiter API con corrección
 async function buyToken(chatId, mint, amountSOL) {
     try {
         const user = users[chatId];
@@ -428,13 +428,14 @@ async function buyToken(chatId, mint, amountSOL) {
         // 🔍 Depuración: Verificando respuesta de Jupiter
         console.log(`🔹 Respuesta de Jupiter:`, JSON.stringify(quoteResponse.data, null, 2));
 
-        if (!quoteResponse.data || !quoteResponse.data.quote) {
+        // 🔹 VERIFICAR que la cotización es válida en la versión v6
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
             throw new Error("No se pudo obtener una cotización válida de Jupiter.");
         }
 
-        // 🔹 Solicitar la transacción de swap a Jupiter usando `quote`
+        // 🔹 Solicitar la transacción de swap a Jupiter usando `quoteResponse.data`
         const swapResponse = await axios.post("https://quote-api.jup.ag/v6/swap", {
-            quoteResponse: quoteResponse.data.quote, // ✅ Corrección
+            quoteResponse: quoteResponse.data, // ✅ CORREGIDO
             userPublicKey: userPublicKey,
             wrapAndUnwrapSol: true
         });
