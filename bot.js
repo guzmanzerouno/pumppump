@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -393,7 +393,7 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Función para comprar tokens usando Jupiter API con corrección
+// 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
 async function buyToken(chatId, mint, amountSOL) {
     try {
         const user = users[chatId];
@@ -428,7 +428,6 @@ async function buyToken(chatId, mint, amountSOL) {
         // 🔍 Depuración: Verificando respuesta de Jupiter
         console.log(`🔹 Respuesta de Jupiter:`, JSON.stringify(quoteResponse.data, null, 2));
 
-        // 🔹 VERIFICAR que la cotización es válida en la versión v6
         if (!quoteResponse.data || !quoteResponse.data.routePlan) {
             throw new Error("No se pudo obtener una cotización válida de Jupiter.");
         }
@@ -444,14 +443,19 @@ async function buyToken(chatId, mint, amountSOL) {
             throw new Error("No se pudo construir la transacción de swap.");
         }
 
-        // 🔹 Decodificar, firmar y enviar la transacción
+        // 🔹 Decodificar la transacción versión 0 correctamente
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
-        const transaction = Transaction.from(transactionBuffer);
-        transaction.sign(userKeypair);
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer); // ✅ CORREGIDO
 
-        const txId = await sendAndConfirmTransaction(connection, transaction, [userKeypair], {
-            commitment: "confirmed"
-        });
+        // 🔹 Firmar la transacción
+        const signers = [userKeypair];
+        versionedTransaction.sign(signers); // ✅ FIRMANDO CORRECTAMENTE
+
+        // 🔹 Enviar y confirmar la transacción
+        const txId = await connection.sendTransaction(versionedTransaction, {
+        skipPreflight: false,
+        preflightCommitment: "confirmed"
+    });
 
         console.log(`✅ Compra completada con éxito: ${txId}`);
         return txId;
