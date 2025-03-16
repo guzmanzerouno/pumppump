@@ -3,7 +3,9 @@ import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { DateTime } from "luxon";
+import bs58 from "bs58";
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
@@ -391,6 +393,84 @@ function calculateAge(timestamp) {
     }
 }
 
+// 🔹 Función para comprar tokens usando Jupiter API
+async function buyToken(chatId, mint, amountSOL) {
+    try {
+        const user = users[chatId];
+        if (!user || !user.privateKey) {
+            throw new Error("Usuario no registrado o sin privateKey.");
+        }
+
+        // 🔹 Obtener Keypair del usuario correctamente
+        const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey)); // ✅ CORREGIDO
+        const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
+        const userPublicKey = userKeypair.publicKey.toBase58();
+
+        // 🔹 Obtener la mejor cotización desde Jupiter
+        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
+            params: {
+                inputMint: "So11111111111111111111111111111111111111112", // SOL
+                outputMint: mint,
+                amount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
+                slippageBps: 50, // 0.5% de slippage
+                swapMode: "ExactIn"
+            }
+        });
+
+        if (!quoteResponse.data || !quoteResponse.data.quote) {
+            throw new Error("No se pudo obtener una cotización válida de Jupiter.");
+        }
+
+        // 🔹 Solicitar la transacción de swap a Jupiter usando `quote`
+        const swapResponse = await axios.post("https://quote-api.jup.ag/v6/swap", {
+            quoteResponse: quoteResponse.data.quote, // ✅ CORREGIDO (antes usabas `route`)
+            userPublicKey: userPublicKey,
+            wrapAndUnwrapSol: true
+        });
+
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            throw new Error("No se pudo construir la transacción de swap.");
+        }
+
+        // 🔹 Decodificar, firmar y enviar la transacción
+        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
+        const transaction = Transaction.from(transactionBuffer);
+
+        // Firmar transacción
+        transaction.sign(userKeypair); // ✅ CORREGIDO
+
+        // Enviar y confirmar la transacción
+        const txId = await sendAndConfirmTransaction(connection, transaction, [userKeypair], {
+            commitment: "confirmed"
+        });
+
+        console.log(`✅ Compra completada con éxito: ${txId}`);
+        return txId;
+    } catch (error) {
+        console.error("❌ Error en la compra:", error);
+        throw error;
+    }
+}
+
+// 🔹 Función mejorada para obtener balance de tokens
+async function getTokenBalance(chatId, mint) {
+    try {
+        const user = users[chatId];
+        const userPublicKey = new PublicKey(Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey))).publicKey);
+
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, { mint: new PublicKey(mint) });
+
+        if (tokenAccounts.value.length > 0) {
+            return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+        }
+
+        return 0;
+    } catch (error) {
+        console.error("❌ Error obteniendo balance:", error);
+        return 0;
+    }
+}
+
 // 🔹 Conjunto para almacenar firmas ya procesadas
 const processedSignatures = new Set();
 
@@ -472,41 +552,78 @@ async function analyzeTransaction(signature) {
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
-// 🔹 Notificar a los suscriptores con imagen y botones
+// 🔹 Notificar a los suscriptores con imagen y botones de compra rápida
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId in users) {
         if (users[userId].subscribed) {
             try {
+                const buyButtons = [
+                    [
+                        { text: "💰 0.1 SOL", callback_data: `buy_${mint}_0.1` },
+                        { text: "💰 0.2 SOL", callback_data: `buy_${mint}_0.2` },
+                        { text: "💰 0.3 SOL", callback_data: `buy_${mint}_0.3` }
+                    ],
+                    [
+                        { text: "💰 0.4 SOL", callback_data: `buy_${mint}_0.4` },
+                        { text: "💰 0.5 SOL", callback_data: `buy_${mint}_0.5` },
+                        { text: "💰 1.0 SOL", callback_data: `buy_${mint}_1.0` }
+                    ],
+                    [
+                        { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
+                    ]
+                ];
+
                 if (imageUrl) {
                     await bot.sendPhoto(userId, imageUrl, {
                         caption: message,
                         parse_mode: "Markdown",
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                                [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                            ]
-                        }
+                        reply_markup: { inline_keyboard: buyButtons }
                     });
                 } else {
                     await bot.sendMessage(userId, message, {
                         parse_mode: "Markdown",
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: "💸 Buy Token", url: `https://jup.ag/swap/SOL-${mint}` }],
-                                [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }]
-                            ]
-                        }
+                        reply_markup: { inline_keyboard: buyButtons }
                     });
                 }
 
                 console.log(`✅ Mensaje enviado a ${userId}`);
+
             } catch (error) {
                 console.error(`❌ Error enviando mensaje a ${userId}:`, error);
             }
         }
     }
 }
+
+bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data; // Ejemplo: "buy_TokenMint_0.1"
+
+    if (data.startsWith("buy_")) {
+        const parts = data.split("_");
+        const mint = parts[1];
+        const amountSOL = parseFloat(parts[2]);
+
+        if (!users[chatId] || !users[chatId].privateKey) {
+            bot.sendMessage(chatId, "⚠️ No tienes una private key registrada. Usa /start para registrarte.");
+            return;
+        }
+
+        bot.sendMessage(chatId, `🛒 Procesando compra de ${amountSOL} SOL en ${mint}...`);
+
+        try {
+            const txSignature = await buyToken(chatId, mint, amountSOL);
+            const tokensReceived = await getTokenBalance(chatId, mint);
+
+            bot.sendMessage(chatId, `✅ *Compra completada*\n\n📌 **Cantidad comprada:** ${tokensReceived} tokens\n🔗 **Transacción:** [Ver en Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+        } catch (error) {
+            console.error("❌ Error en la compra:", error);
+            bot.sendMessage(chatId, "❌ No se pudo completar la compra.");
+        }
+    }
+
+    bot.answerCallbackQuery(query.id);
+});
 
 // 🔹 Escuchar firmas en mensajes y consultar transacción manualmente
 bot.onText(/^check (.+)/, async (msg, match) => {
