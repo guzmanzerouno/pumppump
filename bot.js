@@ -509,23 +509,23 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
 }
 
 // 🔹 Escuchar firmas en mensajes y consultar transacción manualmente
-bot.on("message", async (msg) => {
+bot.onText(/^check (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const text = msg.text.trim();
+    const signature = match[1].trim(); // Obtiene la firma después de "check"
 
-    // 🛑 Verifica si el mensaje es una firma válida
-    if (/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(text)) {
-        bot.sendMessage(chatId, "🔄 Consultando transacción...");
-        
-        try {
-            await analyzeTransaction(text); // 🔄 Usa analyzeTransaction en lugar de getTransactionDetails
-            bot.sendMessage(chatId, "✅ Análisis completado y enviado.");
-        } catch (error) {
-            console.error("❌ Error al procesar la transacción manual:", error);
-            bot.sendMessage(chatId, "❌ Ocurrió un error al analizar la transacción.");
-        }
-    } else {
-        bot.sendMessage(chatId, "⚠️ Por favor, envía una firma de transacción válida.");
+    if (!/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(signature)) {
+        bot.sendMessage(chatId, "⚠️ La firma proporcionada no es válida. Asegúrate de enviarla correctamente.");
+        return;
+    }
+
+    bot.sendMessage(chatId, "🔄 Consultando transacción...");
+    
+    try {
+        await analyzeTransaction(signature);
+        bot.sendMessage(chatId, "✅ Análisis completado y enviado.");
+    } catch (error) {
+        console.error("❌ Error al procesar la transacción manual:", error);
+        bot.sendMessage(chatId, "❌ Ocurrió un error al analizar la transacción.");
     }
 });
 
