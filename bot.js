@@ -817,7 +817,23 @@ bot.on("callback_query", async (query) => {
         bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens...`);
 
         try {
-            const txSignature = await sellToken(chatId, mint, sellType);
+            // 🔹 Obtener Keypair del usuario
+            const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
+            const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+            // 🔹 Obtener balance del token en la wallet
+            const balance = await getTokenBalance(chatId, mint);
+
+            if (!balance || balance <= 0) {
+                bot.sendMessage(chatId, "⚠️ No tienes saldo suficiente para vender.");
+                return;
+            }
+
+            // 🔹 Determinar cantidad a vender (50% o 100%)
+            const amountToSell = sellType === "50" ? balance / 2 : balance;
+
+            // 🔹 Ejecutar la venta a SOL usando Jupiter
+            const txSignature = await executeJupiterSell(wallet, mint, amountToSell, connection);
 
             if (!txSignature) {
                 bot.sendMessage(chatId, "❌ The sale could not be completed due to an unknown error.");
