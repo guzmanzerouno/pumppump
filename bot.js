@@ -309,25 +309,30 @@ async function getDexScreenerData(mintAddress) {
     
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
     
-    while (!dexData || dexData.dexId === "pumpfun") {
+    while (true) { // Mantener el loop hasta que encontremos un DexID válido
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+            
             if (response.data && response.data.length > 0) {
                 dexData = response.data[0];
+
                 console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+
+                // ✅ Si el DexID NO es "pumpfun", salimos del bucle
+                if (dexData.dexId !== "pumpfun") {
+                    console.log(`✅ DexScreener confirmado en ${dexData.dexId}.`);
+                    break;
+                }
             }
         } catch (error) {
             console.error("⚠️ Error en DexScreener:", error.message);
         }
 
-        if (!dexData || dexData.dexId === "pumpfun") {
-            console.log("⏳ Esperando 1 segundo para volver a intentar...");
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+        console.log("⏳ Esperando 1 segundo para volver a intentar...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    console.log(`✅ DexScreener confirmado en ${dexData.dexId}.`);
-    return dexData;
+    return dexData; // ✅ Ahora la declaración return está fuera del bucle
 }
 
     console.log("✅ DexScreener confirmado en Raydium.");
