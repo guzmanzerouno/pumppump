@@ -622,26 +622,37 @@ async function getSwapDetailsFromSolanaRPC(signature) {
         }
 
         const txData = response.data.result;
+        const meta = txData.meta;
 
-        // Extract relevant swap data
-        const preBalances = txData.meta.preBalances;
-        const postBalances = txData.meta.postBalances;
-        const swapFee = txData.meta.fee / 1e9; // Convert lamports to SOL
+        // Verificar si la transacción fue exitosa
+        if (meta.err) {
+            throw new Error("Transaction failed on Solana.");
+        }
 
-        // Find the token received
-        const receivedToken = txData.meta.postTokenBalances.find(token => token.accountIndex === 2);
+        // Extraer balances antes y después del swap
+        const preBalances = meta.preBalances;
+        const postBalances = meta.postBalances;
+        const swapFee = meta.fee / 1e9; // Convertir lamports a SOL
+
+        // Buscar el token recibido en la transacción
+        const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
         const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
         const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
+        // Extraer la cantidad de SOL usada para el swap
+        const solBefore = preBalances[0] / 1e9;
+        const solAfter = postBalances[0] / 1e9;
+        const inputAmount = (solBefore - solAfter - swapFee).toFixed(6); // La diferencia de SOL gastado
+
         return {
-            inputAmount: 0.1, // This should be dynamic
-            inputValue: 12.73, // This should be dynamic
+            inputAmount: inputAmount,
+            inputValue: "N/A", // Este valor puede ser calculado usando un API de precios si es necesario
             receivedAmount: receivedAmount,
             swapFee: swapFee.toFixed(6),
             receivedTokenMint: receivedTokenMint,
             walletAddress: txData.transaction.message.accountKeys[0],
-            solBefore: (preBalances[0] / 1e9).toFixed(3),
-            solAfter: (postBalances[0] / 1e9).toFixed(3)
+            solBefore: solBefore.toFixed(3),
+            solAfter: solAfter.toFixed(3)
         };
 
     } catch (error) {
@@ -652,7 +663,7 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
-    const data = query.data;
+    const data = query.data; 
 
     if (data.startsWith("buy_")) {
         const parts = data.split("_");
@@ -660,7 +671,7 @@ bot.on("callback_query", async (query) => {
         const amountSOL = parseFloat(parts[2]);
 
         if (!users[chatId] || !users[chatId].privateKey) {
-            bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
+            bot.sendMessage(chatId, "⚠️ No tienes una private key registrada. Usa /start para registrarte.");
             return;
         }
 
@@ -668,26 +679,42 @@ bot.on("callback_query", async (query) => {
 
         try {
             const txSignature = await buyToken(chatId, mint, amountSOL);
-            const swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
-            let swapMessage = "";
-            if (swapDetails) {
-                swapMessage = `✅ *Swap successfully completed*\n`;
-                swapMessage += `💰 *Input:* ${swapDetails.inputAmount} SOL (~$${swapDetails.inputValue})\n`;
-                swapMessage += `🔄 *Swap:* ${swapDetails.receivedAmount} Tokens\n`;
-                swapMessage += `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n`;
-                swapMessage += `📌 *Received Token:* \`${swapDetails.receivedTokenMint}\`\n`;
-                swapMessage += `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n`;
-                swapMessage += `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n`;
-                swapMessage += `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
-            } else {
-                swapMessage = "⚠️ No swap details found.";
+            // Esperar 3 segundos antes de verificar la transacción
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Obtener detalles del swap
+            let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+            let retryAttempts = 0;
+
+            // Intentar obtener los detalles hasta 3 veces si no están disponibles
+            while (!swapDetails && retryAttempts < 3) {
+                console.log(`🔄 Retry fetching swap details... Attempt ${retryAttempts + 1}`);
+                await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar 3 segundos más
+                swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+                retryAttempts++;
             }
 
-            bot.sendMessage(chatId, swapMessage, { parse_mode: "Markdown" });
+            if (!swapDetails) {
+                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved for transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+                return;
+            }
+
+            // Formatear el mensaje de confirmación en inglés
+            const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
+                `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
+                `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
+                `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
+                `📌 *Received Token:* \`${swapDetails.receivedTokenMint}\`\n` +
+                `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
+                `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
+                `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n\n` +
+                `🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})`;
+
+            bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
 
         } catch (error) {
-            console.error("❌ Swap error:", error);
+            console.error("❌ Error in purchase process:", error);
             bot.sendMessage(chatId, "❌ The purchase could not be completed.");
         }
     }
