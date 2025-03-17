@@ -746,24 +746,40 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-// 🔹 Escuchar firmas en mensajes y consultar transacción manualmente
+// 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const signature = match[1].trim(); // Obtiene la firma después de "check"
+    const input = match[1].trim(); // Obtiene la entrada después de "check"
 
-    if (!/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(signature)) {
-        bot.sendMessage(chatId, "⚠️ La firma proporcionada no es válida. Asegúrate de enviarla correctamente.");
-        return;
-    }
+    // Validar si es una firma de transacción (Base58 de 87+ caracteres)
+    const isTransactionSignature = /^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(input);
 
-    bot.sendMessage(chatId, "🔄 Consultando transacción...");
-    
+    bot.sendMessage(chatId, "🔄 Fetching details...");
+
     try {
-        await analyzeTransaction(signature);
-        bot.sendMessage(chatId, "✅ Análisis completado y enviado.");
+        let transactionSignature = null;
+        let mintAddress = input;
+
+        if (isTransactionSignature) {
+            // Caso 1: El usuario ingresó una firma de transacción, buscamos el Mint Address
+            transactionSignature = input;
+            const transactionData = await getMintAddressFromTransaction(transactionSignature);
+
+            if (!transactionData || !transactionData.mintAddress) {
+                bot.sendMessage(chatId, "⚠️ Could not retrieve transaction details.");
+                return;
+            }
+
+            mintAddress = transactionData.mintAddress;
+        }
+
+        // Ejecutar la función principal analyzeTransaction() con el Mint Address
+        await analyzeTransaction(mintAddress);
+
+        bot.sendMessage(chatId, "✅ Analysis completed and sent.");
     } catch (error) {
-        console.error("❌ Error al procesar la transacción manual:", error);
-        bot.sendMessage(chatId, "❌ Ocurrió un error al analizar la transacción.");
+        console.error("❌ Error processing request:", error);
+        bot.sendMessage(chatId, "❌ Error retrieving data.");
     }
 });
 
