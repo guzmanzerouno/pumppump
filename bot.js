@@ -303,49 +303,31 @@ function calculateGraduations(migrationDate, age) {
     }
 }
 
-// 🔹 Obtener datos desde DexScreener hasta que `dexId` NO sea `"pumpfun"`
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"`
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    let attempts = 0;
-    const maxAttempts = 10; // 🔥 Número máximo de intentos antes de abortar
-
+    
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
     
-    while (attempts < maxAttempts) { // 🔄 Intentar hasta maxAttempts veces
+    while (!dexData || dexData.dexId === "pumpfun") {
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-            
-            if (response.data && response.data.pairs && response.data.pairs.length > 0) {
-                dexData = response.data.pairs[0];
-
+            if (response.data && response.data.length > 0) {
+                dexData = response.data[0];
                 console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
-
-                // ✅ Si el DexID NO es "pumpfun", salimos del bucle
-                if (dexData.dexId !== "pumpfun") {
-                    console.log(`✅ DexScreener confirmado en ${dexData.dexId}.`);
-                    break;
-                }
-            } else {
-                console.log(`⚠️ No se encontraron datos en DexScreener para ${mintAddress}. Intento ${attempts + 1}/${maxAttempts}`);
             }
         } catch (error) {
-            console.error(`⚠️ Error en DexScreener (Intento ${attempts + 1}/${maxAttempts}):`, error.message);
+            console.error("⚠️ Error en DexScreener:", error.message);
         }
 
-        attempts++;
-        if (attempts < maxAttempts) {
-            console.log("⏳ Esperando 1 segundo antes de reintentar...");
+        if (!dexData || dexData.dexId === "pumpfun") {
+            console.log("⏳ Esperando 1 segundo para volver a intentar...");
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
-    // ❌ Si después de varios intentos no hay datos, abortamos el proceso
-    if (!dexData || dexData.dexId === "pumpfun") {
-        console.log(`❌ No se pudo obtener información válida de DexScreener tras ${maxAttempts} intentos.`);
-        return null;
-    }
+    console.log("✅ DexScreener confirmado en:", dexData.dexId);
 
-    // ✅ Retornar los datos en un objeto correctamente estructurado
     return {
         name: dexData.baseToken?.name || "Desconocido",
         symbol: dexData.baseToken?.symbol || "N/A",
@@ -362,7 +344,7 @@ async function getDexScreenerData(mintAddress) {
         volume24h: dexData.volume?.h24 || "N/A",
         buys24h: dexData.txns?.h24?.buys || "N/A",
         sells24h: dexData.txns?.h24?.sells || "N/A",
-        website: dexData.info?.websites?.[0] || "N/A"
+        website: dexData.info?.websites?.[0]?.url || "N/A"
     };
 }
 
