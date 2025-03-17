@@ -610,9 +610,9 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
 
 async function getSwapDetailsFromSolanaRPC(signature) {
     let retryAttempts = 0;
-    let delay = 3000; // 3 segundos inicial
+    let delay = 5000; // 5 segundos inicial antes de la primera consulta
 
-    while (retryAttempts < 5) { // Máximo de 5 intentos
+    while (retryAttempts < 6) { // Máximo de 6 intentos
         try {
             const response = await axios.post("https://api.mainnet-beta.solana.com", {
                 jsonrpc: "2.0",
@@ -663,7 +663,9 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
             if (error.response && error.response.status === 429) {
                 console.log("⚠️ Rate limit reached, waiting longer before retrying...");
-                delay += 3000; // Aumentar espera si es un error 429
+                delay *= 1.5; // Aumentar espera en 50% si es un error 429
+            } else {
+                delay *= 1.2; // Incremento normal de 20% en cada intento
             }
 
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -699,9 +701,12 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            // 🔹 Notificación temprana al usuario
+            bot.sendMessage(chatId, `✅ *Purchase initiated successfully!*\n\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown" });
+
             // Esperar antes de verificar la transacción
             console.log("⏳ Waiting for Solana to confirm the transaction...");
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar 5 segundos antes de verificar
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos antes de verificar
 
             let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
@@ -710,7 +715,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // Mensaje de confirmación
+            // 📌 Mensaje de confirmación
             const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
                 `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
                 `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
