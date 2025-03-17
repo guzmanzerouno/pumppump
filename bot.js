@@ -532,30 +532,30 @@ async function getTokenBalance(chatId, mint) {
 
 async function executeJupiterSell(chatId, mint, amount) {
     try {
-        console.log(`🔄 Preparing sale of ${amount} tokens for mint: ${mint}`);
-
-        // 📌 **Validate chatId**
+        // 🔍 Verificar si chatId es válido antes de continuar
         if (!chatId || typeof chatId !== "number") {
-            console.error(`⚠️ Invalid chatId type: ${typeof chatId}, value: ${JSON.stringify(chatId)}`);
+            console.error(`⚠ Invalid chatId: Expected number, but got ${typeof chatId} - Value:`, JSON.stringify(chatId));
             return null;
         }
 
+        console.log(`🔄 Preparing sale of ${amount} tokens for mint: ${mint}`);
+
         // 📌 **Retrieve User Keypair**
-        if (!users[chatId] || !users[chatId].privateKey) {
-            console.error(`⚠️ Private key not found for user: ${JSON.stringify(users[chatId] || {})}`);
+        const user = users[chatId];
+        if (!user || !user.privateKey) {
+            console.error(`⚠️ Private key not found for user: ${JSON.stringify(user || {})}`);
             return null;
         }
 
         let wallet;
         try {
-            const privateKeyUint8 = new Uint8Array(bs58.decode(users[chatId].privateKey));
+            const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
             wallet = Keypair.fromSecretKey(privateKeyUint8);
         } catch (error) {
             console.error("❌ Error decoding private key:", error);
             return null;
         }
 
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
         console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
 
         // 📌 **Get Token Decimals**
@@ -579,6 +579,7 @@ async function executeJupiterSell(chatId, mint, amount) {
         console.log(`✅ Sufficient balance (${balance} tokens available)`);
 
         // 📌 **Create ATA if it does not exist**
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
         const ata = await createAssociatedTokenAccountIfNeeded(wallet, mint, connection);
         if (!ata) {
             console.error("❌ Failed to create ATA. Sale canceled.");
