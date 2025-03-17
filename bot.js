@@ -814,13 +814,6 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // 🔹 Notificación temprana al usuario
-            bot.sendMessage(
-                chatId,
-                `✅ *Sell order initiated successfully!*\n\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n\n⏳ *Fetching sell details...*`,
-                { parse_mode: "Markdown" }
-            );
-
             console.log("⏳ Waiting for Solana to confirm the transaction...");
             await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos antes de verificar
 
