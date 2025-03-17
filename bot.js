@@ -477,18 +477,27 @@ async function buyToken(chatId, mint, amountSOL) {
     }
 }
 
-// 🔹 Función mejorada para obtener balance de tokens
 async function getTokenBalance(chatId, mint) {
     try {
+        if (!users[chatId] || !users[chatId].privateKey) {
+            console.error(`⚠️ No se encontró el usuario ${chatId} o no tiene privateKey.`);
+            return 0;
+        }
+
         const user = users[chatId];
-        const userPublicKey = new PublicKey(Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey))).publicKey);
+        const userPublicKey = new PublicKey(user.walletPublicKey); // 🔥 Usa la clave pública directamente
+
+        console.log(`🔎 Consultando balance del token ${mint} para la wallet ${userPublicKey.toBase58()}`);
 
         const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, { mint: new PublicKey(mint) });
 
         if (tokenAccounts.value.length > 0) {
-            return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+            const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+            console.log(`✅ Balance encontrado: ${balance} tokens`);
+            return balance;
         }
 
+        console.log("⚠️ No se encontraron tokens en la wallet.");
         return 0;
     } catch (error) {
         console.error("❌ Error obteniendo balance:", error);
