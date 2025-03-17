@@ -583,18 +583,18 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
             try {
                 const tradeButtons = [
                     [
-                        { text: "💎 Buy 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                        { text: "💎 Buy 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-                        { text: "💎 Buy 0.3 Sol", callback_data: `buy_${mint}_0.3` }
+                        { text: "💎 Buy 0.1 SOL", callback_data: `buy_${mint}_0.1` },
+                        { text: "💎 Buy 0.2 SOL", callback_data: `buy_${mint}_0.2` },
+                        { text: "💎 Buy 0.3 SOL", callback_data: `buy_${mint}_0.3` }
                     ],
                     [
-                        { text: "💎 Buy 0.4 Sol", callback_data: `buy_${mint}_0.4` },
-                        { text: "💎 Buy 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                        { text: "💎 Buy 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+                        { text: "💎 Buy 0.4 SOL", callback_data: `buy_${mint}_0.4` },
+                        { text: "💎 Buy 0.5 SOL", callback_data: `buy_${mint}_0.5` },
+                        { text: "💎 Buy 1.0 SOL", callback_data: `buy_${mint}_1.0` }
                     ],
                     [
-                        { text: "🔻 Sell 50%", callback_data: `sell_${mint}_50` },
-                        { text: "🔻 Sell Max", callback_data: `sell_${mint}_100` }
+                        { text: "❤️ Sell 50%", callback_data: `sell_${mint}_50` },
+                        { text: "❤️ Sell Max", callback_data: `sell_${mint}_100` }
                     ],
                     [
                         { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
