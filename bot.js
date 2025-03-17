@@ -536,7 +536,7 @@ async function executeJupiterSell(chatId, mint, amount) {
 
         // 📌 **Validate chatId**
         if (!chatId || typeof chatId !== "number") {
-            console.error(`⚠️ Invalid chatId: ${JSON.stringify(chatId)}`);
+            console.error(`⚠️ Invalid chatId type: ${typeof chatId}, value: ${JSON.stringify(chatId)}`);
             return null;
         }
 
