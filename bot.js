@@ -543,7 +543,7 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
         const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 
         // 🔹 Obtener la mejor cotización desde Jupiter
-        const quoteResponse = await axios.get(`${JUPITER_API_URL}`, {
+        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint, // Token a vender
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
@@ -552,25 +552,37 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
             }
         });
 
-        if (!quoteResponse.data || !quoteResponse.data.swapTransaction) {
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
             console.error("❌ Error obteniendo cotización de venta en Jupiter.");
             return null;
         }
 
-        // 🔹 Decodificar la transacción
-        const transactionBuffer = Buffer.from(quoteResponse.data.swapTransaction, "base64");
-        const transaction = VersionedTransaction.deserialize(transactionBuffer);
+        // 🔹 Solicitar la transacción de swap a Jupiter usando `POST`
+        const swapResponse = await axios.post(JUPITER_API_URL, {
+            quoteResponse: quoteResponse.data,
+            userPublicKey: wallet.publicKey.toBase58(),
+            wrapAndUnwrapSol: true
+        });
+
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            console.error("❌ No se pudo construir la transacción de swap.");
+            return null;
+        }
+
+        // 🔹 Decodificar la transacción en versión 0
+        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
 
         // 🔹 Firmar la transacción
-        transaction.sign([wallet]);
+        versionedTransaction.sign([wallet]);
 
         // 🔹 Enviar la transacción a Solana
-        const txSignature = await connection.sendTransaction(transaction, {
+        const txSignature = await connection.sendTransaction(versionedTransaction, {
             skipPreflight: false,
             preflightCommitment: "confirmed"
         });
 
-        console.log(`✅ Venta enviada a Solana: ${txSignature}`);
+        console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
         return txSignature;
 
     } catch (error) {
