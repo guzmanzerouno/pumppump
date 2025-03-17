@@ -496,10 +496,19 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// 🔹 Función para ejecutar la venta de tokens en Jupiter (Jup)
+// 🔹 Función mejorada para ejecutar la venta de tokens en Jupiter
 async function executeJupiterSell(wallet, mint, amount, connection) {
     try {
         console.log(`🔄 Preparando venta de ${amount} tokens del mint: ${mint}`);
+
+        // 📌 **Verificar balance del usuario**
+        const balance = await getTokenBalance(wallet.publicKey.toBase58(), mint);
+        if (!balance || balance < amount) {
+            console.error(`❌ Error: saldo insuficiente. Intentando vender ${amount}, pero solo tienes ${balance}.`);
+            return null;
+        }
+
+        console.log(`✅ Saldo suficiente (${balance} tokens disponibles)`);
 
         // 📌 **Crear ATA si no existe**
         const ata = await createAssociatedTokenAccountIfNeeded(wallet, mint, connection);
@@ -508,13 +517,20 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
             return null;
         }
 
+        console.log("🔹 Obteniendo cotización de venta en Jupiter...");
+
+        // 📌 **Obtener los decimales del token**
+        const tokenDecimals = await getTokenDecimals(mint);
+        const amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals)); // Convertir correctamente
+
+        console.log(`🔹 Cantidad a vender (ajustada por decimales): ${amountInUnits}`);
+
         // 🔹 Obtener la mejor cotización de venta desde Jupiter
-        console.log("🔹 Obteniendo cotización de venta...");
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: Math.floor(amount * 1e6), // Convertir a formato adecuado
+                amount: amountInUnits, // Convertido correctamente
                 slippageBps: 100 // 1% de slippage
             }
         });
@@ -524,7 +540,7 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
             return null;
         }
 
-        console.log("✅ Cotización obtenida con éxito.");
+        console.log("✅ Cotización obtenida con éxito.", quoteResponse.data);
 
         // 🔹 Solicitar la transacción de swap a Jupiter usando `POST`
         const swapResponse = await axios.post(JUPITER_API_URL, {
@@ -562,6 +578,35 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
     } catch (error) {
         console.error("❌ Error ejecutando la venta en Jupiter:", error);
         return null;
+    }
+}
+
+// 🔹 Obtener balance de tokens del usuario
+async function getTokenBalance(userPublicKey, mint) {
+    try {
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(new PublicKey(userPublicKey), {
+            mint: new PublicKey(mint)
+        });
+
+        if (tokenAccounts.value.length > 0) {
+            return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+        }
+
+        return 0;
+    } catch (error) {
+        console.error("❌ Error obteniendo balance:", error);
+        return 0;
+    }
+}
+
+// 🔹 Obtener los decimales del token
+async function getTokenDecimals(mint) {
+    try {
+        const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mint));
+        return tokenInfo.value?.data?.parsed?.info?.decimals || 6; // Asume 6 decimales si no encuentra info
+    } catch (error) {
+        console.error("❌ Error obteniendo decimales del token:", error);
+        return 6;
     }
 }
 
