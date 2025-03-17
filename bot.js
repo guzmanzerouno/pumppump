@@ -505,26 +505,32 @@ async function sellToken(chatId, mint, sellType) {
             return null;
         }
 
-        const wallet = new solanaWeb3.Account(Buffer.from(user.privateKey, "hex"));
-        const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com");
+        // 🔹 Obtener Keypair desde la privateKey en formato Base58
+        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-        // Obtener balance del token en la wallet
-        const balance = await getTokenBalance(wallet.publicKey, mint);
+        // 🔹 Obtener balance del token en la wallet
+        const balance = await getTokenBalance(chatId, mint);
 
         if (!balance || balance <= 0) {
             bot.sendMessage(chatId, "⚠️ No tienes saldo suficiente para vender.");
             return null;
         }
 
-        // Determinar cantidad a vender
+        // 🔹 Determinar cantidad a vender (50% o 100%)
         const amountToSell = sellType === "50" ? balance / 2 : balance;
 
-        // Ejecutar la venta a SOL usando Jupiter
+        // 🔹 Ejecutar la venta a SOL usando Jupiter
         const txSignature = await executeJupiterSell(wallet, mint, amountToSell, connection);
 
-        console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
-        return txSignature;
+        if (txSignature) {
+            console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
+            bot.sendMessage(chatId, `✅ Sell order executed!\n🔗 Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+        } else {
+            bot.sendMessage(chatId, "❌ The sale could not be completed due to an unknown error.");
+        }
 
+        return txSignature;
     } catch (error) {
         console.error("❌ Error en la venta de tokens:", error);
         return null;
@@ -536,27 +542,33 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
     try {
         const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 
-        const quoteResponse = await axios.get(
-            `${JUPITER_API_URL}?inputMint=${mint}&outputMint=So11111111111111111111111111111111111111112&amount=${amount}&slippageBps=50`
-        );
+        // 🔹 Obtener la mejor cotización desde Jupiter
+        const quoteResponse = await axios.get(`${JUPITER_API_URL}`, {
+            params: {
+                inputMint: mint, // Token a vender
+                outputMint: "So11111111111111111111111111111111111111112", // SOL
+                amount: Math.floor(amount * 1e9), // Convertir a lamports
+                slippageBps: 50 // 0.5% de slippage
+            }
+        });
 
         if (!quoteResponse.data || !quoteResponse.data.swapTransaction) {
             console.error("❌ Error obteniendo cotización de venta en Jupiter.");
             return null;
         }
 
-        // Convertir la transacción en un objeto
-        const transaction = solanaWeb3.Transaction.from(
-            Buffer.from(quoteResponse.data.swapTransaction, "base64")
-        );
+        // 🔹 Decodificar la transacción
+        const transactionBuffer = Buffer.from(quoteResponse.data.swapTransaction, "base64");
+        const transaction = VersionedTransaction.deserialize(transactionBuffer);
 
-        // Firmar la transacción con la wallet del usuario
-        transaction.feePayer = wallet.publicKey;
-        transaction.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-        transaction.sign(wallet);
+        // 🔹 Firmar la transacción
+        transaction.sign([wallet]);
 
-        // Enviar la transacción a Solana
-        const txSignature = await connection.sendRawTransaction(transaction.serialize());
+        // 🔹 Enviar la transacción a Solana
+        const txSignature = await connection.sendTransaction(transaction, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed"
+        });
 
         console.log(`✅ Venta enviada a Solana: ${txSignature}`);
         return txSignature;
