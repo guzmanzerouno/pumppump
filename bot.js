@@ -701,7 +701,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // 🔹 Notificación temprana al usuario
+            // 🔹 Notificación temprana al usuario con el enlace de Solscan
             bot.sendMessage(chatId, `✅ *Purchase initiated successfully!*\n\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown" });
 
             // Esperar antes de verificar la transacción
@@ -711,11 +711,11 @@ bot.on("callback_query", async (query) => {
             let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
             if (!swapDetails) {
-                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved.`, { parse_mode: "Markdown" });
                 return;
             }
 
-            // 📌 Mensaje de confirmación
+            // 📌 Mensaje de confirmación SIN el enlace de Solscan
             const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
                 `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
                 `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
@@ -723,8 +723,7 @@ bot.on("callback_query", async (query) => {
                 `📌 *Received Token:* \`${swapDetails.receivedTokenMint}\`\n` +
                 `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
                 `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
-                `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n\n` +
-                `🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})`;
+                `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
 
             bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
 
