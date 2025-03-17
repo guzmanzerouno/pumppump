@@ -512,10 +512,10 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
         console.log("🔹 Obteniendo cotización de venta...");
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
-                inputMint: mint, // Token a vender
+                inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: Math.floor(amount * 1e9), // Convertir a lamports
-                slippageBps: 50 // 0.5% de slippage
+                amount: Math.floor(amount * 1e6), // Convertir a formato adecuado
+                slippageBps: 100 // 1% de slippage
             }
         });
 
@@ -597,60 +597,6 @@ async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
         return ata;
     } catch (error) {
         console.error("❌ Error creando la ATA:", error);
-        return null;
-    }
-}
-
-// 🔹 Función para ejecutar la venta de tokens en Jupiter (Jup)
-async function executeJupiterSell(wallet, mint, amount, connection) {
-    try {
-        const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
-
-        // 🔹 Obtener la mejor cotización desde Jupiter
-        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
-            params: {
-                inputMint: mint, // Token a vender
-                outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: Math.floor(amount * 1e9), // Convertir a lamports
-                slippageBps: 50 // 0.5% de slippage
-            }
-        });
-
-        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-            console.error("❌ Error obteniendo cotización de venta en Jupiter.");
-            return null;
-        }
-
-        // 🔹 Solicitar la transacción de swap a Jupiter usando `POST`
-        const swapResponse = await axios.post(JUPITER_API_URL, {
-            quoteResponse: quoteResponse.data,
-            userPublicKey: wallet.publicKey.toBase58(),
-            wrapAndUnwrapSol: true
-        });
-
-        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-            console.error("❌ No se pudo construir la transacción de swap.");
-            return null;
-        }
-
-        // 🔹 Decodificar la transacción en versión 0
-        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
-        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-
-        // 🔹 Firmar la transacción
-        versionedTransaction.sign([wallet]);
-
-        // 🔹 Enviar la transacción a Solana
-        const txSignature = await connection.sendTransaction(versionedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed"
-        });
-
-        console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
-        return txSignature;
-
-    } catch (error) {
-        console.error("❌ Error ejecutando la venta en Jupiter:", error);
         return null;
     }
 }
