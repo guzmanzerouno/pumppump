@@ -313,8 +313,8 @@ async function getDexScreenerData(mintAddress) {
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
             
-            if (response.data && response.data.length > 0) {
-                dexData = response.data[0];
+            if (response.data && response.data.pairs && response.data.pairs.length > 0) {
+                dexData = response.data.pairs[0];
 
                 console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
 
@@ -332,11 +332,7 @@ async function getDexScreenerData(mintAddress) {
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    return dexData; // ✅ Ahora la declaración return está fuera del bucle
-}
-
-    console.log("✅ DexScreener confirmado en Raydium.");
-
+    // ✅ Retornar los datos en un objeto correctamente estructurado
     return {
         name: dexData.baseToken?.name || "Desconocido",
         symbol: dexData.baseToken?.symbol || "N/A",
@@ -353,7 +349,7 @@ async function getDexScreenerData(mintAddress) {
         volume24h: dexData.volume?.h24 || "N/A",
         buys24h: dexData.txns?.h24?.buys || "N/A",
         sells24h: dexData.txns?.h24?.sells || "N/A",
-        website: dexData.info?.websites?.[0]?.url || "N/A"
+        website: dexData.info?.websites?.[0] || "N/A"
     };
 }
 
