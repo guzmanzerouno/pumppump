@@ -534,9 +534,15 @@ async function executeJupiterSell(chatId, mint, amount) {
     try {
         console.log(`🔄 Preparing sale of ${amount} tokens for mint: ${mint}`);
 
+        // 📌 **Validate chatId**
+        if (!chatId || typeof chatId !== "number") {
+            console.error(`⚠️ Invalid chatId: ${JSON.stringify(chatId)}`);
+            return null;
+        }
+
         // 📌 **Retrieve User Keypair**
         if (!users[chatId] || !users[chatId].privateKey) {
-            console.error(`⚠️ Private key not found for user ${chatId}.`);
+            console.error(`⚠️ Private key not found for user: ${JSON.stringify(users[chatId] || {})}`);
             return null;
         }
 
