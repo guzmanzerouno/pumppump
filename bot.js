@@ -505,15 +505,26 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// 🔹 Función mejorada para ejecutar la venta de tokens en Jupiter
-async function executeJupiterSell(wallet, mint, amount, connection) {
+async function executeJupiterSell(chatId, mint, amount) {
     try {
         console.log(`🔄 Preparando venta de ${amount} tokens del mint: ${mint}`);
 
-        // 📌 **Verificar balance del usuario**
-        const balance = await getTokenBalance(wallet.publicKey.toBase58(), mint);
+        // 📌 **Obtener el Keypair del usuario desde la privateKey**
+        if (!users[chatId] || !users[chatId].privateKey) {
+            console.error(`⚠️ No se encontró la privateKey para el usuario ${chatId}.`);
+            return null;
+        }
+
+        const privateKeyUint8 = new Uint8Array(bs58.decode(users[chatId].privateKey));
+        const wallet = Keypair.fromSecretKey(privateKeyUint8); // 🔥 Generar Keypair directamente
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+        console.log(`🔹 Wallet para la venta: ${wallet.publicKey.toBase58()}`);
+
+        // 📌 **Obtener balance del token antes de vender**
+        const balance = await getTokenBalance(chatId, mint);
         if (!balance || balance < amount) {
-            console.error(`❌ Error: saldo insuficiente. Intentando vender ${amount}, pero solo tienes ${balance}.`);
+            console.error(`❌ Saldo insuficiente. Intentando vender ${amount}, pero solo tienes ${balance}.`);
             return null;
         }
 
@@ -528,19 +539,19 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
 
         console.log("🔹 Obteniendo cotización de venta en Jupiter...");
 
-        // 📌 **Obtener los decimales del token**
+        // 🔹 Obtener los decimales correctos del token
         const tokenDecimals = await getTokenDecimals(mint);
         const amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals)); // Convertir correctamente
 
         console.log(`🔹 Cantidad a vender (ajustada por decimales): ${amountInUnits}`);
 
-        // 🔹 Obtener la mejor cotización de venta desde Jupiter
+        // 🔹 Obtener cotización de venta desde Jupiter
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: amountInUnits, // Convertido correctamente
-                slippageBps: 100 // 1% de slippage
+                amount: amountInUnits,
+                slippageBps: 100
             }
         });
 
@@ -551,7 +562,7 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
 
         console.log("✅ Cotización obtenida con éxito.", quoteResponse.data);
 
-        // 🔹 Solicitar la transacción de swap a Jupiter usando `POST`
+        // 🔹 Solicitar la transacción de swap a Jupiter
         const swapResponse = await axios.post(JUPITER_API_URL, {
             quoteResponse: quoteResponse.data,
             userPublicKey: wallet.publicKey.toBase58(),
@@ -594,10 +605,18 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
 async function getTokenDecimals(mint) {
     try {
         const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mint));
-        return tokenInfo.value?.data?.parsed?.info?.decimals || 6; // Asume 6 decimales si no encuentra info
+        
+        if (!tokenInfo.value || !tokenInfo.value.data) {
+            console.warn(`⚠️ No se encontró información del token ${mint}, usando 6 decimales por defecto.`);
+            return 6; // Asume 6 si no encuentra info
+        }
+
+        const decimals = tokenInfo.value.data.parsed.info.decimals;
+        console.log(`✅ Token ${mint} tiene ${decimals} decimales.`);
+        return decimals;
     } catch (error) {
-        console.error("❌ Error obteniendo decimales del token:", error);
-        return 6;
+        console.error(`❌ Error obteniendo decimales del token ${mint}:`, error);
+        return 6; // Devuelve 6 como fallback
     }
 }
 
@@ -605,12 +624,12 @@ async function getTokenDecimals(mint) {
 async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
     try {
         // Obtener la dirección de la ATA para este token y esta wallet
-        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+        const ata = getAssociatedTokenAddressSync(new PublicKey(mint), wallet.publicKey);
 
         // Verificar si la cuenta ya existe en la blockchain
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo !== null) {
-            console.log(`✅ ATA ya existente: ${ata.toBase58()}`);
+            console.log(`✅ ATA ya existente para ${mint}: ${ata.toBase58()}`);
             return ata;
         }
 
@@ -632,7 +651,7 @@ async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
 
         return ata;
     } catch (error) {
-        console.error("❌ Error creando la ATA:", error);
+        console.error(`❌ Error creando la ATA para ${mint}:`, error);
         return null;
     }
 }
@@ -721,47 +740,55 @@ async function analyzeTransaction(signature) {
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
+    if (!mint) {
+        console.error("⚠️ Mint inválido, no se enviará notificación.");
+        return;
+    }
+
     for (const userId in users) {
-        if (users[userId].subscribed) {
-            try {
-                const actionButtons = [
-                    [
-                        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                        { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-                        { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
-                    ],
-                    [
-                        { text: "💰 0.4 Sol", callback_data: `buy_${mint}_0.4` },
-                        { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                        { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
-                    ],
-                    [
-                        { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                        { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-                    ],
-                    [
-                        { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
-                    ]
-                ];
+        const user = users[userId];
 
-                if (imageUrl) {
-                    await bot.sendPhoto(userId, imageUrl, {
-                        caption: message,
-                        parse_mode: "Markdown",
-                        reply_markup: { inline_keyboard: actionButtons }
-                    });
-                } else {
-                    await bot.sendMessage(userId, message, {
-                        parse_mode: "Markdown",
-                        reply_markup: { inline_keyboard: actionButtons }
-                    });
-                }
+        // Evitar enviar mensajes a usuarios no registrados
+        if (!user || !user.subscribed || !user.privateKey) continue;
 
-                console.log(`✅ Mensaje enviado a ${userId}`);
+        try {
+            const actionButtons = [
+                [
+                    { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                    { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+                    { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
+                ],
+                [
+                    { text: "💰 0.4 Sol", callback_data: `buy_${mint}_0.4` },
+                    { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+                ],
+                [
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                ],
+                [
+                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
+                ]
+            ];
 
-            } catch (error) {
-                console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+            if (imageUrl) {
+                await bot.sendPhoto(userId, imageUrl, {
+                    caption: message,
+                    parse_mode: "Markdown",
+                    reply_markup: { inline_keyboard: actionButtons }
+                });
+            } else {
+                await bot.sendMessage(userId, message, {
+                    parse_mode: "Markdown",
+                    reply_markup: { inline_keyboard: actionButtons }
+                });
             }
+
+            console.log(`✅ Mensaje enviado a ${userId}`);
+
+        } catch (error) {
+            console.error(`❌ Error enviando mensaje a ${userId}:`, error);
         }
     }
 }
@@ -857,8 +884,12 @@ bot.on("callback_query", async (query) => {
             const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
             const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
+            // 🔹 Obtener decimales del token
+            const decimals = await getTokenDecimals(mint);
+
             // 🔹 Obtener balance del token en la wallet
-            const balance = await getTokenBalance(chatId, mint);
+            let balance = await getTokenBalance(chatId, mint);
+            balance = Math.floor(balance * Math.pow(10, decimals)); // Convertir a unidades mínimas
 
             if (!balance || balance <= 0) {
                 bot.sendMessage(chatId, "⚠️ No tienes saldo suficiente para vender.");
@@ -866,7 +897,13 @@ bot.on("callback_query", async (query) => {
             }
 
             // 🔹 Determinar cantidad a vender (50% o 100%)
-            const amountToSell = sellType === "50" ? balance / 2 : balance;
+            let amountToSell = sellType === "50" ? balance / 2 : balance;
+
+            // 🔹 Evitar ventas menores a un umbral (ejemplo: 1 unidad del token)
+            if (amountToSell < 1) {
+                bot.sendMessage(chatId, "⚠️ The amount to sell is too low.");
+                return;
+            }
 
             // 🔹 Ejecutar la venta a SOL usando Jupiter
             const txSignature = await executeJupiterSell(wallet, mint, amountToSell, connection);
@@ -876,7 +913,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // ✅ Nuevo mensaje antes de la confirmación
+            // ✅ Mensaje antes de la confirmación
             bot.sendMessage(
                 chatId,
                 `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
