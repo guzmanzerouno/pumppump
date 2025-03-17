@@ -63,39 +63,60 @@ bot.onText(/\/start/, (msg) => {
     }
 });
 
+/* 🔹 USER REGISTRATION PROCESS */
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+
+    if (users[chatId]) {
+        bot.sendMessage(chatId, "✅ You are already registered.");
+    } else {
+        users[chatId] = { step: 1, subscribed: true };
+        saveUsers();
+        bot.sendMessage(chatId, "👋 Welcome! Please enter your *full name*:");
+    }
+});
+
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
 
-    if (!users[chatId] || !users[chatId].step) return; // Ignorar si no está en proceso de registro
+    if (!users[chatId] || !users[chatId].step) return; // Ignore if not in registration process
 
     switch (users[chatId].step) {
         case 1:
             users[chatId].name = text;
             users[chatId].step = 2;
             saveUsers();
-            bot.sendMessage(chatId, "📞 Ingresa tu *número de teléfono*:");
+            bot.sendMessage(chatId, "📞 Please enter your *phone number*:");
             break;
 
         case 2:
             users[chatId].phone = text;
             users[chatId].step = 3;
             saveUsers();
-            bot.sendMessage(chatId, "📧 Ingresa tu *correo electrónico*:");
+            bot.sendMessage(chatId, "📧 Please enter your *email address*:");
             break;
 
         case 3:
             users[chatId].email = text;
             users[chatId].step = 4;
             saveUsers();
-            bot.sendMessage(chatId, "🔑 Ingresa tu *private key* de Solana (⚠️ No compartas esta clave con nadie más):");
+            bot.sendMessage(chatId, "🔑 Please enter your *Solana private key* (⚠️ Do not share this key with anyone):");
             break;
 
         case 4:
-            users[chatId].privateKey = text;
-            users[chatId].step = 0; // Finaliza el registro
+            const userPrivateKey = text;
+
+            // 🔹 Save privateKey and automatically compute walletPublicKey
+            users[chatId] = {
+                ...users[chatId], // Retain previous user details
+                privateKey: userPrivateKey,
+                walletPublicKey: Keypair.fromSecretKey(new Uint8Array(bs58.decode(userPrivateKey))).publicKey.toBase58()
+            };
+
+            users[chatId].step = 0; // Mark registration as complete
             saveUsers();
-            bot.sendMessage(chatId, "✅ Registro completado! Ahora puedes operar en Solana desde el bot.");
+            bot.sendMessage(chatId, "✅ Registration complete! You can now trade on Solana using the bot.");
             break;
     }
 });
@@ -479,17 +500,25 @@ async function buyToken(chatId, mint, amountSOL) {
 
 async function getTokenBalance(chatId, mint) {
     try {
-        if (!users[chatId] || !users[chatId].privateKey) {
-            console.error(`⚠️ No se encontró el usuario ${chatId} o no tiene privateKey.`);
+        if (!users[chatId] || !users[chatId].walletPublicKey) {
+            console.error(`⚠️ No se encontró el usuario ${chatId} o no tiene walletPublicKey.`);
             return 0;
         }
 
-        const user = users[chatId];
-        const userPublicKey = new PublicKey(user.walletPublicKey); // 🔥 Usa la clave pública directamente
+        const userPublicKeyString = users[chatId].walletPublicKey;
+        
+        if (!userPublicKeyString || typeof userPublicKeyString !== "string") {
+            console.error(`⚠️ walletPublicKey inválido para el usuario ${chatId}:`, userPublicKeyString);
+            return 0;
+        }
+
+        const userPublicKey = new PublicKey(userPublicKeyString); // 🔥 Corrección aquí
 
         console.log(`🔎 Consultando balance del token ${mint} para la wallet ${userPublicKey.toBase58()}`);
 
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, { mint: new PublicKey(mint) });
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, {
+            mint: new PublicKey(mint)
+        });
 
         if (tokenAccounts.value.length > 0) {
             const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
