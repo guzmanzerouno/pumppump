@@ -303,13 +303,13 @@ function calculateGraduations(migrationDate, age) {
     }
 }
 
-// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea `"raydium"`
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` NO sea `"pumpfun"`
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
     
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
     
-    while (!dexData || dexData.dexId !== "raydium") {
+    while (!dexData || dexData.dexId === "pumpfun") {
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
             if (response.data && response.data.length > 0) {
@@ -320,11 +320,15 @@ async function getDexScreenerData(mintAddress) {
             console.error("⚠️ Error en DexScreener:", error.message);
         }
 
-        if (!dexData || dexData.dexId !== "raydium") {
+        if (!dexData || dexData.dexId === "pumpfun") {
             console.log("⏳ Esperando 1 segundo para volver a intentar...");
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
+
+    console.log(`✅ DexScreener confirmado en ${dexData.dexId}.`);
+    return dexData;
+}
 
     console.log("✅ DexScreener confirmado en Raydium.");
 
