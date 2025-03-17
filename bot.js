@@ -576,21 +576,25 @@ async function analyzeTransaction(signature) {
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
-// 🔹 Notificar a los suscriptores con imagen y botones de compra rápida
+// 🔹 Notificar a los suscriptores con imagen y botones de compra y venta rápida
 async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     for (const userId in users) {
         if (users[userId].subscribed) {
             try {
-                const buyButtons = [
+                const tradeButtons = [
                     [
-                        { text: "💰 0.1 SOL", callback_data: `buy_${mint}_0.1` },
-                        { text: "💰 0.2 SOL", callback_data: `buy_${mint}_0.2` },
-                        { text: "💰 0.3 SOL", callback_data: `buy_${mint}_0.3` }
+                        { text: "💎 Buy 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                        { text: "💎 Buy 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+                        { text: "💎 Buy 0.3 Sol", callback_data: `buy_${mint}_0.3` }
                     ],
                     [
-                        { text: "💰 0.4 SOL", callback_data: `buy_${mint}_0.4` },
-                        { text: "💰 0.5 SOL", callback_data: `buy_${mint}_0.5` },
-                        { text: "💰 1.0 SOL", callback_data: `buy_${mint}_1.0` }
+                        { text: "💎 Buy 0.4 Sol", callback_data: `buy_${mint}_0.4` },
+                        { text: "💎 Buy 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                        { text: "💎 Buy 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+                    ],
+                    [
+                        { text: "🔻 Sell 50%", callback_data: `sell_${mint}_50` },
+                        { text: "🔻 Sell Max", callback_data: `sell_${mint}_100` }
                     ],
                     [
                         { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
@@ -601,12 +605,12 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     await bot.sendPhoto(userId, imageUrl, {
                         caption: message,
                         parse_mode: "Markdown",
-                        reply_markup: { inline_keyboard: buyButtons }
+                        reply_markup: { inline_keyboard: tradeButtons }
                     });
                 } else {
                     await bot.sendMessage(userId, message, {
                         parse_mode: "Markdown",
-                        reply_markup: { inline_keyboard: buyButtons }
+                        reply_markup: { inline_keyboard: tradeButtons }
                     });
                 }
 
@@ -687,6 +691,74 @@ async function getSwapDetailsFromSolanaRPC(signature) {
     console.error("❌ Failed to retrieve swap details after multiple attempts.");
     return null;
 }
+
+// 🔹 Manejar las solicitudes de venta (Sell 50% o Sell Max)
+bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data;
+
+    if (data.startsWith("sell_")) {
+        const parts = data.split("_");
+        const mint = parts[1];
+        const sellType = parts[2]; // "50" o "100" para 50% o 100%
+
+        if (!users[chatId] || !users[chatId].privateKey) {
+            bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
+            return;
+        }
+
+        // Determinar la cantidad a vender (parcial o total)
+        const userBalance = await getTokenBalance(chatId, mint);
+        if (!userBalance || userBalance <= 0) {
+            bot.sendMessage(chatId, "❌ You don't have tokens to sell.");
+            return;
+        }
+
+        const amountToSell = sellType === "50" ? userBalance / 2 : userBalance;
+
+        bot.sendMessage(chatId, `🔻 Processing sale of ${amountToSell} tokens...`);
+
+        try {
+            const txSignature = await sellToken(chatId, mint, amountToSell);
+
+            if (!txSignature) {
+                bot.sendMessage(chatId, "❌ The sale could not be completed due to an unknown error.");
+                return;
+            }
+
+            // 🔹 Notificación temprana al usuario
+            bot.sendMessage(chatId, `✅ *Sell order placed successfully!*\n\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown" });
+
+            // Esperar antes de verificar la transacción
+            console.log("⏳ Waiting for Solana to confirm the transaction...");
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos antes de verificar
+
+            let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+
+            if (!swapDetails) {
+                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+                return;
+            }
+
+            // 📌 Mensaje de confirmación de venta
+            const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
+                `🔻 *Tokens Sold:* ${amountToSell}\n` +
+                `💰 *Received SOL:* ${swapDetails.inputAmount} SOL\n` +
+                `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
+                `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
+                `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
+                `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
+
+            bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+
+        } catch (error) {
+            console.error("❌ Error in sell process:", error);
+            bot.sendMessage(chatId, "❌ The sale could not be completed.");
+        }
+    }
+
+    bot.answerCallbackQuery(query.id);
+});
 
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
