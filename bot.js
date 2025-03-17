@@ -840,6 +840,13 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            // ✅ Nuevo mensaje antes de la confirmación
+            bot.sendMessage(
+                chatId,
+                `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+                { parse_mode: "Markdown" }
+            );
+
             console.log("⏳ Waiting for Solana to confirm the transaction...");
             await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos antes de verificar
 
