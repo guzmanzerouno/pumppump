@@ -510,11 +510,12 @@ async function analyzeTransaction(signature) {
     // 📌 Agregar la firma al conjunto de procesadas
     processedSignatures.add(signature);
 
-    // 1️⃣ Obtener datos del Mint Address desde Solana
-    const mintData = await getMintAddressFromTransaction(signature);
+    // 1️⃣ Intentar obtener el Mint Address desde la transacción
+    let mintData = await getMintAddressFromTransaction(signature);
+
     if (!mintData || !mintData.mintAddress) {
-        console.log("⚠️ No se pudo obtener el Mint Address.");
-        return;
+        console.log("⚠️ No se pudo obtener el Mint Address. Asumiendo que la firma es un Mint Address.");
+        mintData = { mintAddress: signature };
     }
 
     // 🛑 Filtrar transacciones que no deben procesarse (Wrapped SOL)
@@ -523,9 +524,9 @@ async function analyzeTransaction(signature) {
         return;
     }
 
-    console.log(`✅ Mint Address obtenido: ${mintData.mintAddress}`);
+    console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
 
-    // 2️⃣ Obtener datos de DexScreener (esperando hasta que el dexId sea "raydium")
+    // 2️⃣ Obtener datos de DexScreener
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
         console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
@@ -746,24 +747,40 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-// 🔹 Escuchar firmas en mensajes y consultar transacción manualmente
+// 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const signature = match[1].trim(); // Obtiene la firma después de "check"
+    const input = match[1].trim(); // Obtiene la entrada después de "check"
 
-    if (!/^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(signature)) {
-        bot.sendMessage(chatId, "⚠️ La firma proporcionada no es válida. Asegúrate de enviarla correctamente.");
-        return;
-    }
+    // Validar si es una firma de transacción (Base58 de 87+ caracteres)
+    const isTransactionSignature = /^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(input);
 
-    bot.sendMessage(chatId, "🔄 Consultando transacción...");
-    
+    bot.sendMessage(chatId, "🔄 Fetching details...");
+
     try {
-        await analyzeTransaction(signature);
-        bot.sendMessage(chatId, "✅ Análisis completado y enviado.");
+        let transactionSignature = null;
+        let mintAddress = input;
+
+        if (isTransactionSignature) {
+            // Caso 1: El usuario ingresó una firma de transacción, buscamos el Mint Address
+            transactionSignature = input;
+            const transactionData = await getMintAddressFromTransaction(transactionSignature);
+
+            if (!transactionData || !transactionData.mintAddress) {
+                bot.sendMessage(chatId, "⚠️ Could not retrieve transaction details.");
+                return;
+            }
+
+            mintAddress = transactionData.mintAddress;
+        }
+
+        // Ejecutar la función principal analyzeTransaction() con el Mint Address
+        await analyzeTransaction(mintAddress);
+
+        bot.sendMessage(chatId, "✅ Analysis completed and sent.");
     } catch (error) {
-        console.error("❌ Error al procesar la transacción manual:", error);
-        bot.sendMessage(chatId, "❌ Ocurrió un error al analizar la transacción.");
+        console.error("❌ Error processing request:", error);
+        bot.sendMessage(chatId, "❌ Error retrieving data.");
     }
 });
 
