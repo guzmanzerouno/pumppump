@@ -530,120 +530,104 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-async function executeJupiterSell(chatId, mint, amount) {
-    try {
-        // 🔍 Verificar si chatId es válido antes de continuar
-        if (!chatId || typeof chatId !== "number") {
-            console.error(`⚠ Invalid chatId: Expected number, but got ${typeof chatId} - Value:`, JSON.stringify(chatId));
-            return null;
+bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data;
+
+    if (data.startsWith("sell_")) {
+        const parts = data.split("_");
+        const mint = parts[1];
+        const sellType = parts[2];
+
+        console.log(`🔍 Debug - User before selling:`, JSON.stringify(users[chatId], null, 2));
+
+        if (!users[chatId] || !users[chatId].privateKey) {
+            console.error(`⚠ Private key not found for user: ${JSON.stringify(users[chatId])}`);
+            bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
+            return;
         }
 
-        console.log(`🔄 Preparing sale of ${amount} tokens for mint: ${mint}`);
+        bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens...`);
 
-        // 📌 **Retrieve User Keypair**
-        const user = users[chatId];
-        if (!user || !user.privateKey) {
-            console.error(`⚠️ Private key not found for user: ${JSON.stringify(user || {})}`);
-            return null;
-        }
-
-        let wallet;
         try {
-            const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
-            wallet = Keypair.fromSecretKey(privateKeyUint8);
-        } catch (error) {
-            console.error("❌ Error decoding private key:", error);
-            return null;
-        }
+            // 🔹 Get user's wallet keypair
+            const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
+            const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-        console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
+            // 🔹 Get token decimals
+            const decimals = await getTokenDecimals(mint);
+            console.log(`✅ Token ${mint} has ${decimals} decimals.`);
 
-        // 📌 **Get Token Decimals**
-        const tokenDecimals = await getTokenDecimals(mint);
-        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
+            // 🔹 Get token balance in UI units
+            let balance = await getTokenBalance(chatId, mint);
+            console.log(`✅ Balance found: ${balance} tokens`);
 
-        // 📌 **Retrieve Balance Before Selling**
-        let balance = await getTokenBalance(chatId, mint);
-        console.log(`🔍 Balance before conversion: ${balance} tokens (UI units)`);
-
-        balance = Math.floor(balance * Math.pow(10, tokenDecimals)); // Convert to raw units
-        console.log(`✅ Balance after conversion: ${balance} (raw units)`);
-
-        // Ensure the balance is sufficient for the requested sale
-        const amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals)); // Convert requested amount
-        if (!balance || balance < amountInUnits) {
-            console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balance} available.`);
-            return null;
-        }
-
-        console.log(`✅ Sufficient balance (${balance} tokens available)`);
-
-        // 📌 **Create ATA if it does not exist**
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-        const ata = await createAssociatedTokenAccountIfNeeded(wallet, mint, connection);
-        if (!ata) {
-            console.error("❌ Failed to create ATA. Sale canceled.");
-            return null;
-        }
-
-        console.log("🔹 Fetching Jupiter sell quote...");
-
-        // 🔹 **Get the Best Sell Quote from Jupiter**
-        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
-            params: {
-                inputMint: mint,
-                outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: amountInUnits, // Already converted to raw units
-                slippageBps: 100 // 1% slippage
+            if (!balance || balance <= 0) {
+                bot.sendMessage(chatId, "⚠️ You don't have enough balance to sell.");
+                return;
             }
-        });
 
-        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-            console.error("❌ No valid quote retrieved from Jupiter.");
-            return null;
-        }
+            // 🔹 Convert balance to smallest units (lamports)
+            let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
 
-        console.log("✅ Successfully obtained sell quote.", quoteResponse.data);
+            // 🔹 Determine amount to sell (50% or 100%)
+            let amountToSell = sellType === "50" ? balanceInLamports / 2 : balanceInLamports;
+            console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
 
-        // 🔹 **Request Swap Transaction from Jupiter**
-        const swapResponse = await axios.post(JUPITER_API_URL, {
-            quoteResponse: quoteResponse.data,
-            userPublicKey: wallet.publicKey.toBase58(),
-            wrapAndUnwrapSol: true
-        });
+            // 🔹 Avoid selling amounts lower than the token's smallest unit
+            if (amountToSell < 1) {
+                bot.sendMessage(chatId, "⚠️ The amount to sell is too low.");
+                return;
+            }
 
-        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-            console.error("❌ Failed to construct swap transaction.");
-            return null;
-        }
+            // 🔹 ✅ Ejecutar la venta pasando el chatId correcto
+            const txSignature = await executeJupiterSell(chatId, mint, amountToSell);
 
-        console.log("✅ Swap transaction received from Jupiter.");
+            if (!txSignature) {
+                bot.sendMessage(chatId, "❌ The sale could not be completed due to an unknown error.");
+                return;
+            }
 
-        // 🔹 **Decode and Sign the Transaction**
-        try {
-            const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
-            const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-            versionedTransaction.sign([wallet]); // Sign transaction
-            console.log("✅ Transaction successfully signed.");
-            
-            // 🔹 **Send Transaction to Solana**
-            console.log("🚀 Sending transaction to Solana network...");
-            const txSignature = await connection.sendTransaction(versionedTransaction, {
-                skipPreflight: false,
-                preflightCommitment: "confirmed"
-            });
+            // ✅ Notify user that the sell order was executed
+            bot.sendMessage(
+                chatId,
+                `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+                { parse_mode: "Markdown" }
+            );
 
-            console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-            return txSignature;
+            console.log("⏳ Waiting for Solana to confirm the transaction...");
+            await new Promise(resolve => setTimeout(resolve, 10000));
+
+            let sellDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+
+            if (!sellDetails) {
+                bot.sendMessage(
+                    chatId,
+                    `⚠️ Sell details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+                    { parse_mode: "Markdown" }
+                );
+                return;
+            }
+
+            // 📌 Confirmation message
+            const confirmationMessage = `✅ *Sell completed successfully*\n\n` +
+                `💰 *Tokens Sold:* ${sellDetails.receivedAmount} Tokens\n` +
+                `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
+                `📌 *Sold Token:* \`${sellDetails.receivedTokenMint}\`\n` +
+                `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
+                `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
+                `💰 *SOL after sell:* ${sellDetails.solAfter} SOL`;
+
+            bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+
         } catch (error) {
-            console.error("❌ Error signing or sending the transaction:", error);
-            return null;
+            console.error("❌ Error in sell process:", error);
+            bot.sendMessage(chatId, "❌ The sale could not be completed.");
         }
-    } catch (error) {
-        console.error("❌ Error executing sell order on Jupiter:", error);
-        return null;
     }
-}
+
+    bot.answerCallbackQuery(query.id);
+});
 
 // 🔹 Obtener los decimales del token
 async function getTokenDecimals(mint) {
