@@ -348,31 +348,41 @@ async function getDexScreenerData(mintAddress) {
     };
 }
 
-// 🔹 Obtener datos de riesgo desde RugCheck API
-async function fetchRugCheckData(tokenAddress) {
-    try {
-        const response = await axios.get(`${RUGCHECK_API_BASE}/${tokenAddress}/report`);
-        if (!response.data) {
-            return null;
+// 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
+async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
+    let attempt = 1;
+
+    while (attempt <= retries) {
+        try {
+            console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
+            const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+
+            if (!response.data) {
+                throw new Error("No response data from RugCheck.");
+            }
+
+            const data = response.data;
+            return {
+                name: data.fileMeta?.name || "N/A",
+                symbol: data.fileMeta?.symbol || "N/A",
+                imageUrl: data.fileMeta?.image || "",
+                riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
+                riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+                lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
+            };
+
+        } catch (error) {
+            console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
+
+            if (attempt < retries && error.response?.status === 502) {
+                console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                attempt++;
+            } else {
+                console.log(`❌ RugCheck API failed after ${retries} attempts.`);
+                return null;
+            }
         }
-
-        const data = response.data;
-        const name = data.fileMeta?.name || "N/A";
-        const symbol = data.fileMeta?.symbol || "N/A";
-        const imageUrl = data.fileMeta?.image || "";
-        const riskScore = data.score || 9999;
-        const riskLevel = riskScore <= 1000 ? "🟢 GOOD" : "🔴 WARNING";
-        const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
-        let lpLocked = "N/A";
-
-        if (data.markets && data.markets.length > 0) {
-            lpLocked = data.markets[0].lp?.lpLockedPct || "N/A";
-        }
-
-        return { name, symbol, imageUrl, riskLevel, riskDescription, lpLocked };
-    } catch (error) {
-        console.error("❌ Error al obtener datos desde RugCheck:", error);
-        return null;
     }
 }
 
