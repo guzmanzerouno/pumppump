@@ -544,22 +544,39 @@ async function executeJupiterSell(chatId, mint, amount) {
         const connection = new Connection(SOLANA_RPC_URL, "confirmed");
         console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
 
+        // 🔹 Obtener decimales del token
         const tokenDecimals = await getTokenDecimals(mint);
-        const balance = await getTokenBalance(chatId, mint);
+        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
+
+        // 🔹 Obtener balance actual en UI units
+        let balance = await getTokenBalance(chatId, mint);
         console.log(`✅ Balance found: ${balance} tokens`);
 
-        if (!balance || balance < amount) {
-            console.error(`❌ Insufficient balance. Trying to sell ${amount}, but only ${balance} available.`);
+        // 🔹 Convertir balance y cantidad a vender a unidades mínimas
+        const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
+        let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
+
+        console.log(`🔹 Balance en unidades mínimas: ${balanceInUnits}`);
+        console.log(`🔹 Cantidad a vender en unidades mínimas: ${amountInUnits}`);
+
+        // 🔹 Ajustar cantidad a vender si es mayor al balance disponible
+        if (amountInUnits > balanceInUnits) {
+            console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
+            amountInUnits = balanceInUnits;
+        }
+
+        if (!balanceInUnits || balanceInUnits < amountInUnits) {
+            console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
             return null;
         }
 
         console.log("🔹 Fetching Jupiter sell quote...");
-        const amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
 
+        // 🔹 Obtener cotización de venta en Jupiter
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint,
-                outputMint: "So11111111111111111111111111111111111111112",
+                outputMint: "So11111111111111111111111111111111111111112", // SOL
                 amount: amountInUnits,
                 slippageBps: 100
             }
@@ -572,6 +589,7 @@ async function executeJupiterSell(chatId, mint, amount) {
 
         console.log("✅ Successfully obtained sell quote.", quoteResponse.data);
 
+        // 🔹 Solicitar transacción de swap a Jupiter
         const swapResponse = await axios.post(JUPITER_API_URL, {
             quoteResponse: quoteResponse.data,
             userPublicKey: wallet.publicKey.toBase58(),
@@ -585,6 +603,7 @@ async function executeJupiterSell(chatId, mint, amount) {
 
         console.log("✅ Swap transaction received from Jupiter.");
 
+        // 🔹 Decodificar y firmar la transacción
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
         const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
         versionedTransaction.sign([wallet]);
@@ -592,6 +611,7 @@ async function executeJupiterSell(chatId, mint, amount) {
         console.log("✅ Transaction successfully signed.");
         console.log("🚀 Sending transaction to Solana network...");
 
+        // 🔹 Enviar transacción a Solana
         const txSignature = await connection.sendTransaction(versionedTransaction, {
             skipPreflight: false,
             preflightCommitment: "confirmed"
