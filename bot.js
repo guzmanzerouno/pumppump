@@ -306,10 +306,12 @@ function calculateGraduations(migrationDate, age) {
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` NO sea `"pumpfun"`
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    
+    let attempts = 0;
+    const maxAttempts = 10; // 🔥 Número máximo de intentos antes de abortar
+
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
     
-    while (true) { // Mantener el loop hasta que encontremos un DexID válido
+    while (attempts < maxAttempts) { // 🔄 Intentar hasta maxAttempts veces
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
             
@@ -323,13 +325,24 @@ async function getDexScreenerData(mintAddress) {
                     console.log(`✅ DexScreener confirmado en ${dexData.dexId}.`);
                     break;
                 }
+            } else {
+                console.log(`⚠️ No se encontraron datos en DexScreener para ${mintAddress}. Intento ${attempts + 1}/${maxAttempts}`);
             }
         } catch (error) {
-            console.error("⚠️ Error en DexScreener:", error.message);
+            console.error(`⚠️ Error en DexScreener (Intento ${attempts + 1}/${maxAttempts}):`, error.message);
         }
 
-        console.log("⏳ Esperando 1 segundo para volver a intentar...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+        if (attempts < maxAttempts) {
+            console.log("⏳ Esperando 1 segundo antes de reintentar...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+
+    // ❌ Si después de varios intentos no hay datos, abortamos el proceso
+    if (!dexData || dexData.dexId === "pumpfun") {
+        console.log(`❌ No se pudo obtener información válida de DexScreener tras ${maxAttempts} intentos.`);
+        return null;
     }
 
     // ✅ Retornar los datos en un objeto correctamente estructurado
