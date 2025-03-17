@@ -581,24 +581,6 @@ async function executeJupiterSell(wallet, mint, amount, connection) {
     }
 }
 
-// 🔹 Obtener balance de tokens del usuario
-async function getTokenBalance(userPublicKey, mint) {
-    try {
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(new PublicKey(userPublicKey), {
-            mint: new PublicKey(mint)
-        });
-
-        if (tokenAccounts.value.length > 0) {
-            return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
-        }
-
-        return 0;
-    } catch (error) {
-        console.error("❌ Error obteniendo balance:", error);
-        return 0;
-    }
-}
-
 // 🔹 Obtener los decimales del token
 async function getTokenDecimals(mint) {
     try {
