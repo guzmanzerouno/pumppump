@@ -608,6 +608,46 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
+async function getSwapDetailsFromSolscan(signature) {
+    try {
+        const response = await axios.get(`https://api.solscan.io/transaction?tx=${signature}`);
+        if (!response.data || !response.data.data) {
+            throw new Error("No se pudo obtener información de Solscan.");
+        }
+
+        const txData = response.data.data;
+        let swapDetails = [];
+
+        // Buscar eventos de Swap en la transacción
+        for (const instruction of txData.instructions) {
+            if (instruction.parsed && instruction.parsed.type === "swap") {
+                const amountIn = instruction.parsed.info.amountIn / 1e9; // Convertir de lamports a SOL
+                const amountOut = instruction.parsed.info.amountOut;
+                const sourceToken = instruction.parsed.info.sourceToken;
+                const destinationToken = instruction.parsed.info.destinationToken;
+                const platform = instruction.programId; // Puede ser Jupiter, Raydium, etc.
+
+                swapDetails.push({
+                    amountIn,
+                    amountOut,
+                    sourceToken,
+                    destinationToken,
+                    platform
+                });
+            }
+        }
+
+        if (swapDetails.length === 0) {
+            throw new Error("No se encontraron detalles de Swap en la transacción.");
+        }
+
+        return swapDetails;
+    } catch (error) {
+        console.error("❌ Error obteniendo detalles de Swap en Solscan:", error);
+        return null;
+    }
+}
+
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data = query.data; // Ejemplo: "buy_TokenMint_0.1"
@@ -628,7 +668,20 @@ bot.on("callback_query", async (query) => {
             const txSignature = await buyToken(chatId, mint, amountSOL);
             const tokensReceived = await getTokenBalance(chatId, mint);
 
-            bot.sendMessage(chatId, `✅ *Compra completada*\n\n📌 **Cantidad comprada:** ${tokensReceived} tokens\n🔗 **Transacción:** [Ver en Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+            // 🔹 Obtener detalles del Swap desde Solscan
+            const swapDetails = await getSwapDetailsFromSolscan(txSignature);
+            let swapMessage = "";
+
+            if (swapDetails) {
+                for (const swap of swapDetails) {
+                    swapMessage += `🔄 *Swap realizado en ${swap.platform}*\n`;
+                    swapMessage += `💰 *${swap.amountIn} SOL* → *${swap.amountOut} ${swap.destinationToken}*\n\n`;
+                }
+            } else {
+                swapMessage = "⚠️ No se encontraron detalles específicos del Swap.";
+            }
+
+            bot.sendMessage(chatId, `✅ *Compra completada*\n\n📌 **Cantidad comprada:** ${tokensReceived} tokens\n🔗 **Transacción:** [Ver en Solscan](https://solscan.io/tx/${txSignature})\n\n${swapMessage}`, { parse_mode: "Markdown" });
         } catch (error) {
             console.error("❌ Error en la compra:", error);
             bot.sendMessage(chatId, "❌ No se pudo completar la compra.");
