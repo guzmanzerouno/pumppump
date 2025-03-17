@@ -609,56 +609,70 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
 }
 
 async function getSwapDetailsFromSolanaRPC(signature) {
-    try {
-        const response = await axios.post("https://api.mainnet-beta.solana.com", {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "getTransaction",
-            params: [signature, { encoding: "json", maxSupportedTransactionVersion: 0 }]
-        });
+    let retryAttempts = 0;
+    let delay = 3000; // 3 segundos inicial
 
-        if (!response.data || !response.data.result) {
-            throw new Error("Failed to retrieve transaction details.");
+    while (retryAttempts < 5) { // Máximo de 5 intentos
+        try {
+            const response = await axios.post("https://api.mainnet-beta.solana.com", {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "getTransaction",
+                params: [signature, { encoding: "json", maxSupportedTransactionVersion: 0 }]
+            });
+
+            if (!response.data || !response.data.result) {
+                throw new Error("Failed to retrieve transaction details.");
+            }
+
+            const txData = response.data.result;
+            const meta = txData.meta;
+
+            // Verificar si la transacción falló
+            if (meta.err) {
+                throw new Error("Transaction failed on Solana.");
+            }
+
+            // Extraer balances antes y después del swap
+            const preBalances = meta.preBalances;
+            const postBalances = meta.postBalances;
+            const swapFee = meta.fee / 1e9; // Convertir lamports a SOL
+
+            // Buscar el token recibido en la transacción
+            const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
+            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
+            const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
+
+            // Extraer la cantidad de SOL usada para el swap
+            const solBefore = preBalances[0] / 1e9;
+            const solAfter = postBalances[0] / 1e9;
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6); // La diferencia de SOL gastado
+
+            return {
+                inputAmount: inputAmount,
+                receivedAmount: receivedAmount,
+                swapFee: swapFee.toFixed(6),
+                receivedTokenMint: receivedTokenMint,
+                walletAddress: txData.transaction.message.accountKeys[0],
+                solBefore: solBefore.toFixed(3),
+                solAfter: solAfter.toFixed(3)
+            };
+
+        } catch (error) {
+            console.error(`❌ Error retrieving swap details (Attempt ${retryAttempts + 1}):`, error.message);
+
+            if (error.response && error.response.status === 429) {
+                console.log("⚠️ Rate limit reached, waiting longer before retrying...");
+                delay += 3000; // Aumentar espera si es un error 429
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+            retryAttempts++;
         }
-
-        const txData = response.data.result;
-        const meta = txData.meta;
-
-        // Verificar si la transacción fue exitosa
-        if (meta.err) {
-            throw new Error("Transaction failed on Solana.");
-        }
-
-        // Extraer balances antes y después del swap
-        const preBalances = meta.preBalances;
-        const postBalances = meta.postBalances;
-        const swapFee = meta.fee / 1e9; // Convertir lamports a SOL
-
-        // Buscar el token recibido en la transacción
-        const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
-        const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
-        const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
-
-        // Extraer la cantidad de SOL usada para el swap
-        const solBefore = preBalances[0] / 1e9;
-        const solAfter = postBalances[0] / 1e9;
-        const inputAmount = (solBefore - solAfter - swapFee).toFixed(6); // La diferencia de SOL gastado
-
-        return {
-            inputAmount: inputAmount,
-            inputValue: "N/A", // Este valor puede ser calculado usando un API de precios si es necesario
-            receivedAmount: receivedAmount,
-            swapFee: swapFee.toFixed(6),
-            receivedTokenMint: receivedTokenMint,
-            walletAddress: txData.transaction.message.accountKeys[0],
-            solBefore: solBefore.toFixed(3),
-            solAfter: solAfter.toFixed(3)
-        };
-
-    } catch (error) {
-        console.error("❌ Error retrieving swap details from Solana RPC:", error);
-        return null;
     }
+
+    console.error("❌ Failed to retrieve swap details after multiple attempts.");
+    return null;
 }
 
 bot.on("callback_query", async (query) => {
@@ -671,7 +685,7 @@ bot.on("callback_query", async (query) => {
         const amountSOL = parseFloat(parts[2]);
 
         if (!users[chatId] || !users[chatId].privateKey) {
-            bot.sendMessage(chatId, "⚠️ No tienes una private key registrada. Usa /start para registrarte.");
+            bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
             return;
         }
 
@@ -680,27 +694,23 @@ bot.on("callback_query", async (query) => {
         try {
             const txSignature = await buyToken(chatId, mint, amountSOL);
 
-            // Esperar 3 segundos antes de verificar la transacción
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Obtener detalles del swap
-            let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
-            let retryAttempts = 0;
-
-            // Intentar obtener los detalles hasta 3 veces si no están disponibles
-            while (!swapDetails && retryAttempts < 3) {
-                console.log(`🔄 Retry fetching swap details... Attempt ${retryAttempts + 1}`);
-                await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar 3 segundos más
-                swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
-                retryAttempts++;
-            }
-
-            if (!swapDetails) {
-                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved for transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+            if (!txSignature) {
+                bot.sendMessage(chatId, "❌ The purchase could not be completed due to an unknown error.");
                 return;
             }
 
-            // Formatear el mensaje de confirmación en inglés
+            // Esperar antes de verificar la transacción
+            console.log("⏳ Waiting for Solana to confirm the transaction...");
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar 5 segundos antes de verificar
+
+            let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+
+            if (!swapDetails) {
+                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
+                return;
+            }
+
+            // Mensaje de confirmación
             const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
                 `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
                 `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
