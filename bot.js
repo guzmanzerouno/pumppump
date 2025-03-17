@@ -4,6 +4,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -16,6 +17,7 @@ const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 
 let ws;
@@ -494,45 +496,107 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// 🔹 Función para vender tokens usando Jupiter (Jup)
-async function sellToken(chatId, mint, sellType) {
+// 🔹 Función para ejecutar la venta de tokens en Jupiter (Jup)
+async function executeJupiterSell(wallet, mint, amount, connection) {
     try {
-        const user = users[chatId];
+        console.log(`🔄 Preparando venta de ${amount} tokens del mint: ${mint}`);
 
-        if (!user || !user.privateKey) {
-            console.log("⚠️ No se encontró una clave privada para este usuario.");
-            bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
+        // 📌 **Crear ATA si no existe**
+        const ata = await createAssociatedTokenAccountIfNeeded(wallet, mint, connection);
+        if (!ata) {
+            console.error("❌ No se pudo crear la ATA. Venta cancelada.");
             return null;
         }
 
-        // 🔹 Obtener Keypair desde la privateKey en formato Base58
-        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+        // 🔹 Obtener la mejor cotización de venta desde Jupiter
+        console.log("🔹 Obteniendo cotización de venta...");
+        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
+            params: {
+                inputMint: mint, // Token a vender
+                outputMint: "So11111111111111111111111111111111111111112", // SOL
+                amount: Math.floor(amount * 1e9), // Convertir a lamports
+                slippageBps: 50 // 0.5% de slippage
+            }
+        });
 
-        // 🔹 Obtener balance del token en la wallet
-        const balance = await getTokenBalance(chatId, mint);
-
-        if (!balance || balance <= 0) {
-            bot.sendMessage(chatId, "⚠️ No tienes saldo suficiente para vender.");
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
+            console.error("❌ No se pudo obtener cotización válida de Jupiter.");
             return null;
         }
 
-        // 🔹 Determinar cantidad a vender (50% o 100%)
-        const amountToSell = sellType === "50" ? balance / 2 : balance;
+        console.log("✅ Cotización obtenida con éxito.");
 
-        // 🔹 Ejecutar la venta a SOL usando Jupiter
-        const txSignature = await executeJupiterSell(wallet, mint, amountToSell, connection);
+        // 🔹 Solicitar la transacción de swap a Jupiter usando `POST`
+        const swapResponse = await axios.post(JUPITER_API_URL, {
+            quoteResponse: quoteResponse.data,
+            userPublicKey: wallet.publicKey.toBase58(),
+            wrapAndUnwrapSol: true
+        });
 
-        if (txSignature) {
-            console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
-            bot.sendMessage(chatId, `✅ Sell order executed!\n🔗 Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`, { parse_mode: "Markdown" });
-        } else {
-            bot.sendMessage(chatId, "❌ The sale could not be completed due to an unknown error.");
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            console.error("❌ No se pudo construir la transacción de swap.");
+            return null;
         }
 
+        console.log("✅ Transacción de swap recibida desde Jupiter.");
+
+        // 🔹 Decodificar la transacción en versión 0
+        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+
+        // 🔹 Firmar la transacción
+        versionedTransaction.sign([wallet]);
+
+        console.log("✅ Transacción firmada con éxito.");
+
+        // 🔹 Enviar la transacción a Solana
+        console.log("🚀 Enviando transacción a la red de Solana...");
+        const txSignature = await connection.sendTransaction(versionedTransaction, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed"
+        });
+
+        console.log(`✅ Venta ejecutada con éxito: ${txSignature}`);
         return txSignature;
+
     } catch (error) {
-        console.error("❌ Error en la venta de tokens:", error);
+        console.error("❌ Error ejecutando la venta en Jupiter:", error);
+        return null;
+    }
+}
+
+// 🔹 Función para crear la ATA si no existe
+async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
+    try {
+        // Obtener la dirección de la ATA para este token y esta wallet
+        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+
+        // Verificar si la cuenta ya existe en la blockchain
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (ataInfo !== null) {
+            console.log(`✅ ATA ya existente: ${ata.toBase58()}`);
+            return ata;
+        }
+
+        console.log(`⚠️ ATA no encontrada, creando una nueva para el token ${mint}...`);
+
+        // Crear la instrucción para la ATA
+        const transaction = new Transaction().add(
+            createAssociatedTokenAccountInstruction(
+                wallet.publicKey,  // Payer (quién paga la transacción)
+                ata,               // Dirección de la ATA
+                wallet.publicKey,  // Owner (propietario)
+                new PublicKey(mint) // Mint del token
+            )
+        );
+
+        // Firmar y enviar la transacción
+        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+        console.log(`✅ ATA creada con éxito: ${ata.toBase58()} - TX: ${txSignature}`);
+
+        return ata;
+    } catch (error) {
+        console.error("❌ Error creando la ATA:", error);
         return null;
     }
 }
