@@ -722,7 +722,7 @@ async function executeJupiterSell(chatId, mint, amount) {
         });
 
         console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-        return { txSignature, soldAmount: balance };
+        return txSignature;
     } catch (error) {
         console.error("❌ Error executing sell order on Jupiter:", error);
         return null;
@@ -1115,6 +1115,8 @@ bot.on("callback_query", async (query) => {
 
             // 🔹 Determinar cantidad a vender (50% o 100%)
             let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
+            let soldAmount = sellType === "50" ? (balance / 2).toFixed(9) : balance.toFixed(9);
+
             console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
 
             // 🔹 Evitar vender cantidades menores que la unidad mínima del token
@@ -1153,8 +1155,8 @@ bot.on("callback_query", async (query) => {
 
             let sellDetails = null;
             let attempt = 0;
-            const maxAttempts = 10;  // 🔹 Aumentamos a 10 intentos
-            const delayBetweenAttempts = 5000; // 🔹 Esperamos 5 segundos entre intentos
+            const maxAttempts = 10;
+            const delayBetweenAttempts = 5000;
 
             while (attempt < maxAttempts && !sellDetails) {
                 attempt++;
@@ -1182,7 +1184,6 @@ bot.on("callback_query", async (query) => {
             let tokenSymbol = sellTokenData?.symbol || "Unknown";
 
             // 🔹 Validar datos antes de enviar el mensaje
-            let soldAmount = sellDetails.receivedAmount && sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : "Unknown";
             let gotSol = sellDetails.inputAmount ? sellDetails.inputAmount : "Unknown";
             let swapFee = sellDetails.swapFee ? sellDetails.swapFee : "Unknown";
             let walletAddress = sellDetails.walletAddress ? sellDetails.walletAddress : "Unknown";
@@ -1191,7 +1192,7 @@ bot.on("callback_query", async (query) => {
             const sellMessage = `✅ *Sell completed successfully*\n` +
             `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${soldAmount} Tokens\n` +
+            `💰 *Sold:* ${soldAmount} Tokens\n` + // Aquí se usa el balance calculado
             `💰 *Got:* ${gotSol} SOL\n` +
             `🔄 *Sell Fee:* ${swapFee} SOL\n` +
             `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
