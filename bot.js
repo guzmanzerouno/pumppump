@@ -1225,20 +1225,33 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);  // 🔹 Corregido aquí
+            const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);  // 🔹 Obtener información del token comprado
 
             const confirmationMessage = `✅ *Swap completed successfully*\n` +
-            `*SOL/${escapeMarkdown(swapTokenData.symbol)}* (${escapeMarkdown(swapDetails.dexPlatform)})\n\n` +
+            `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
             `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
             `🔄 *Got:* ${swapDetails.receivedAmount} Tokens\n` +
             `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-            `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol)}:* \`${swapDetails.receivedTokenMint}\`\n` + // 🔹 Corregido aquí
+            `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` + 
             `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
             `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
             `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
 
-            bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, confirmationMessage, {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "💸 Sell 50%", callback_data: `sell_${swapDetails.receivedTokenMint}_50` },
+                            { text: "💯 Sell MAX", callback_data: `sell_${swapDetails.receivedTokenMint}_100` }
+                        ],
+                        [
+                            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${swapDetails.receivedTokenMint}` }
+                        ]
+                    ]
+                }
+            });
 
         } catch (error) {
             console.error("❌ Error in purchase process:", error);
