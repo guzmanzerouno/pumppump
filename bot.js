@@ -990,9 +990,14 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
             let receivedTokens = meta.postTokenBalances.filter(token => token.accountIndex !== 0);
 
+            // 🔍 Identificar correctamente el token recibido, evitando seleccionar WSOL
             let receivedToken = receivedTokens.find(token => token.mint !== "So11111111111111111111111111111111111111112");
-            if (!receivedToken) {
-                receivedToken = receivedTokens[0]; // Si no hay otro token, tomar el primero (fallback)
+            
+            if (!receivedToken && receivedTokens.length > 0) {
+                // Si solo encontramos WSOL, elegir el token con mayor cantidad recibida
+                receivedToken = receivedTokens.reduce((prev, current) =>
+                    parseFloat(current.uiTokenAmount.amount) > parseFloat(prev.uiTokenAmount.amount) ? current : prev
+                );
             }
 
             const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
