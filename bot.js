@@ -917,12 +917,35 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     }
 }
 
+async function getTokenNameFromSolana(mintAddress) {
+    try {
+        const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mintAddress));
+        
+        if (!tokenInfo.value || !tokenInfo.value.data) {
+            console.warn(`⚠️ No se encontró información del token ${mintAddress} en Solana RPC.`);
+            return null;
+        }
+
+        const parsedData = tokenInfo.value.data.parsed.info;
+        return {
+            name: parsedData.name || "Unknown",
+            symbol: parsedData.symbol || "N/A"
+        };
+
+    } catch (error) {
+        console.error(`❌ Error obteniendo información del token ${mintAddress}:`, error);
+        return null;
+    }
+}
+
 async function getSwapDetailsFromSolanaRPC(signature) {
     let retryAttempts = 0;
     let delay = 5000; // 5 segundos inicial antes de la primera consulta
 
     while (retryAttempts < 6) { // Máximo de 6 intentos
         try {
+            console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
+
             const response = await axios.post("https://api.mainnet-beta.solana.com", {
                 jsonrpc: "2.0",
                 id: 1,
@@ -931,24 +954,28 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             });
 
             if (!response.data || !response.data.result) {
-                throw new Error("Failed to retrieve transaction details.");
+                throw new Error("❌ No transaction details found.");
             }
 
             const txData = response.data.result;
             const meta = txData.meta;
 
-            if (meta.err) {
-                throw new Error("Transaction failed on Solana.");
+            if (!meta || meta.err) {
+                throw new Error("❌ Transaction failed on Solana.");
             }
 
-            const preBalances = meta.preBalances;
-            const postBalances = meta.postBalances;
-            const swapFee = meta.fee / 1e9;
+            const preBalances = meta.preBalances || [];
+            const postBalances = meta.postBalances || [];
+            const swapFee = meta.fee ? meta.fee / 1e9 : 0;
 
-            // Buscar el token recibido
-            const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
-            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
+            // 🔹 Buscar el token recibido
+            const receivedToken = meta.postTokenBalances?.find(token => token.accountIndex !== 0);
+            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
             const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
+
+            if (!receivedTokenMint || receivedTokenMint === "Unknown") {
+                console.warn("⚠️ No received token found.");
+            }
 
             // 🔍 Intentar obtener el nombre y símbolo del token
             let tokenInfo = await getTokenNameFromSolana(receivedTokenMint);
@@ -960,12 +987,14 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const tokenName = tokenInfo?.name || "Unknown";
             const tokenSymbol = tokenInfo?.symbol || "N/A";
 
-            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
-            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
+            // 🔹 Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys) || "Unknown DEX";
 
-            const solBefore = preBalances[0] / 1e9;
-            const solAfter = postBalances[0] / 1e9;
+            const solBefore = preBalances[0] ? preBalances[0] / 1e9 : 0;
+            const solAfter = postBalances[0] ? postBalances[0] / 1e9 : 0;
             const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
+
+            console.log(`✅ Swap details retrieved successfully for: ${signature}`);
 
             return {
                 inputAmount: inputAmount,
@@ -975,7 +1004,7 @@ async function getSwapDetailsFromSolanaRPC(signature) {
                 receivedTokenName: tokenName,
                 receivedTokenSymbol: tokenSymbol,
                 dexPlatform: dexPlatform,
-                walletAddress: txData.transaction.message.accountKeys[0],
+                walletAddress: txData.transaction.message.accountKeys[0] || "Unknown",
                 solBefore: solBefore.toFixed(3),
                 solAfter: solAfter.toFixed(3)
             };
