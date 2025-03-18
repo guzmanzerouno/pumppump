@@ -1184,7 +1184,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);
+            const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);  // 🔹 Corregido aquí
 
             const confirmationMessage = `✅ *Swap completed successfully*\n` +
             `*SOL/${escapeMarkdown(swapTokenData.symbol)}* (${escapeMarkdown(swapDetails.dexPlatform)})\n\n` +
@@ -1192,7 +1192,7 @@ bot.on("callback_query", async (query) => {
             `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
             `🔄 *Got:* ${swapDetails.receivedAmount} Tokens\n` +
             `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-            `📌 *Received Token ${escapeMarkdown(tokenData.symbol)}:* \`${swapDetails.receivedTokenMint}\`\n` +
+            `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol)}:* \`${swapDetails.receivedTokenMint}\`\n` + // 🔹 Corregido aquí
             `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
             `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
             `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
