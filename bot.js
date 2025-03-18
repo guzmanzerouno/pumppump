@@ -422,6 +422,50 @@ function calculateAge(timestamp) {
     }
 }
 
+function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
+    const tokenInfo = {
+        symbol: dexData.symbol,
+        name: dexData.name,
+        USD: dexData.priceUsd,
+        SOL: dexData.priceSol,
+        liquidity: dexData.liquidity,
+        marketCap: dexData.marketCap,
+        FDV: dexData.fdv,
+        age: age,
+        "24H": priceChange24h,
+        warning: rugCheckData.riskDescription,
+        LPLOCKED: rugCheckData.lpLocked,
+        chain: dexData.chain,
+        dex: dexData.dex,
+        migrationDate: mintData.date,
+        graduations: graduations,
+        status: mintData.status,
+        pair: dexData.pairAddress,
+        token: mintData.mintAddress
+    };
+
+    let tokens = {};
+
+    // Cargar el archivo existente si ya hay datos
+    if (fs.existsSync('tokens.json')) {
+        tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+    }
+
+    // Guardar usando el mintAddress como clave
+    tokens[mintData.mintAddress] = tokenInfo;
+
+    fs.writeFileSync('tokens.json', JSON.stringify(tokens, null, 2), 'utf-8');
+    console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+}
+
+function getTokenInfo(mintAddress) {
+    if (!fs.existsSync('tokens.json')) return { symbol: "Unknown", name: "Unknown" };
+
+    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+
+    return tokens[mintAddress] || { symbol: "Unknown", name: "Unknown" };
+}
+
 // 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
 async function buyToken(chatId, mint, amountSOL, retry = false) {
     try {
@@ -1005,19 +1049,21 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
+
             // 📌 Confirmation message
             const sellMessage = `✅ *Sell completed successfully*\n` +
-            `*${escapeMarkdown(sellDetails.receivedTokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform)})\n\n` +
+            `*${escapeMarkdown(sellTokenData.symbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform)})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
             `💰 *Sold:* ${sellDetails.receivedAmount} Tokens\n` +
             `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
             `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-            `📌 *Sold Token ${escapeMarkdown(sellDetails.receivedTokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
+            `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
             `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
             `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
             `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
-            bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
 
         } catch (error) {
             console.error("❌ Error in sell process:", error);
@@ -1064,13 +1110,15 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);
+
             const confirmationMessage = `✅ *Swap completed successfully*\n` +
-            `*SOL/${escapeMarkdown(swapDetails.receivedTokenSymbol)}* (${escapeMarkdown(swapDetails.dexPlatform)})\n\n` +
+            `*SOL/${escapeMarkdown(swapTokenData.symbol)}* (${escapeMarkdown(swapDetails.dexPlatform)})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
             `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
             `🔄 *Got:* ${swapDetails.receivedAmount} Tokens\n` +
             `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-            `📌 *Received Token ${escapeMarkdown(swapDetails.receivedTokenSymbol)}:* \`${swapDetails.receivedTokenMint}\`\n` +
+            `📌 *Received Token ${escapeMarkdown(tokenData.symbol)}:* \`${swapDetails.receivedTokenMint}\`\n` +
             `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
             `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
             `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
