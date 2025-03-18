@@ -406,13 +406,15 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
 }
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
-    // 🔹 1️⃣ Verificar si los datos son válidos
+    console.log("🔄 Intentando guardar datos en tokens.json...");
+
+    // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
     if (!dexData || !mintData || !rugCheckData) {
         console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
         return;
     }
 
-    console.log("✅ Guardando datos en tokens.json...");
+    console.log("✅ Datos validados correctamente.");
     console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
 
     // 🔹 2️⃣ Formatear datos antes de guardar
