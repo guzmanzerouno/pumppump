@@ -459,11 +459,11 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, gra
 }
 
 function getTokenInfo(mintAddress) {
-    if (!fs.existsSync('tokens.json')) return { symbol: "Unknown", name: "Unknown" };
+    if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
 
-    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8')) || {};
 
-    return tokens[mintAddress] || { symbol: "Unknown", name: "Unknown" };
+    return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
 
 // 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
