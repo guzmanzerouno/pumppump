@@ -1146,7 +1146,7 @@ bot.on("callback_query", async (query) => {
             bot.sendMessage(
                 chatId,
                 `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
-                { parse_mode: "Markdown", disable_web_page_preview: true } // 🔹 Eliminamos el banner de Solscan
+                { parse_mode: "Markdown", disable_web_page_preview: true }
             );
 
             console.log("⏳ Waiting for Solana to confirm the transaction...");
@@ -1166,15 +1166,11 @@ bot.on("callback_query", async (query) => {
             // 🔹 Obtener información del token vendido desde tokens.json
             const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
 
-            // 🔹 Corregir la cantidad de tokens vendidos
-            const soldAmount = amountToSell / Math.pow(10, decimals); // Convertimos a unidades legibles
-            console.log(`✅ Corrected sold amount: ${soldAmount} tokens`);
-
             // 📌 Mensaje final de confirmación de venta
             const sellMessage = `✅ *Sell completed successfully*\n` +
             `*${escapeMarkdown(sellTokenData.symbol || "Unknown")}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${soldAmount} Tokens\n` + // 🔹 Usamos la cantidad corregida
+            `💰 *Sold:* ${sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : "Unknown"} Tokens\n` +
             `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
             `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
             `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol || "Unknown")}:* \`${sellDetails.receivedTokenMint}\`\n` +
