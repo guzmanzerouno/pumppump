@@ -956,7 +956,7 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-async function getSwapDetailsFromSolanaRPC(signature) {
+async function getSwapDetailsFromSolanaRPC(signature, expectedMint) {
     let retryAttempts = 0;
     let delay = 5000; // 5 segundos inicial antes de la primera consulta
 
@@ -986,15 +986,17 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar los tokens vendidos y recibidos
+            // 🔍 Buscar el token vendido
             let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
-            let receivedTokens = meta.postTokenBalances.filter(token => token.accountIndex !== 0);
 
-            // 🔍 Identificar correctamente el token recibido, evitando seleccionar WSOL
-            let receivedToken = receivedTokens.find(token => token.mint !== "So11111111111111111111111111111111111111112");
-            
+            // 🔍 Buscar los tokens recibidos y filtrar WSOL
+            let receivedTokens = meta.postTokenBalances.filter(token => token.mint !== "So11111111111111111111111111111111111111112");
+
+            // 🔍 Intentar encontrar el token que coincide con el `expectedMint`
+            let receivedToken = receivedTokens.find(token => token.mint === expectedMint);
+
             if (!receivedToken && receivedTokens.length > 0) {
-                // Si solo encontramos WSOL, elegir el token con mayor cantidad recibida
+                // Si el `expectedMint` no se encuentra, tomar el token con mayor cantidad
                 receivedToken = receivedTokens.reduce((prev, current) =>
                     parseFloat(current.uiTokenAmount.amount) > parseFloat(prev.uiTokenAmount.amount) ? current : prev
                 );
@@ -1006,17 +1008,12 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
             const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // 🔹 Intentar obtener el nombre y símbolo del token vendido y recibido
-            let soldTokenInfo = getTokenInfo(soldTokenMint);
+            // 🔹 Verificar si el token recibido está en `tokens.json`
             let receivedTokenInfo = getTokenInfo(receivedTokenMint);
+            let receivedTokenName = receivedTokenInfo?.name || "Unknown";
+            let receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
 
-            const soldTokenName = soldTokenInfo?.name || "Unknown";
-            const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
-
-            const receivedTokenName = receivedTokenInfo?.name || "Unknown";
-            const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
-
-            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, etc.)
             const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
             const solBefore = preBalances[0] / 1e9;
@@ -1025,13 +1022,11 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
             return {
                 inputAmount: inputAmount,
-                soldAmount: soldAmount,  // 🔹 Cantidad de tokens vendidos
-                receivedAmount: receivedAmount,  // 🔹 Cantidad de tokens recibidos
+                soldAmount: soldAmount,
+                receivedAmount: receivedAmount,
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
                 receivedTokenMint: receivedTokenMint,
-                soldTokenName: soldTokenName,
-                soldTokenSymbol: soldTokenSymbol,
                 receivedTokenName: receivedTokenName,
                 receivedTokenSymbol: receivedTokenSymbol,
                 dexPlatform: dexPlatform,
