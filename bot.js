@@ -1148,7 +1148,27 @@ bot.on("callback_query", async (query) => {
             console.log("⏳ Waiting for Solana to confirm the transaction...");
             await new Promise(resolve => setTimeout(resolve, 10000));
 
-            let sellDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+            let sellDetails = null;
+            let fetchAttempts = 0;
+
+            // 🔄 Intentar obtener los detalles hasta 3 veces si están incompletos
+            while (fetchAttempts < 3) {
+                sellDetails = await getSwapDetailsFromSolanaRPC(txSignature);
+
+                if (
+                    sellDetails &&
+                    sellDetails.receivedAmount !== "N/A" &&
+                    sellDetails.receivedTokenMint !== "N/A" &&
+                    sellDetails.receivedTokenMint !== undefined &&
+                    sellDetails.receivedAmount > 0
+                ) {
+                    break;
+                }
+
+                console.log(`⚠️ Sell details incomplete, retrying... (${fetchAttempts + 1}/3)`);
+                fetchAttempts++;
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar antes de intentar de nuevo
+            }
 
             if (!sellDetails) {
                 bot.sendMessage(
@@ -1162,17 +1182,24 @@ bot.on("callback_query", async (query) => {
             // 🔹 Obtener información del token vendido desde tokens.json
             const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
 
+            // 📌 Validar y corregir posibles valores vacíos o incorrectos
+            const soldAmount = sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : amountToSell / Math.pow(10, decimals);
+            const tokenSymbol = sellTokenData.symbol && sellTokenData.symbol !== "N/A" ? sellTokenData.symbol : "Unknown";
+
+            console.log(`✅ Sold Amount Corrected: ${soldAmount}`);
+            console.log(`✅ Token Symbol Corrected: ${tokenSymbol}`);
+
             // 📌 Mensaje final de confirmación de venta
             const sellMessage = `✅ *Sell completed successfully*\n` +
-            `*${escapeMarkdown(sellTokenData.symbol || "Unknown")}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
-            `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : "Unknown"} Tokens\n` +
-            `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
-            `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-            `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol || "Unknown")}:* \`${sellDetails.receivedTokenMint}\`\n` +
-            `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
-            `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
-            `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
+                `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
+                `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+                `💰 *Sold:* ${soldAmount} Tokens\n` +
+                `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
+                `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
+                `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
+                `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
+                `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
+                `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
             bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
 
