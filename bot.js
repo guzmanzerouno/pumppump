@@ -732,6 +732,23 @@ async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
     }
 }
 
+// 🔹 Calcular el tiempo desde la creación del par en horas, minutos y segundos
+function calculateAge(timestamp) {
+    if (!timestamp) return "N/A";
+    const now = Date.now();
+    const elapsedMs = now - timestamp;
+
+    const hours = Math.floor(elapsedMs / 3600000); // 1 hora = 3600000 ms
+    const minutes = Math.floor((elapsedMs % 3600000) / 60000);
+    const seconds = Math.floor((elapsedMs % 60000) / 1000);
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`; // Si hay horas, las mostramos
+    } else {
+        return `${minutes}m ${seconds}s`; // Si no hay horas, solo minutos y segundos
+    }
+}
+
 // 🔹 Conjunto para almacenar firmas ya procesadas
 const processedSignatures = new Set();
 
