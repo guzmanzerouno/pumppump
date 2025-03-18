@@ -790,24 +790,19 @@ const processedSignatures = new Set();
 async function analyzeTransaction(signature) {
     console.log(`🔍 Analizando transacción: ${signature}`);
 
-    // 🛑 Verificar si la firma ya fue procesada
     if (processedSignatures.has(signature)) {
         console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
 
-    // 📌 Agregar la firma al conjunto de procesadas
     processedSignatures.add(signature);
 
-    // 1️⃣ Intentar obtener el Mint Address desde la transacción
     let mintData = await getMintAddressFromTransaction(signature);
-
     if (!mintData || !mintData.mintAddress) {
         console.log("⚠️ No se pudo obtener el Mint Address. Asumiendo que la firma es un Mint Address.");
         mintData = { mintAddress: signature };
     }
 
-    // 🛑 Filtrar transacciones que no deben procesarse (Wrapped SOL)
     if (mintData.mintAddress === "So11111111111111111111111111111111111111112") {
         console.log("⏩ Transacción ignorada: Wrapped SOL detectado.");
         return;
@@ -815,7 +810,6 @@ async function analyzeTransaction(signature) {
 
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
 
-    // 2️⃣ Obtener datos de DexScreener
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
         console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
@@ -823,7 +817,6 @@ async function analyzeTransaction(signature) {
     }
     console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
 
-    // 3️⃣ Obtener datos de RugCheck API
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) {
         console.log(`⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress}`);
@@ -831,13 +824,17 @@ async function analyzeTransaction(signature) {
     }
     console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
 
-    // 4️⃣ Calcular los valores adicionales
     const priceChange24h = dexData.priceChange24h !== "N/A"
         ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
         : "N/A";
 
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
+
+    // 🔹 🔥 **GUARDAR LOS DATOS EN tokens.json**
+    console.log("💾 Guardando datos en tokens.json...");
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
+
 
     // 5️⃣ Formatear mensaje para Telegram
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
