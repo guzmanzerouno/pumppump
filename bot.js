@@ -820,25 +820,30 @@ function calculateAge(timestamp) {
     }
 }
 
-// 🔹 Conjunto para almacenar firmas ya procesadas
+// 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
 // 🔹 Función principal que ejecuta todo el proceso
-async function analyzeTransaction(signature) {
-    console.log(`🔍 Analizando transacción: ${signature}`);
+async function analyzeTransaction(signature, forceCheck = false) {
+    console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
 
-    if (processedSignatures.has(signature)) {
+    // Si no es un check manual y ya fue procesado, ignorarlo
+    if (!forceCheck && processedSignatures.has(signature)) {
         console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
 
-    processedSignatures.add(signature);
+    // Si es un "check xxxx", permitimos que se analice de nuevo
+    if (!forceCheck) {
+        processedSignatures.add(signature);
+    }
 
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
         console.log("⚠️ No se pudo obtener el Mint Address. Asumiendo que la firma es un Mint Address.");
         mintData = { mintAddress: signature };
     }
+
 
     if (mintData.mintAddress === "So11111111111111111111111111111111111111112") {
         console.log("⏩ Transacción ignorada: Wrapped SOL detectado.");
