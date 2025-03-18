@@ -986,34 +986,37 @@ async function getSwapDetailsFromSolanaRPC(signature, expectedMint) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token vendido
-            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
+            let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
 
-            // 🔍 Buscar los tokens recibidos y filtrar WSOL
-            let receivedTokens = meta.postTokenBalances.filter(token => token.mint !== "So11111111111111111111111111111111111111112");
-
-            // 🔍 Intentar encontrar el token que coincide con el `expectedMint`
-            let receivedToken = receivedTokens.find(token => token.mint === expectedMint);
-
-            if (!receivedToken && receivedTokens.length > 0) {
-                // Si el `expectedMint` no se encuentra, tomar el token con mayor cantidad
-                receivedToken = receivedTokens.reduce((prev, current) =>
-                    parseFloat(current.uiTokenAmount.amount) > parseFloat(prev.uiTokenAmount.amount) ? current : prev
-                );
+            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
+            if (!receivedToken) {
+                receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
             }
 
+            if (!receivedToken) {
+                throw new Error("❌ No valid received token found.");
+            }
+
+            // 🔹 Capturar la cantidad correcta del token comprado
+            const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
+
+            // 🔹 Identificar el token vendido
+            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
             const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
-            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
-
             const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
-            const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // 🔹 Verificar si el token recibido está en `tokens.json`
-            let receivedTokenInfo = getTokenInfo(receivedTokenMint);
-            let receivedTokenName = receivedTokenInfo?.name || "Unknown";
-            let receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
+            // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
+            let soldTokenInfo = getTokenInfo(soldTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
 
-            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, etc.)
+            const soldTokenName = soldTokenInfo?.name || "Unknown";
+            const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
+
+            const receivedTokenName = receivedTokenInfo?.name || "Unknown";
+            const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
+
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
             const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
             const solBefore = preBalances[0] / 1e9;
@@ -1023,10 +1026,12 @@ async function getSwapDetailsFromSolanaRPC(signature, expectedMint) {
             return {
                 inputAmount: inputAmount,
                 soldAmount: soldAmount,
-                receivedAmount: receivedAmount,
+                receivedAmount: receivedAmount,  // ✅ Ahora la cantidad correcta del token comprado
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
-                receivedTokenMint: receivedTokenMint,
+                receivedTokenMint: receivedToken.mint,
+                soldTokenName: soldTokenName,
+                soldTokenSymbol: soldTokenSymbol,
                 receivedTokenName: receivedTokenName,
                 receivedTokenSymbol: receivedTokenSymbol,
                 dexPlatform: dexPlatform,
