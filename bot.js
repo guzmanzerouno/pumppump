@@ -986,9 +986,14 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token vendido o recibido
-            const soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
-            const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
+            // 🔍 Buscar los tokens vendidos y recibidos
+            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            let receivedTokens = meta.postTokenBalances.filter(token => token.accountIndex !== 0);
+
+            let receivedToken = receivedTokens.find(token => token.mint !== "So11111111111111111111111111111111111111112");
+            if (!receivedToken) {
+                receivedToken = receivedTokens[0]; // Si no hay otro token, tomar el primero (fallback)
+            }
 
             const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
             const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
@@ -996,7 +1001,7 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
             const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // 🔹 Intentar obtener el nombre y símbolo del token vendido
+            // 🔹 Intentar obtener el nombre y símbolo del token vendido y recibido
             let soldTokenInfo = getTokenInfo(soldTokenMint);
             let receivedTokenInfo = getTokenInfo(receivedTokenMint);
 
@@ -1016,7 +1021,7 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             return {
                 inputAmount: inputAmount,
                 soldAmount: soldAmount,  // 🔹 Cantidad de tokens vendidos
-                receivedAmount: receivedAmount,  // 🔹 Cantidad de SOL recibidos
+                receivedAmount: receivedAmount,  // 🔹 Cantidad de tokens recibidos
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
                 receivedTokenMint: receivedTokenMint,
@@ -1051,9 +1056,9 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
 function detectDexPlatform(accountKeys) {
     const dexIdentifiers = {
-        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter",
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter Aggregator v6",
         "mete1GCG6pESFVkMyfrgXW1UV3pR7xyF6LT1r6dTC4y": "Meteora",
-        "CAMt6JZJHj3AgGrwvvXL4LoNZFxtFnS2LZKPh8UmeHqT": "Raydium",
+        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium Liquidity Pool V4",
         "9Wq5m2K2JhE7G7q8jK8HgyR7Atsj6qGkTRS8UnToV2pj": "Orca"
     };
 
