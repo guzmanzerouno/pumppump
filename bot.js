@@ -906,6 +906,10 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
                 ],
                 [
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                ],
+                [
                     { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
                 ]
             ];
