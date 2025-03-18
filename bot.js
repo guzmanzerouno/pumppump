@@ -423,7 +423,7 @@ function calculateAge(timestamp) {
 }
 
 // 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
-async function buyToken(chatId, mint, amountSOL) {
+async function buyToken(chatId, mint, amountSOL, retry = false) {
     try {
         const user = users[chatId];
         if (!user || !user.privateKey) {
@@ -434,6 +434,15 @@ async function buyToken(chatId, mint, amountSOL) {
         const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
         const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
         const userPublicKey = userKeypair.publicKey.toBase58();
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+        // 🔹 Verificar si la cuenta ATA existe, si no, crearla
+        const ata = await createAssociatedTokenAccountIfNeeded(userKeypair, mint, connection);
+        if (!ata) {
+            throw new Error(`❌ No se pudo crear la ATA para el token ${mint}`);
+        }
+
+        console.log(`✅ ATA verificada para ${mint}: ${ata.toBase58()}`);
 
         // 🔍 Depuración: Verificando valores antes de enviar a Jupiter
         console.log(`🟡 Intentando obtener cotización en Jupiter...`);
@@ -449,48 +458,50 @@ async function buyToken(chatId, mint, amountSOL) {
                 inputMint: "So11111111111111111111111111111111111111112", // SOL
                 outputMint: mint,
                 amount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
-                slippageBps: 50, // 0.5% de slippage
+                slippageBps: 100, // 1% de slippage
                 swapMode: "ExactIn"
             }
         });
 
-        // 🔍 Depuración: Verificando respuesta de Jupiter
-        console.log(`🔹 Respuesta de Jupiter:`, JSON.stringify(quoteResponse.data, null, 2));
-
         if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-            throw new Error("No se pudo obtener una cotización válida de Jupiter.");
+            throw new Error("❌ No se pudo obtener una cotización válida de Jupiter.");
         }
 
-        // 🔹 Solicitar la transacción de swap a Jupiter usando `quoteResponse.data`
+        // 🔹 Solicitar la transacción de swap a Jupiter
         const swapResponse = await axios.post("https://quote-api.jup.ag/v6/swap", {
-            quoteResponse: quoteResponse.data, // ✅ CORREGIDO
+            quoteResponse: quoteResponse.data, 
             userPublicKey: userPublicKey,
             wrapAndUnwrapSol: true
         });
 
         if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-            throw new Error("No se pudo construir la transacción de swap.");
+            throw new Error("❌ No se pudo construir la transacción de swap.");
         }
 
         // 🔹 Decodificar la transacción versión 0 correctamente
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
-        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer); // ✅ CORREGIDO
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
 
         // 🔹 Firmar la transacción
-        const signers = [userKeypair];
-        versionedTransaction.sign(signers); // ✅ FIRMANDO CORRECTAMENTE
+        versionedTransaction.sign([userKeypair]);
 
         // 🔹 Enviar y confirmar la transacción
         const txId = await connection.sendTransaction(versionedTransaction, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed"
-    });
+            skipPreflight: false,
+            preflightCommitment: "confirmed"
+        });
 
         console.log(`✅ Compra completada con éxito: ${txId}`);
         return txId;
     } catch (error) {
         console.error("❌ Error en la compra:", error);
-        throw error;
+
+        if (!retry) {
+            console.warn("🔄 Reintentando compra...");
+            return await buyToken(chatId, mint, amountSOL, true); // Reintentar una vez más
+        } else {
+            return null;
+        }
     }
 }
 
@@ -1005,16 +1016,14 @@ bot.on("callback_query", async (query) => {
             const txSignature = await buyToken(chatId, mint, amountSOL);
 
             if (!txSignature) {
-                bot.sendMessage(chatId, "❌ The purchase could not be completed due to an unknown error.");
+                bot.sendMessage(chatId, "❌ The purchase could not be completed.");
                 return;
             }
 
-            // 🔹 Notificación temprana al usuario con el enlace de Solscan
             bot.sendMessage(chatId, `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown" });
 
-            // Esperar antes de verificar la transacción
             console.log("⏳ Waiting for Solana to confirm the transaction...");
-            await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos antes de verificar
+            await new Promise(resolve => setTimeout(resolve, 10000));
 
             let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
@@ -1023,7 +1032,6 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // 📌 Mensaje de confirmación SIN el enlace de Solscan
             const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
                 `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
                 `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
