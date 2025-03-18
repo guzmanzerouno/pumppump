@@ -405,57 +405,54 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
     }
 }
 
-// 🔹 Calcular el tiempo desde la creación del par en horas, minutos y segundos
-function calculateAge(timestamp) {
-    if (!timestamp) return "N/A";
-    const now = Date.now();
-    const elapsedMs = now - timestamp;
-
-    const hours = Math.floor(elapsedMs / 3600000); // 1 hora = 3600000 ms
-    const minutes = Math.floor((elapsedMs % 3600000) / 60000);
-    const seconds = Math.floor((elapsedMs % 60000) / 1000);
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m ${seconds}s`; // Si hay horas, las mostramos
-    } else {
-        return `${minutes}m ${seconds}s`; // Si no hay horas, solo minutos y segundos
-    }
-}
-
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
+    if (!dexData || !mintData || !rugCheckData) {
+        console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
+        return;
+    }
+
+    console.log("✅ Guardando datos en tokens.json...");
+
     const tokenInfo = {
-        symbol: dexData.symbol,
-        name: dexData.name,
-        USD: dexData.priceUsd,
-        SOL: dexData.priceSol,
-        liquidity: dexData.liquidity,
-        marketCap: dexData.marketCap,
-        FDV: dexData.fdv,
-        age: age,
-        "24H": priceChange24h,
-        warning: rugCheckData.riskDescription,
-        LPLOCKED: rugCheckData.lpLocked,
-        chain: dexData.chain,
-        dex: dexData.dex,
-        migrationDate: mintData.date,
-        graduations: graduations,
-        status: mintData.status,
-        pair: dexData.pairAddress,
-        token: mintData.mintAddress
+        symbol: dexData.symbol || "Unknown",
+        name: dexData.name || "Unknown",
+        USD: dexData.priceUsd || "N/A",
+        SOL: dexData.priceSol || "N/A",
+        liquidity: dexData.liquidity || "N/A",
+        marketCap: dexData.marketCap || "N/A",
+        FDV: dexData.fdv || "N/A",
+        age: age || "N/A",
+        "24H": priceChange24h || "N/A",
+        warning: rugCheckData.riskDescription || "N/A",
+        LPLOCKED: rugCheckData.lpLocked || "N/A",
+        chain: dexData.chain || "solana",
+        dex: dexData.dex || "N/A",
+        migrationDate: mintData.date || "N/A",
+        graduations: graduations || "N/A",
+        status: mintData.status || "N/A",
+        pair: dexData.pairAddress || "N/A",
+        token: mintData.mintAddress || "N/A"
     };
 
-    let tokens = {};
+    console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
 
-    // Cargar el archivo existente si ya hay datos
+    let tokens = {};
     if (fs.existsSync('tokens.json')) {
-        tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+        try {
+            tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+        } catch (error) {
+            console.error("❌ Error leyendo tokens.json:", error);
+        }
     }
 
-    // Guardar usando el mintAddress como clave
     tokens[mintData.mintAddress] = tokenInfo;
 
-    fs.writeFileSync('tokens.json', JSON.stringify(tokens, null, 2), 'utf-8');
-    console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+    try {
+        fs.writeFileSync('tokens.json', JSON.stringify(tokens, null, 2), 'utf-8');
+        console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+    } catch (error) {
+        console.error("❌ Error guardando token en tokens.json:", error);
+    }
 }
 
 function getTokenInfo(mintAddress) {
