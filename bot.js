@@ -722,7 +722,7 @@ async function executeJupiterSell(chatId, mint, amount) {
         });
 
         console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-        return txSignature;
+        return { txSignature, soldAmount: balance };
     } catch (error) {
         console.error("❌ Error executing sell order on Jupiter:", error);
         return null;
