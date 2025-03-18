@@ -659,7 +659,7 @@ async function getTokenDecimals(mint) {
 async function createAssociatedTokenAccountIfNeeded(wallet, mint, connection) {
     try {
         // Obtener la dirección de la ATA para este token y esta wallet
-        const ata = getAssociatedTokenAddressSync(new PublicKey(mint), wallet.publicKey);
+        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
 
         // Verificar si la cuenta ya existe en la blockchain
         const ataInfo = await connection.getAccountInfo(ata);
