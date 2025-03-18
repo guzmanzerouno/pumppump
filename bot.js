@@ -905,7 +905,10 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
                     { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
                 ],
-
+                [
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                ],
                 [
                     { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
                 ]
@@ -1175,7 +1178,7 @@ bot.on("callback_query", async (query) => {
             `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
             `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
-            bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown", disable_web_page_preview: true });
 
         } catch (error) {
             console.error("❌ Error in sell process:", error);
