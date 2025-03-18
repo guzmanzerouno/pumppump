@@ -1146,7 +1146,7 @@ bot.on("callback_query", async (query) => {
             bot.sendMessage(
                 chatId,
                 `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
-                { parse_mode: "Markdown" }
+                { parse_mode: "Markdown", disable_web_page_preview: true } // 🔹 Eliminamos el banner de Solscan
             );
 
             console.log("⏳ Waiting for Solana to confirm the transaction...");
@@ -1158,7 +1158,7 @@ bot.on("callback_query", async (query) => {
                 bot.sendMessage(
                     chatId,
                     `⚠️ Sell details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
-                    { parse_mode: "Markdown" }
+                    { parse_mode: "Markdown", disable_web_page_preview: true }
                 );
                 return;
             }
@@ -1166,11 +1166,15 @@ bot.on("callback_query", async (query) => {
             // 🔹 Obtener información del token vendido desde tokens.json
             const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
 
+            // 🔹 Corregir la cantidad de tokens vendidos
+            const soldAmount = amountToSell / Math.pow(10, decimals); // Convertimos a unidades legibles
+            console.log(`✅ Corrected sold amount: ${soldAmount} tokens`);
+
             // 📌 Mensaje final de confirmación de venta
             const sellMessage = `✅ *Sell completed successfully*\n` +
             `*${escapeMarkdown(sellTokenData.symbol || "Unknown")}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : "Unknown"} Tokens\n` +
+            `💰 *Sold:* ${soldAmount} Tokens\n` + // 🔹 Usamos la cantidad corregida
             `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
             `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
             `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol || "Unknown")}:* \`${sellDetails.receivedTokenMint}\`\n` +
@@ -1213,7 +1217,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            bot.sendMessage(chatId, `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`, { parse_mode: "Markdown", disable_web_page_preview: true });
 
             console.log("⏳ Waiting for Solana to confirm the transaction...");
             await new Promise(resolve => setTimeout(resolve, 10000));
@@ -1221,7 +1225,7 @@ bot.on("callback_query", async (query) => {
             let swapDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
             if (!swapDetails) {
-                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved.`, { parse_mode: "Markdown" });
+                bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved.`, { parse_mode: "Markdown", disable_web_page_preview: true });
                 return;
             }
 
