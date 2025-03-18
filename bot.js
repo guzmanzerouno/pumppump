@@ -960,51 +960,54 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const txData = response.data.result;
             const meta = txData.meta;
 
-            if (!meta || meta.err) {
-                throw new Error("❌ Transaction failed on Solana.");
+            if (meta.err) {
+                throw new Error("Transaction failed on Solana.");
             }
 
-            const preBalances = meta.preBalances || [];
-            const postBalances = meta.postBalances || [];
-            const swapFee = meta.fee ? meta.fee / 1e9 : 0;
+            const preBalances = meta.preBalances;
+            const postBalances = meta.postBalances;
+            const swapFee = meta.fee / 1e9;
 
-            // 🔹 Buscar el token recibido
-            const receivedToken = meta.postTokenBalances?.find(token => token.accountIndex !== 0);
-            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
+            // 🔍 Buscar el token vendido o recibido
+            const soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
+
+            const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+            const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
+
+            const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
             const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            if (!receivedTokenMint || receivedTokenMint === "Unknown") {
-                console.warn("⚠️ No received token found.");
-            }
+            // 🔹 Intentar obtener el nombre y símbolo del token vendido
+            let soldTokenInfo = getTokenInfo(soldTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedTokenMint);
 
-            // 🔍 Intentar obtener el nombre y símbolo del token
-            let tokenInfo = await getTokenNameFromSolana(receivedTokenMint);
-            if (!tokenInfo) {
-                console.log("⚠️ No se encontró en Solana RPC, buscando en DexScreener...");
-                tokenInfo = await getDexScreenerData(receivedTokenMint); // Fallback a DexScreener
-            }
+            const soldTokenName = soldTokenInfo?.name || "Unknown";
+            const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
 
-            const tokenName = tokenInfo?.name || "Unknown";
-            const tokenSymbol = tokenInfo?.symbol || "N/A";
+            const receivedTokenName = receivedTokenInfo?.name || "Unknown";
+            const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
 
-            // 🔹 Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
-            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys) || "Unknown DEX";
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
-            const solBefore = preBalances[0] ? preBalances[0] / 1e9 : 0;
-            const solAfter = postBalances[0] ? postBalances[0] / 1e9 : 0;
+            const solBefore = preBalances[0] / 1e9;
+            const solAfter = postBalances[0] / 1e9;
             const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
-
-            console.log(`✅ Swap details retrieved successfully for: ${signature}`);
 
             return {
                 inputAmount: inputAmount,
-                receivedAmount: receivedAmount,
+                soldAmount: soldAmount,  // 🔹 Cantidad de tokens vendidos
+                receivedAmount: receivedAmount,  // 🔹 Cantidad de SOL recibidos
                 swapFee: swapFee.toFixed(6),
+                soldTokenMint: soldTokenMint,
                 receivedTokenMint: receivedTokenMint,
-                receivedTokenName: tokenName,
-                receivedTokenSymbol: tokenSymbol,
+                soldTokenName: soldTokenName,
+                soldTokenSymbol: soldTokenSymbol,
+                receivedTokenName: receivedTokenName,
+                receivedTokenSymbol: receivedTokenSymbol,
                 dexPlatform: dexPlatform,
-                walletAddress: txData.transaction.message.accountKeys[0] || "Unknown",
+                walletAddress: txData.transaction.message.accountKeys[0],
                 solBefore: solBefore.toFixed(3),
                 solAfter: solAfter.toFixed(3)
             };
@@ -1064,15 +1067,15 @@ bot.on("callback_query", async (query) => {
         bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens...`);
 
         try {
-            // 🔹 Get user's wallet keypair
+            // 🔹 Obtener Keypair de la wallet del usuario
             const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
             const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-            // 🔹 Get token decimals
+            // 🔹 Obtener decimales del token
             const decimals = await getTokenDecimals(mint);
             console.log(`✅ Token ${mint} has ${decimals} decimals.`);
 
-            // 🔹 Get token balance in UI units
+            // 🔹 Obtener balance del token en UI units
             let balance = await getTokenBalance(chatId, mint);
             console.log(`✅ Balance found: ${balance} tokens`);
 
@@ -1081,20 +1084,20 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // 🔹 Convert balance to smallest units (lamports)
+            // 🔹 Convertir balance a unidades mínimas (lamports)
             let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
 
-            // 🔹 Determine amount to sell (50% or 100%)
-            let amountToSell = sellType === "50" ? balanceInLamports / 2 : balanceInLamports;
+            // 🔹 Determinar cantidad a vender (50% o 100%)
+            let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
             console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
 
-            // 🔹 Avoid selling amounts lower than the token's smallest unit
+            // 🔹 Evitar vender cantidades menores que la unidad mínima del token
             if (amountToSell < 1) {
                 bot.sendMessage(chatId, "⚠️ The amount to sell is too low.");
                 return;
             }
 
-            // 🔹 ✅ Ejecutar la venta pasando el chatId correcto
+            // 🔹 Ejecutar la venta y obtener el txSignature
             const txSignature = await executeJupiterSell(chatId, mint, amountToSell);
 
             if (!txSignature) {
@@ -1102,7 +1105,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // ✅ Notify user that the sell order was executed
+            // ✅ Notificar al usuario que la orden de venta fue ejecutada
             bot.sendMessage(
                 chatId,
                 `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
@@ -1123,16 +1126,17 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            // 🔹 Obtener información del token vendido desde tokens.json
             const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
 
-            // 📌 Confirmation message
+            // 📌 Mensaje final de confirmación de venta
             const sellMessage = `✅ *Sell completed successfully*\n` +
-            `*${escapeMarkdown(sellTokenData.symbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform)})\n\n` +
+            `*${escapeMarkdown(sellTokenData.symbol || "Unknown")}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
             `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${sellDetails.receivedAmount} Tokens\n` +
+            `💰 *Sold:* ${sellDetails.soldAmount !== "N/A" ? sellDetails.soldAmount : "Unknown"} Tokens\n` +
             `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
             `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-            `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
+            `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol || "Unknown")}:* \`${sellDetails.receivedTokenMint}\`\n` +
             `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
             `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
             `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
