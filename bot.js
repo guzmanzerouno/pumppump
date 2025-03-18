@@ -848,31 +848,44 @@ async function getSwapDetailsFromSolanaRPC(signature) {
             const txData = response.data.result;
             const meta = txData.meta;
 
-            // Verificar si la transacción falló
             if (meta.err) {
                 throw new Error("Transaction failed on Solana.");
             }
 
-            // Extraer balances antes y después del swap
             const preBalances = meta.preBalances;
             const postBalances = meta.postBalances;
-            const swapFee = meta.fee / 1e9; // Convertir lamports a SOL
+            const swapFee = meta.fee / 1e9;
 
-            // Buscar el token recibido en la transacción
+            // Buscar el token recibido
             const receivedToken = meta.postTokenBalances.find(token => token.accountIndex !== 0);
             const receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : "N/A";
             const receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // Extraer la cantidad de SOL usada para el swap
+            // 🔍 Intentar obtener el nombre y símbolo del token
+            let tokenInfo = await getTokenNameFromSolana(receivedTokenMint);
+            if (!tokenInfo) {
+                console.log("⚠️ No se encontró en Solana RPC, buscando en DexScreener...");
+                tokenInfo = await getDexScreenerData(receivedTokenMint); // Fallback a DexScreener
+            }
+
+            const tokenName = tokenInfo?.name || "Unknown";
+            const tokenSymbol = tokenInfo?.symbol || "N/A";
+
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
+
             const solBefore = preBalances[0] / 1e9;
             const solAfter = postBalances[0] / 1e9;
-            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6); // La diferencia de SOL gastado
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
 
             return {
                 inputAmount: inputAmount,
                 receivedAmount: receivedAmount,
                 swapFee: swapFee.toFixed(6),
                 receivedTokenMint: receivedTokenMint,
+                receivedTokenName: tokenName,
+                receivedTokenSymbol: tokenSymbol,
+                dexPlatform: dexPlatform,
                 walletAddress: txData.transaction.message.accountKeys[0],
                 solBefore: solBefore.toFixed(3),
                 solAfter: solAfter.toFixed(3)
@@ -883,9 +896,9 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
             if (error.response && error.response.status === 429) {
                 console.log("⚠️ Rate limit reached, waiting longer before retrying...");
-                delay *= 1.5; // Aumentar espera en 50% si es un error 429
+                delay *= 1.5;
             } else {
-                delay *= 1.2; // Incremento normal de 20% en cada intento
+                delay *= 1.2;
             }
 
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -895,6 +908,22 @@ async function getSwapDetailsFromSolanaRPC(signature) {
 
     console.error("❌ Failed to retrieve swap details after multiple attempts.");
     return null;
+}
+
+function detectDexPlatform(accountKeys) {
+    const dexIdentifiers = {
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter",
+        "mete1GCG6pESFVkMyfrgXW1UV3pR7xyF6LT1r6dTC4y": "Meteora",
+        "CAMt6JZJHj3AgGrwvvXL4LoNZFxtFnS2LZKPh8UmeHqT": "Raydium",
+        "9Wq5m2K2JhE7G7q8jK8HgyR7Atsj6qGkTRS8UnToV2pj": "Orca"
+    };
+
+    for (const key of accountKeys) {
+        if (dexIdentifiers[key]) {
+            return dexIdentifiers[key];
+        }
+    }
+    return "Unknown DEX";
 }
 
 bot.on("callback_query", async (query) => {
@@ -977,13 +1006,16 @@ bot.on("callback_query", async (query) => {
             }
 
             // 📌 Confirmation message
-            const confirmationMessage = `✅ *Sell completed successfully*\n\n` +
-                `💰 *Tokens Sold:* ${sellDetails.receivedAmount} Tokens\n` +
-                `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-                `📌 *Sold Token:* \`${sellDetails.receivedTokenMint}\`\n` +
-                `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
-                `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
-                `💰 *SOL after sell:* ${sellDetails.solAfter} SOL`;
+            const sellMessage = `✅ *Sell completed successfully*\n` +
+            `*${escapeMarkdown(sellDetails.receivedTokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform)})\n\n` +
+            `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+            `💰 *Sold:* ${sellDetails.receivedAmount} Tokens\n` +
+            `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
+            `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
+            `📌 *Sold Token ${escapeMarkdown(sellDetails.receivedTokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
+            `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
+            `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
+            `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
             bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
 
@@ -1032,14 +1064,16 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            const confirmationMessage = `✅ *Swap completed successfully*\n\n` +
-                `💰 *Input Amount:* ${swapDetails.inputAmount} SOL\n` +
-                `🔄 *Swapped:* ${swapDetails.receivedAmount} Tokens\n` +
-                `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-                `📌 *Received Token:* \`${swapDetails.receivedTokenMint}\`\n` +
-                `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
-                `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
-                `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
+            const confirmationMessage = `✅ *Swap completed successfully*\n` +
+            `*SOL/${escapeMarkdown(swapDetails.receivedTokenSymbol)}* (${escapeMarkdown(swapDetails.dexPlatform)})\n\n` +
+            `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+            `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
+            `🔄 *Got:* ${swapDetails.receivedAmount} Tokens\n` +
+            `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
+            `📌 *Received Token ${escapeMarkdown(swapDetails.receivedTokenSymbol)}:* \`${swapDetails.receivedTokenMint}\`\n` +
+            `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
+            `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
+            `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
 
             bot.sendMessage(chatId, confirmationMessage, { parse_mode: "Markdown" });
 
