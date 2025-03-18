@@ -406,13 +406,16 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
 }
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
+    // 🔹 1️⃣ Verificar si los datos son válidos
     if (!dexData || !mintData || !rugCheckData) {
         console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
         return;
     }
 
     console.log("✅ Guardando datos en tokens.json...");
+    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
 
+    // 🔹 2️⃣ Formatear datos antes de guardar
     const tokenInfo = {
         symbol: dexData.symbol || "Unknown",
         name: dexData.name || "Unknown",
@@ -436,22 +439,51 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, gra
 
     console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
 
+    // 🔹 3️⃣ Verificar si el archivo `tokens.json` existe y es válido
     let tokens = {};
-    if (fs.existsSync('tokens.json')) {
+    const filePath = 'tokens.json';
+
+    if (fs.existsSync(filePath)) {
         try {
-            tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8'));
+            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
+            console.log("📂 Archivo tokens.json leído correctamente.");
         } catch (error) {
             console.error("❌ Error leyendo tokens.json:", error);
+            console.log("🔄 Restaurando tokens.json vacío...");
+            fs.writeFileSync(filePath, "{}", 'utf-8');
+            tokens = {};
         }
+    } else {
+        console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
     }
 
+    // 🔹 4️⃣ Verificar que `mintData.mintAddress` no sea `undefined`
+    if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
+        console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
+        return;
+    }
+
+    console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
+
+    // 🔹 5️⃣ Guardar los datos en `tokens.json`
     tokens[mintData.mintAddress] = tokenInfo;
 
     try {
-        fs.writeFileSync('tokens.json', JSON.stringify(tokens, null, 2), 'utf-8');
+        fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
         console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
     } catch (error) {
         console.error("❌ Error guardando token en tokens.json:", error);
+    }
+
+    // 🔹 6️⃣ Verificar permisos de escritura en `tokens.json`
+    try {
+        fs.accessSync(filePath, fs.constants.W_OK);
+        console.log("✅ Permisos de escritura en tokens.json verificados.");
+    } catch (error) {
+        console.error("❌ Error: No hay permisos de escritura en tokens.json.");
+        console.log("🔄 Ejecuta este comando para arreglarlo:");
+        console.log(`chmod 666 ${filePath}`);
     }
 }
 
