@@ -1101,17 +1101,17 @@ bot.on("callback_query", async (query) => {
             const decimals = await getTokenDecimals(mint);
             console.log(`✅ Token ${mint} has ${decimals} decimals.`);
 
-            // 🔹 Obtener balance del token en UI units
-            let balance = await getTokenBalance(chatId, mint);
-            console.log(`✅ Balance found: ${balance} tokens`);
+            // 🔹 Obtener balance del token antes de la venta
+            let balanceBeforeSell = await getTokenBalance(chatId, mint);
+            console.log(`✅ Balance before sell: ${balanceBeforeSell} tokens`);
 
-            if (!balance || balance <= 0) {
+            if (!balanceBeforeSell || balanceBeforeSell <= 0) {
                 bot.sendMessage(chatId, "⚠️ You don't have enough balance to sell.");
                 return;
             }
 
             // 🔹 Convertir balance a unidades mínimas (lamports)
-            let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
+            let balanceInLamports = Math.floor(balanceBeforeSell * Math.pow(10, decimals));
 
             // 🔹 Determinar cantidad a vender (50% o 100%)
             let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
@@ -1154,7 +1154,7 @@ bot.on("callback_query", async (query) => {
 
             let sellDetails = await getSwapDetailsFromSolanaRPC(txSignature);
 
-            if (!sellDetails) {
+            if (!sellDetails || !sellDetails.preTokenBalances || !sellDetails.postTokenBalances) {
                 bot.sendMessage(
                     chatId,
                     `⚠️ Sell details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
@@ -1163,22 +1163,30 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            // 🔹 Obtener balance del token después de la venta
+            let balanceAfterSell = sellDetails.postTokenBalances.find(token => token.mint === mint)?.uiTokenAmount.uiAmount || 0;
+            let actualSoldAmount = balanceBeforeSell - balanceAfterSell;
+
+            console.log(`✅ Sold Amount Corrected: ${actualSoldAmount.toFixed(6)} Tokens`);
+
             // 🔹 Obtener información del token vendido desde tokens.json
-            const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
+            let sellTokenData = getTokenInfo(mint);
+            let tokenSymbol = sellTokenData.symbol || "Unknown";
+
+            console.log(`✅ Token Symbol Corrected: ${tokenSymbol}`);
 
             // 📌 Mensaje final de confirmación de venta
             const sellMessage = `✅ *Sell completed successfully*\n` +
-            `*${escapeMarkdown(sellTokenData.symbol || "Unknown")}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
-            `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-            `💰 *Sold:* ${sellDetails.receivedAmount !== "N/A" ? sellDetails.receivedAmount : "Unknown"} Tokens\n` +
-            `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
-            `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-            `📌 *Sold Token ${escapeMarkdown(sellTokenData.symbol || "Unknown")}:* \`${sellDetails.receivedTokenMint}\`\n` +
-            `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
-            `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
-            `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
+                `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
+                `💰 *Sold:* ${actualSoldAmount.toFixed(6)} Tokens\n` +
+                `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
+                `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
+                `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${mint}\`\n` +
+                `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
+                `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
+                `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
-            bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown", disable_web_page_preview: true });
+            bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
 
         } catch (error) {
             console.error("❌ Error in sell process:", error);
