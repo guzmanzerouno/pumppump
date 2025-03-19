@@ -1358,15 +1358,18 @@ async function confirmBuy(chatId, swapDetails) {
             (balance) => balance.mint === swapDetails.receivedTokenMint
         );
         if (tokenBalance && tokenBalance.uiTokenAmount) {
-            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString);
+            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString) || 0;  // ✅ Asegura que sea un número
         }
     }
+
+    // ✅ Evitar error si receivedAmount no es un número
+    receivedAmount = isNaN(receivedAmount) ? 0 : receivedAmount;
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Ahora no fallará con `.toFixed()`
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
