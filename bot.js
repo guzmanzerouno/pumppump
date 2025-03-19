@@ -14,8 +14,6 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const USERS_FILE = "users.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
@@ -770,18 +768,12 @@ async function getTokenDecimals(mint) {
     }
 }
 
+// 🔹 Función para verificar y crear la ATA si no existe
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
-        // 🔹 Validar que el mint sea un PublicKey válido
-        if (!mint || mint.length !== 44) {
-            console.error(`❌ Error: Mint inválido: ${mint}`);
-            return null;
-        }
+        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
 
-        const mintPublicKey = new PublicKey(mint);
-        const ata = await getAssociatedTokenAddress(mintPublicKey, wallet.publicKey, false, SPL_TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
-
-        // 🔹 Verificar si la cuenta ya existe
+        // 🔹 Verificar si la cuenta ya existe en la blockchain
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo !== null) {
             console.log(`✅ ATA already exists for ${mint}: ${ata.toBase58()}`);
@@ -796,44 +788,18 @@ async function ensureAssociatedTokenAccount(wallet, mint, connection) {
                 wallet.publicKey,  // Payer (quién paga la transacción)
                 ata,               // Dirección de la ATA
                 wallet.publicKey,  // Owner (propietario)
-                mintPublicKey,     // Mint del token
-                SPL_TOKEN_PROGRAM_ID,  // Programa SPL Token
-                ASSOCIATED_TOKEN_PROGRAM_ID // Programa de Associated Token Account
+                new PublicKey(mint) // Mint del token
             )
         );
 
-        let attempts = 0;
-        const maxAttempts = 5;
-        let delay = 500; // Tiempo inicial de espera (en ms)
+        // 🔹 Firmar y enviar la transacción
+        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
 
-        while (attempts < maxAttempts) {
-            try {
-                // 🔹 Enviar transacción y esperar confirmación
-                const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+        console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
 
-                console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
-                return ata;
-            } catch (error) {
-                // 🔹 Manejo de errores específicos
-                if (error.message.includes("Too Many Requests")) {
-                    console.warn(`⚠️ Rate limit exceeded. Retrying in ${delay}ms...`);
-                    await new Promise(res => setTimeout(res, delay));
-                    delay *= 2; // Exponential backoff
-                } else if (error.message.includes("incorrect program id")) {
-                    console.error("❌ Error: Incorrect program ID for instruction. Possible SPL Token mismatch.");
-                    return null;
-                } else {
-                    console.error(`❌ Error creating ATA for ${mint}:`, error);
-                    return null;
-                }
-            }
-            attempts++;
-        }
-
-        console.error(`❌ Failed to create ATA for ${mint} after ${maxAttempts} attempts.`);
-        return null;
+        return ata;
     } catch (error) {
-        console.error(`❌ Critical error in ensureAssociatedTokenAccount for ${mint}:`, error);
+        console.error(`❌ Error creating ATA for ${mint}:`, error);
         return null;
     }
 }
@@ -1380,31 +1346,23 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails, transactionDetails) {
+async function confirmBuy(chatId, swapDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
-    // ✅ Extraer correctamente la cantidad de tokens recibidos desde postTokenBalances
-    let receivedAmount = 0;
+    // ✅ Extraer directamente la cantidad de tokens recibidos
+    let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
+
+    // ✅ Determinar el token recibido de manera correcta
     let receivedTokenMint = swapDetails.receivedTokenMint;
-    let walletAddress = swapDetails.walletAddress;
-    
-    if (transactionDetails && transactionDetails.meta && transactionDetails.meta.postTokenBalances) {
-        const tokenBalance = transactionDetails.meta.postTokenBalances.find(balance => 
-            balance.owner === walletAddress && balance.mint === receivedTokenMint
-        );
-        if (tokenBalance) {
-            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString) || 0;
-        }
-    }
 
     // ✅ Verificar que el token es válido
-    if (!receivedTokenMint || receivedAmount === 0) {
+    if (!receivedTokenMint || receivedTokenMint.length < 32) {
         console.error("❌ Error: No se pudo determinar un token recibido válido.");
-        bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido o el monto es 0.");
+        bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido.");
         return;
     }
 
-    console.log(`✅ Token recibido correctamente: ${receivedTokenMint} (${receivedAmount} Tokens)`);
+    console.log(`✅ Token recibido correctamente: ${receivedTokenMint}`);
 
     // ✅ Obtener información del token
     const swapTokenData = getTokenInfo(receivedTokenMint);
@@ -1455,7 +1413,6 @@ async function confirmBuy(chatId, swapDetails, transactionDetails) {
 
     console.log("✅ Swap confirmado correctamente. Datos guardados.");
 }
-
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
