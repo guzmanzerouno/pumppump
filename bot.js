@@ -14,6 +14,8 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const USERS_FILE = "users.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
@@ -770,8 +772,15 @@ async function getTokenDecimals(mint) {
 
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
-        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-        
+        // 🔹 Validar que el mint sea un PublicKey válido
+        if (!mint || mint.length !== 44) {
+            console.error(`❌ Error: Mint inválido: ${mint}`);
+            return null;
+        }
+
+        const mintPublicKey = new PublicKey(mint);
+        const ata = await getAssociatedTokenAddress(mintPublicKey, wallet.publicKey, false, SPL_TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+
         // 🔹 Verificar si la cuenta ya existe
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo !== null) {
@@ -781,14 +790,15 @@ async function ensureAssociatedTokenAccount(wallet, mint, connection) {
 
         console.log(`⚠️ ATA not found, creating a new one for token ${mint}...`);
 
-        // 🔹 Instrucción para crear la ATA
+        // 🔹 Crear la instrucción para la ATA
         const transaction = new Transaction().add(
             createAssociatedTokenAccountInstruction(
                 wallet.publicKey,  // Payer (quién paga la transacción)
                 ata,               // Dirección de la ATA
                 wallet.publicKey,  // Owner (propietario)
-                new PublicKey(mint), // Mint del token
-                new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") // Programa SPL Token
+                mintPublicKey,     // Mint del token
+                SPL_TOKEN_PROGRAM_ID,  // Programa SPL Token
+                ASSOCIATED_TOKEN_PROGRAM_ID // Programa de Associated Token Account
             )
         );
 
@@ -809,6 +819,9 @@ async function ensureAssociatedTokenAccount(wallet, mint, connection) {
                     console.warn(`⚠️ Rate limit exceeded. Retrying in ${delay}ms...`);
                     await new Promise(res => setTimeout(res, delay));
                     delay *= 2; // Exponential backoff
+                } else if (error.message.includes("incorrect program id")) {
+                    console.error("❌ Error: Incorrect program ID for instruction. Possible SPL Token mismatch.");
+                    return null;
                 } else {
                     console.error(`❌ Error creating ATA for ${mint}:`, error);
                     return null;
