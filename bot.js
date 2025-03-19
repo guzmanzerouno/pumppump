@@ -1058,29 +1058,29 @@ async function getSwapDetailsFromHeliusRPC(signature) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token comprado en postTokenBalances
-            let receivedToken = meta.postTokenBalances.find(token => {
-                return token.uiTokenAmount.uiAmount > 0 && token.uiTokenAmount.uiAmount !== null;
-            });
+            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
+            let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
+
+            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
+            if (!receivedToken) {
+                receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
+            }
 
             if (!receivedToken) {
                 throw new Error("❌ No valid received token found.");
             }
 
-            const receivedAmount = parseFloat(receivedToken.uiTokenAmount.uiAmountString);
-            const receivedTokenMint = receivedToken.mint;
+            // 🔹 Capturar la cantidad correcta del token comprado
+            const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
 
-            // 🔍 Buscar el token vendido en preTokenBalances
-            let soldToken = meta.preTokenBalances.find(token => {
-                return token.uiTokenAmount.uiAmount > 0 && token.mint !== receivedTokenMint;
-            });
+            // 🔹 Identificar el token vendido
+            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+            const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
 
-            let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
-            let soldTokenMint = soldToken ? soldToken.mint : "Unknown";
-
-            // 🔹 Obtener nombres y símbolos de los tokens
+            // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
             let soldTokenInfo = getTokenInfo(soldTokenMint);
-            let receivedTokenInfo = getTokenInfo(receivedTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
 
             const soldTokenName = soldTokenInfo?.name || "Unknown";
             const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
@@ -1093,15 +1093,15 @@ async function getSwapDetailsFromHeliusRPC(signature) {
 
             const solBefore = preBalances[0] / 1e9;
             const solAfter = postBalances[0] / 1e9;
-            const inputAmount = soldTokenSymbol === "SOL" ? (solBefore - solAfter - swapFee).toFixed(6) : soldAmount.toFixed(6);
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
 
             return {
                 inputAmount: inputAmount,
                 soldAmount: soldAmount,
-                receivedAmount: receivedAmount.toFixed(6),
+                receivedAmount: receivedAmount,  // ✅ Ahora la cantidad correcta del token comprado
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
-                receivedTokenMint: receivedTokenMint,
+                receivedTokenMint: receivedToken.mint,
                 soldTokenName: soldTokenName,
                 soldTokenSymbol: soldTokenSymbol,
                 receivedTokenName: receivedTokenName,
