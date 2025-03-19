@@ -1375,10 +1375,15 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"}`);
 
-    // ✅ Obtener saldo antes y después del swap
+    // ✅ Obtener saldo antes del swap
     let balanceBefore = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance antes del swap: ${balanceBefore}`);
 
+    // ✅ Esperar un tiempo para asegurar que la blockchain se actualice
+    console.log("⏳ Esperando 8 segundos para obtener balance después del swap...");
+    await new Promise(resolve => setTimeout(resolve, 8000));
+
+    // ✅ Obtener saldo después del swap
     let balanceAfter = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance después del swap: ${balanceAfter}`);
 
@@ -1396,7 +1401,7 @@ async function confirmBuy(chatId, swapDetails) {
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Usa la cantidad correcta
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Ahora usa la cantidad correcta
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
