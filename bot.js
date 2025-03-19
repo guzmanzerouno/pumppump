@@ -1345,8 +1345,6 @@ bot.on("callback_query", async (query) => {
 
 async function confirmBuy(chatId, swapDetails) {
     const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);
-
-    // ✅ Obtener los decimales del token para convertir correctamente la cantidad recibida
     const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
 
     // ✅ Buscar el balance final del token recibido en postTokenBalances
