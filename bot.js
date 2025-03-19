@@ -1349,25 +1349,13 @@ bot.on("callback_query", async (query) => {
 async function confirmBuy(chatId, swapDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
-    let receivedTokenMint = swapDetails.receivedTokenMint;
-    
-    // ✅ Buscar el token correcto en `postTokenBalances`
-    if (!receivedTokenMint || receivedTokenMint.length < 32) {
-        console.log("🔄 Buscando token recibido en postTokenBalances...");
-        
-        if (swapDetails.postTokenBalances) {
-            for (const balance of swapDetails.postTokenBalances) {
-                // Evitamos elegir el token que vendimos
-                if (balance.mint !== swapDetails.soldTokenMint) {
-                    receivedTokenMint = balance.mint;
-                    console.log(`✅ Token recibido identificado: ${receivedTokenMint}`);
-                    break;
-                }
-            }
-        }
-    }
+    // ✅ Extraer directamente la cantidad de tokens recibidos
+    let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
 
-    // ✅ Verificar si `receivedTokenMint` es válido
+    // ✅ Determinar el token recibido de manera correcta
+    let receivedTokenMint = swapDetails.receivedTokenMint;
+
+    // ✅ Verificar que el token es válido
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
         console.error("❌ Error: No se pudo determinar un token recibido válido.");
         bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido.");
@@ -1382,30 +1370,7 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"} (${receivedTokenMint})`);
 
-    // ✅ Obtener saldo antes del swap
-    console.log(`🔄 Consultando balance **antes** del swap para ${receivedTokenMint}...`);
-    let balanceBefore = await getTokenBalance(chatId, receivedTokenMint);
-    console.log(`✅ Balance antes del swap: ${balanceBefore}`);
-
-    // ✅ Esperamos para que Solana actualice el saldo
-    console.log("⏳ Esperando 2 segundos antes de obtener balance después del swap...");
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // ✅ Obtener saldo después del swap
-    console.log(`🔄 Consultando balance **después** del swap para ${receivedTokenMint}...`);
-    let balanceAfter = await getTokenBalance(chatId, receivedTokenMint);
-    console.log(`✅ Balance después del swap: ${balanceAfter}`);
-
-    // ✅ Calcular los tokens obtenidos
-    let receivedAmount = balanceAfter - balanceBefore;
-
-    if (isNaN(receivedAmount) || receivedAmount < 0) {
-        console.warn("⚠️ Advertencia: No se pudo calcular correctamente la cantidad de tokens recibidos.");
-        receivedAmount = 0;
-    }
-
-    console.log(`✅ Tokens obtenidos: ${receivedAmount}`);
-
+    // ✅ Formatear correctamente el resultado final
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
@@ -1445,6 +1410,8 @@ async function confirmBuy(chatId, swapDetails) {
         "SOL before swap": `${swapDetails.solBefore} SOL`,
         "SOL after swap": `${swapDetails.solAfter} SOL`
     });
+
+    console.log("✅ Swap confirmado correctamente. Datos guardados.");
 }
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
