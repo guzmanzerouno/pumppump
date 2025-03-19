@@ -768,12 +768,11 @@ async function getTokenDecimals(mint) {
     }
 }
 
-// 🔹 Función mejorada para verificar y crear la ATA con backoff exponencial
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
         const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-
-        // 🔹 Verificar si la cuenta ya existe en la blockchain
+        
+        // 🔹 Verificar si la cuenta ya existe
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo !== null) {
             console.log(`✅ ATA already exists for ${mint}: ${ata.toBase58()}`);
@@ -782,43 +781,46 @@ async function ensureAssociatedTokenAccount(wallet, mint, connection) {
 
         console.log(`⚠️ ATA not found, creating a new one for token ${mint}...`);
 
-        // 🔹 Crear la instrucción para la ATA
+        // 🔹 Instrucción para crear la ATA
         const transaction = new Transaction().add(
             createAssociatedTokenAccountInstruction(
                 wallet.publicKey,  // Payer (quién paga la transacción)
                 ata,               // Dirección de la ATA
                 wallet.publicKey,  // Owner (propietario)
-                new PublicKey(mint) // Mint del token
+                new PublicKey(mint), // Mint del token
+                new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") // Programa SPL Token
             )
         );
 
-        let retries = 0;
-        let delay = 500;
-        const maxRetries = 5;
+        let attempts = 0;
+        const maxAttempts = 5;
+        let delay = 500; // Tiempo inicial de espera (en ms)
 
-        while (retries < maxRetries) {
+        while (attempts < maxAttempts) {
             try {
-                // 🔹 Intentar enviar la transacción
+                // 🔹 Enviar transacción y esperar confirmación
                 const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+
                 console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
                 return ata;
             } catch (error) {
-                if (error.message.includes("429 Too Many Requests")) {
-                    console.warn(`⚠️ RPC Rate Limit reached. Retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    delay *= 2; // Aumenta el tiempo de espera exponencialmente
+                // 🔹 Manejo de errores específicos
+                if (error.message.includes("Too Many Requests")) {
+                    console.warn(`⚠️ Rate limit exceeded. Retrying in ${delay}ms...`);
+                    await new Promise(res => setTimeout(res, delay));
+                    delay *= 2; // Exponential backoff
                 } else {
                     console.error(`❌ Error creating ATA for ${mint}:`, error);
                     return null;
                 }
             }
-            retries++;
+            attempts++;
         }
 
-        console.error(`❌ Failed to create ATA for ${mint} after ${maxRetries} attempts.`);
+        console.error(`❌ Failed to create ATA for ${mint} after ${maxAttempts} attempts.`);
         return null;
     } catch (error) {
-        console.error(`❌ Unexpected error creating ATA for ${mint}:`, error);
+        console.error(`❌ Critical error in ensureAssociatedTokenAccount for ${mint}:`, error);
         return null;
     }
 }
