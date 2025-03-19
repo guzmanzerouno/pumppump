@@ -1262,9 +1262,8 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmSell(chatId, sellDetails, soldAmount, mint) {
-    // ✅ Usar el mint original para obtener el símbolo correcto
-    let sellTokenData = getTokenInfo(mint);
+async function confirmSell(chatId, sellDetails, soldAmount) {
+    let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
     let tokenSymbol = sellTokenData?.symbol || "Unknown";
 
     const sellMessage = `✅ *Sell completed successfully*\n` +
@@ -1273,7 +1272,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, mint) {
         `💰 *Sold:* ${soldAmount} Tokens\n` +
         `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
         `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-        `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${mint}\`\n` +
+        `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
         `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
         `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
@@ -1288,7 +1287,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, mint) {
         "Got": `${sellDetails.inputAmount} SOL`,
         "Sell Fee": `${sellDetails.swapFee} SOL`,
         "Sold Token": tokenSymbol,
-        "Sold Token Address": mint, // ✅ Guardamos el mint correcto del token vendido
+        "Sold Token Address": sellDetails.receivedTokenMint,
         "Wallet": sellDetails.walletAddress,
         "SOL before sell": `${sellDetails.solBefore} SOL`,
         "SOL after sell": `${sellDetails.solAfter} SOL`
