@@ -1267,7 +1267,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     let tokenSymbol = sellTokenData?.symbol || "Unknown";
 
     const sellMessage = `✅ *Sell completed successfully*\n` +
-        `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
+        `${escapeMarkdown(swapTokenData.symbol || "Unknown")}*/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
         `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
@@ -1282,7 +1282,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     // 🔥 Guardar en swaps.json
     saveSwap(chatId, "Sell", {
         "Sell completed successfully": true,
-        "Pair": `${tokenSymbol}/SOL`,
+        "Pair": `${swapTokenData.symbol || "Unknown"}/SOL`,
         "Sold": `${soldAmount} Tokens`,
         "Got": `${sellDetails.inputAmount} SOL`,
         "Sell Fee": `${sellDetails.swapFee} SOL`,
