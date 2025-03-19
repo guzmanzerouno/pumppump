@@ -1059,26 +1059,29 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token comprado en postTokenBalances usando `expectedMint`
+            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
             let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
 
+            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
             if (!receivedToken) {
-                throw new Error(`❌ Token ${expectedMint} not found in postTokenBalances.`);
+                receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
+            }
+
+            if (!receivedToken) {
+                throw new Error("❌ No valid received token found.");
             }
 
             // 🔹 Capturar la cantidad correcta del token comprado
-            const receivedAmount = parseFloat(receivedToken.uiTokenAmount.uiAmountString);
-            const receivedTokenMint = receivedToken.mint;
+            const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
 
-            // 🔍 Buscar el token vendido en preTokenBalances (cualquier token que no sea el comprado)
-            let soldToken = meta.preTokenBalances.find(token => token.mint !== expectedMint);
-
-            let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
-            let soldTokenMint = soldToken ? soldToken.mint : "Unknown";
+            // 🔹 Identificar el token vendido
+            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+            const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
 
             // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
             let soldTokenInfo = getTokenInfo(soldTokenMint);
-            let receivedTokenInfo = getTokenInfo(receivedTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
 
             const soldTokenName = soldTokenInfo?.name || "Unknown";
             const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
@@ -1095,11 +1098,11 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
 
             return {
                 inputAmount: inputAmount,
-                soldAmount: soldAmount.toFixed(6),
-                receivedAmount: receivedAmount.toFixed(6),
+                soldAmount: soldAmount,
+                receivedAmount: receivedAmount,  // ✅ Ahora la cantidad correcta del token comprado
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
-                receivedTokenMint: receivedTokenMint,
+                receivedTokenMint: receivedToken.mint,
                 soldTokenName: soldTokenName,
                 soldTokenSymbol: soldTokenSymbol,
                 receivedTokenName: receivedTokenName,
@@ -1151,7 +1154,7 @@ bot.on("callback_query", async (query) => {
 
     if (data.startsWith("sell_")) {
         const parts = data.split("_");
-        const mint = parts[1];
+        const mint = parts[1];  // 🔥 Token que se está vendiendo
         const sellType = parts[2];
 
         console.log(`🔍 Debug - User before selling:`, JSON.stringify(users[chatId], null, 2));
@@ -1203,7 +1206,7 @@ bot.on("callback_query", async (query) => {
             // 🔹 Ejecutar venta con reintento progresivo
             let attempts = 0;
             let txSignature = null;
-            let delayBetweenAttempts = 3000; // Inicialmente 5s
+            let delayBetweenAttempts = 3000; // Inicialmente 3s
 
             while (attempts < 3 && !txSignature) {
                 attempts++;
@@ -1239,7 +1242,8 @@ bot.on("callback_query", async (query) => {
             while (attempt < maxAttempts && !sellDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
-                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature);
+                
+                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, mint); // 🔥 PASANDO EL MINT
 
                 if (!sellDetails) {
                     console.log(`❌ Error retrieving swap details (Attempt ${attempt}): No transaction details found.`);
@@ -1318,7 +1322,7 @@ bot.on("callback_query", async (query) => {
 
     if (data.startsWith("buy_")) {
         const parts = data.split("_");
-        const mint = parts[1];
+        const mint = parts[1]; // Token que se va a comprar
         const amountSOL = parseFloat(parts[2]);
 
         if (!users[chatId] || !users[chatId].privateKey) {
@@ -1326,7 +1330,7 @@ bot.on("callback_query", async (query) => {
             return;
         }
 
-        bot.sendMessage(chatId, `🛒 Processing purchase of ${amountSOL} SOL for ${mint}...`);
+        bot.sendMessage(chatId, `🛒 Attempting to buy *${amountSOL} SOL* worth of *${mint}*...`, { parse_mode: "Markdown" });
 
         try {
             const txSignature = await buyToken(chatId, mint, amountSOL);
@@ -1347,13 +1351,13 @@ bot.on("callback_query", async (query) => {
             let swapDetails = null;
             let attempt = 0;
             const maxAttempts = 5;
-            let delay = 3000; // Iniciar con 5 segundos
+            let delay = 3000; // Iniciar con 3 segundos
 
             while (attempt < maxAttempts && !swapDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius: ${txSignature} (Attempt ${attempt})`);
-                
-                swapDetails = await getSwapDetailsFromHeliusRPC(txSignature); // 🔥 Ahora usa Helius
+
+                swapDetails = await getSwapDetailsFromHeliusRPC(txSignature, mint); // 🔥 PASANDO EL MINT
 
                 if (!swapDetails) {
                     console.log(`❌ Attempt ${attempt}: No transaction details found. Retrying in ${delay / 1000} sec...`);
@@ -1371,7 +1375,7 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // ✅ Llamar a confirmBuy() para manejar la conversión y el mensaje
+            // ✅ Llamar a confirmBuy() para manejar la conversión y el mensaje final
             await confirmBuy(chatId, swapDetails);
 
         } catch (error) {
