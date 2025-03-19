@@ -1262,8 +1262,9 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmSell(chatId, sellDetails, soldAmount) {
-    let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
+async function confirmSell(chatId, sellDetails, soldAmount, mint) {
+    // ✅ Usar el mint original para obtener el símbolo correcto
+    let sellTokenData = getTokenInfo(mint);
     let tokenSymbol = sellTokenData?.symbol || "Unknown";
 
     const sellMessage = `✅ *Sell completed successfully*\n` +
@@ -1272,7 +1273,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         `💰 *Sold:* ${soldAmount} Tokens\n` +
         `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
         `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-        `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
+        `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${mint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
         `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
         `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
@@ -1287,7 +1288,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         "Got": `${sellDetails.inputAmount} SOL`,
         "Sell Fee": `${sellDetails.swapFee} SOL`,
         "Sold Token": tokenSymbol,
-        "Sold Token Address": sellDetails.receivedTokenMint,
+        "Sold Token Address": mint, // ✅ Guardamos el mint correcto del token vendido
         "Wallet": sellDetails.walletAddress,
         "SOL before sell": `${sellDetails.solBefore} SOL`,
         "SOL after sell": `${sellDetails.solAfter} SOL`
@@ -1330,8 +1331,8 @@ bot.on("callback_query", async (query) => {
                 bot.sendMessage(chatId, `⚠️ Swap details could not be retrieved.`, { parse_mode: "Markdown", disable_web_page_preview: true });
                 return;
             }
-
-            // ✅ CAMBIO: Ahora llamamos a confirmBuy() en lugar de repetir el código
+            
+            // ✅ Llamar a confirmBuy() para manejar la conversión y el mensaje
             await confirmBuy(chatId, swapDetails);
 
         } catch (error) {
@@ -1345,11 +1346,16 @@ bot.on("callback_query", async (query) => {
 
 async function confirmBuy(chatId, swapDetails) {
     const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);
+
+    // ✅ Obtener los decimales del token para convertir correctamente la cantidad recibida
+    const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
+    const receivedAmount = swapDetails.receivedAmount / Math.pow(10, tokenDecimals);
+
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${swapDetails.receivedAmount} Tokens\n` +
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Se usa el valor convertido
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
@@ -1376,7 +1382,7 @@ async function confirmBuy(chatId, swapDetails) {
         "Swap completed successfully": true,
         "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
         "Spent": `${swapDetails.inputAmount} SOL`,
-        "Got": `${swapDetails.receivedAmount} Tokens`,
+        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // ✅ Se almacena la cantidad correcta
         "Swap Fee": `${swapDetails.swapFee} SOL`,
         "Received Token": swapTokenData.symbol || "Unknown",
         "Received Token Address": swapDetails.receivedTokenMint,
