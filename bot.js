@@ -1348,13 +1348,23 @@ async function confirmBuy(chatId, swapDetails) {
 
     // ✅ Obtener los decimales del token para convertir correctamente la cantidad recibida
     const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
-    const receivedAmount = swapDetails.receivedAmount / Math.pow(10, tokenDecimals);
+
+    // ✅ Buscar el balance final del token recibido en postTokenBalances
+    let receivedAmount = 0;
+    if (swapDetails.postTokenBalances) {
+        const tokenBalance = swapDetails.postTokenBalances.find(
+            (balance) => balance.mint === swapDetails.receivedTokenMint
+        );
+        if (tokenBalance) {
+            receivedAmount = tokenBalance.uiTokenAmount.uiAmount; // ✅ Usamos la cantidad correcta
+        }
+    }
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Se usa el valor convertido
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Ahora usa el valor correcto
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
@@ -1381,7 +1391,7 @@ async function confirmBuy(chatId, swapDetails) {
         "Swap completed successfully": true,
         "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
         "Spent": `${swapDetails.inputAmount} SOL`,
-        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // ✅ Se almacena la cantidad correcta
+        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // ✅ Ahora almacena el valor correcto
         "Swap Fee": `${swapDetails.swapFee} SOL`,
         "Received Token": swapTokenData.symbol || "Unknown",
         "Received Token Address": swapDetails.receivedTokenMint,
