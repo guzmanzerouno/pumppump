@@ -1349,24 +1349,28 @@ bot.on("callback_query", async (query) => {
 async function confirmBuy(chatId, swapDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
-    // ✅ Intentamos obtener la dirección del token comprado desde receivedTokenMint
     let receivedTokenMint = swapDetails.receivedTokenMint;
-
-    // ✅ Si `receivedTokenMint` está vacío o es incorrecto, intentamos recuperarlo de `postTokenBalances`
+    
+    // ✅ Buscar el token correcto en `postTokenBalances`
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
+        console.log("🔄 Buscando token recibido en postTokenBalances...");
+        
         if (swapDetails.postTokenBalances) {
-            const tokenBalance = swapDetails.postTokenBalances.find(balance => balance.accountIndex !== 0);
-            if (tokenBalance) {
-                receivedTokenMint = tokenBalance.mint;
-                console.log(`🔄 Token corregido desde postTokenBalances: ${receivedTokenMint}`);
+            for (const balance of swapDetails.postTokenBalances) {
+                // Evitamos elegir el token que vendimos
+                if (balance.mint !== swapDetails.soldTokenMint) {
+                    receivedTokenMint = balance.mint;
+                    console.log(`✅ Token recibido identificado: ${receivedTokenMint}`);
+                    break;
+                }
             }
         }
     }
 
-    // ✅ Verificar si la dirección del token es válida antes de continuar
+    // ✅ Verificar si `receivedTokenMint` es válido
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
-        console.error("❌ Error: No se pudo determinar una dirección válida para el token recibido.");
-        bot.sendMessage(chatId, "⚠️ Error: No se pudo obtener una dirección válida para el token recibido.");
+        console.error("❌ Error: No se pudo determinar un token recibido válido.");
+        bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido.");
         return;
     }
 
@@ -1378,24 +1382,23 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"} (${receivedTokenMint})`);
 
-    // ✅ Obtener saldo **antes** del swap (antes de ejecutar el swap)
+    // ✅ Obtener saldo antes del swap
     console.log(`🔄 Consultando balance **antes** del swap para ${receivedTokenMint}...`);
     let balanceBefore = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance antes del swap: ${balanceBefore}`);
 
-    // ✅ Esperamos 2 segundos para asegurar que la blockchain se actualice
+    // ✅ Esperamos para que Solana actualice el saldo
     console.log("⏳ Esperando 2 segundos antes de obtener balance después del swap...");
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // ✅ Obtener saldo **después** del swap
+    // ✅ Obtener saldo después del swap
     console.log(`🔄 Consultando balance **después** del swap para ${receivedTokenMint}...`);
     let balanceAfter = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance después del swap: ${balanceAfter}`);
 
-    // ✅ Calcular cuántos tokens se recibieron correctamente
+    // ✅ Calcular los tokens obtenidos
     let receivedAmount = balanceAfter - balanceBefore;
 
-    // ✅ Asegurar que `receivedAmount` sea un número válido antes de usar `.toFixed()`
     if (isNaN(receivedAmount) || receivedAmount < 0) {
         console.warn("⚠️ Advertencia: No se pudo calcular correctamente la cantidad de tokens recibidos.");
         receivedAmount = 0;
@@ -1407,7 +1410,7 @@ async function confirmBuy(chatId, swapDetails) {
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Usa la cantidad correcta
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
