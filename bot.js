@@ -1278,8 +1278,8 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
     let tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
 
-    // ✅ Obtener el monto real recibido en SOL, asegurando que sea un número
-    let gotSol = parseFloat(sellDetails.receivedAmount) || (parseFloat(sellDetails.solAfter) - parseFloat(sellDetails.solBefore)).toFixed(6);
+    // ✅ Obtener el monto real recibido en SOL, asegurando que sea un número correcto
+    let gotSol = parseFloat(sellDetails.receivedAmount) || parseFloat((sellDetails.solAfter - sellDetails.solBefore).toFixed(6));
 
     // ✅ Verificar si `sellDetails.receivedTokenMint` es válido antes de mostrarlo
     let receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
@@ -1289,7 +1289,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
-        `💰 *Got:* ${gotSol} SOL\n` +
+        `💰 *Got:* ${gotSol.toFixed(9)} SOL\n` +  // 🔥 Fix final: muestra correctamente sin notación científica
         `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
         `📌 *Sold Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
@@ -1304,7 +1304,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         "Sell completed successfully": true,
         "Pair": `${tokenSymbol}/SOL`,
         "Sold": `${soldAmount} Tokens`,
-        "Got": `${gotSol} SOL`,
+        "Got": `${gotSol.toFixed(9)} SOL`,  // 🔥 Ahora se guarda correctamente formateado
         "Sell Fee": `${sellDetails.swapFee} SOL`,
         "Sold Token": tokenSymbol,
         "Sold Token Address": receivedTokenMint,
