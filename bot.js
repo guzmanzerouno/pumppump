@@ -768,7 +768,7 @@ async function getTokenDecimals(mint) {
     }
 }
 
-// 🔹 Función para verificar y crear la ATA si no existe
+// 🔹 Función mejorada para verificar y crear la ATA con backoff exponencial
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
         const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
@@ -792,14 +792,33 @@ async function ensureAssociatedTokenAccount(wallet, mint, connection) {
             )
         );
 
-        // 🔹 Firmar y enviar la transacción
-        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+        let retries = 0;
+        let delay = 500;
+        const maxRetries = 5;
 
-        console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
+        while (retries < maxRetries) {
+            try {
+                // 🔹 Intentar enviar la transacción
+                const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+                console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
+                return ata;
+            } catch (error) {
+                if (error.message.includes("429 Too Many Requests")) {
+                    console.warn(`⚠️ RPC Rate Limit reached. Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Aumenta el tiempo de espera exponencialmente
+                } else {
+                    console.error(`❌ Error creating ATA for ${mint}:`, error);
+                    return null;
+                }
+            }
+            retries++;
+        }
 
-        return ata;
+        console.error(`❌ Failed to create ATA for ${mint} after ${maxRetries} attempts.`);
+        return null;
     } catch (error) {
-        console.error(`❌ Error creating ATA for ${mint}:`, error);
+        console.error(`❌ Unexpected error creating ATA for ${mint}:`, error);
         return null;
     }
 }
@@ -1346,23 +1365,31 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails) {
+async function confirmBuy(chatId, swapDetails, transactionDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
-    // ✅ Extraer directamente la cantidad de tokens recibidos
-    let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
-
-    // ✅ Determinar el token recibido de manera correcta
+    // ✅ Extraer correctamente la cantidad de tokens recibidos desde postTokenBalances
+    let receivedAmount = 0;
     let receivedTokenMint = swapDetails.receivedTokenMint;
+    let walletAddress = swapDetails.walletAddress;
+    
+    if (transactionDetails && transactionDetails.meta && transactionDetails.meta.postTokenBalances) {
+        const tokenBalance = transactionDetails.meta.postTokenBalances.find(balance => 
+            balance.owner === walletAddress && balance.mint === receivedTokenMint
+        );
+        if (tokenBalance) {
+            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString) || 0;
+        }
+    }
 
     // ✅ Verificar que el token es válido
-    if (!receivedTokenMint || receivedTokenMint.length < 32) {
+    if (!receivedTokenMint || receivedAmount === 0) {
         console.error("❌ Error: No se pudo determinar un token recibido válido.");
-        bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido.");
+        bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido o el monto es 0.");
         return;
     }
 
-    console.log(`✅ Token recibido correctamente: ${receivedTokenMint}`);
+    console.log(`✅ Token recibido correctamente: ${receivedTokenMint} (${receivedAmount} Tokens)`);
 
     // ✅ Obtener información del token
     const swapTokenData = getTokenInfo(receivedTokenMint);
@@ -1413,6 +1440,7 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log("✅ Swap confirmado correctamente. Datos guardados.");
 }
+
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
