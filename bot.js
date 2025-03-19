@@ -1347,34 +1347,58 @@ bot.on("callback_query", async (query) => {
 });
 
 async function confirmBuy(chatId, swapDetails) {
-    const swapTokenData = getTokenInfo(swapDetails.receivedTokenMint);
-    const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
+    console.log("🔍 Validando swapDetails:", swapDetails);
 
-    // ✅ Buscar el balance final del token recibido en postTokenBalances
-    let receivedAmount = 0;  // Fallback inicial
+    // ✅ Intentamos obtener la dirección del token comprado
+    let receivedTokenMint = swapDetails.receivedTokenMint;
 
-    if (swapDetails.postTokenBalances) {
-        const tokenBalance = swapDetails.postTokenBalances.find(
-            (balance) => balance.mint === swapDetails.receivedTokenMint
-        );
-        if (tokenBalance && tokenBalance.uiTokenAmount) {
-            let amountParsed = parseFloat(tokenBalance.uiTokenAmount.uiAmountString);
-            receivedAmount = isNaN(amountParsed) ? 0 : amountParsed; // ✅ Asegura que siempre sea un número
+    // ✅ Si no está presente, intentamos encontrarlo en postTokenBalances
+    if (!receivedTokenMint && swapDetails.postTokenBalances) {
+        const tokenBalance = swapDetails.postTokenBalances.find((balance) => balance.accountIndex !== 0);
+        if (tokenBalance) {
+            receivedTokenMint = tokenBalance.mint;
         }
     }
 
-    // ✅ Si sigue sin ser un número, asignamos 0 como default
-    if (typeof receivedAmount !== "number" || isNaN(receivedAmount)) {
+    // ✅ Verificar si la dirección es válida
+    if (!receivedTokenMint) {
+        console.error("❌ Error: No se pudo determinar receivedTokenMint.");
+        bot.sendMessage(chatId, "⚠️ Error: No se pudo obtener la dirección del token recibido.");
+        return;
+    }
+
+    console.log(`✅ Token recibido: ${receivedTokenMint}`);
+
+    // ✅ Obtener información del token
+    const swapTokenData = getTokenInfo(receivedTokenMint);
+    const tokenDecimals = await getTokenDecimals(receivedTokenMint);
+
+    console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"}`);
+
+    // ✅ Obtener saldo antes y después del swap
+    let balanceBefore = await getTokenBalance(chatId, receivedTokenMint);
+    console.log(`✅ Balance antes del swap: ${balanceBefore}`);
+
+    let balanceAfter = await getTokenBalance(chatId, receivedTokenMint);
+    console.log(`✅ Balance después del swap: ${balanceAfter}`);
+
+    // ✅ Calcular cuántos tokens se recibieron
+    let receivedAmount = balanceAfter - balanceBefore;
+
+    // ✅ Si el resultado es inválido, asignamos 0
+    if (isNaN(receivedAmount) || receivedAmount < 0) {
         receivedAmount = 0;
     }
+
+    console.log(`✅ Tokens obtenidos: ${receivedAmount}`);
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Ahora no fallará con `.toFixed()`
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Usa la cantidad correcta
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-        `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` +
+        `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
         `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
@@ -1384,11 +1408,11 @@ async function confirmBuy(chatId, swapDetails) {
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: "💸 Sell 50%", callback_data: `sell_${swapDetails.receivedTokenMint}_50` },
-                    { text: "💯 Sell MAX", callback_data: `sell_${swapDetails.receivedTokenMint}_100` }
+                    { text: "💸 Sell 50%", callback_data: `sell_${receivedTokenMint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
                 ],
                 [
-                    { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${swapDetails.receivedTokenMint}` }
+                    { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
                 ]
             ]
         }
@@ -1402,7 +1426,7 @@ async function confirmBuy(chatId, swapDetails) {
         "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`, 
         "Swap Fee": `${swapDetails.swapFee} SOL`,
         "Received Token": swapTokenData.symbol || "Unknown",
-        "Received Token Address": swapDetails.receivedTokenMint,
+        "Received Token Address": receivedTokenMint,
         "Wallet": swapDetails.walletAddress,
         "SOL before swap": `${swapDetails.solBefore} SOL`,
         "SOL after swap": `${swapDetails.solAfter} SOL`
