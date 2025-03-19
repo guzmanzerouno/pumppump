@@ -1266,11 +1266,14 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
     let tokenSymbol = sellTokenData?.symbol || "Unknown";
 
+    // ✅ Obtener el monto real recibido en SOL
+    let gotSol = sellDetails.outputAmount || (sellDetails.solAfter - sellDetails.solBefore).toFixed(6);
+    
     const sellMessage = `✅ *Sell completed successfully*\n` +
         `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
-        `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
+        `💰 *Got:* ${gotSol} SOL\n` +
         `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
         `📌 *Sold Token ${escapeMarkdown(tokenSymbol)}:* \`${sellDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
@@ -1284,7 +1287,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         "Sell completed successfully": true,
         "Pair": `${tokenSymbol}/SOL`,
         "Sold": `${soldAmount} Tokens`,
-        "Got": `${sellDetails.inputAmount} SOL`,
+        "Got": `${gotSol} SOL`,
         "Sell Fee": `${sellDetails.swapFee} SOL`,
         "Sold Token": tokenSymbol,
         "Sold Token Address": sellDetails.receivedTokenMint,
@@ -1348,13 +1351,14 @@ async function confirmBuy(chatId, swapDetails) {
     const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
 
     // ✅ Buscar el balance final del token recibido en postTokenBalances
-    let receivedAmount = 0;
+    let receivedAmount = swapDetails.receivedAmount || 0; // Fallback si `postTokenBalances` no tiene datos
+
     if (swapDetails.postTokenBalances) {
         const tokenBalance = swapDetails.postTokenBalances.find(
             (balance) => balance.mint === swapDetails.receivedTokenMint
         );
         if (tokenBalance && tokenBalance.uiTokenAmount) {
-            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString); // ✅ Usa uiAmountString para precisión
+            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString);
         }
     }
 
@@ -1362,7 +1366,7 @@ async function confirmBuy(chatId, swapDetails) {
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  // ✅ Usa el valor correcto
+        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${swapDetails.receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
@@ -1389,7 +1393,7 @@ async function confirmBuy(chatId, swapDetails) {
         "Swap completed successfully": true,
         "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
         "Spent": `${swapDetails.inputAmount} SOL`,
-        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // ✅ Usa el valor correcto
+        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`, 
         "Swap Fee": `${swapDetails.swapFee} SOL`,
         "Received Token": swapTokenData.symbol || "Unknown",
         "Received Token Address": swapDetails.receivedTokenMint,
