@@ -1378,22 +1378,24 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"} (${receivedTokenMint})`);
 
-    // ✅ Obtener saldo antes del swap
+    // ✅ Obtener saldo **antes** del swap (antes de ejecutar el swap)
+    console.log(`🔄 Consultando balance **antes** del swap para ${receivedTokenMint}...`);
     let balanceBefore = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance antes del swap: ${balanceBefore}`);
 
-    // ✅ Esperar un tiempo para asegurar que la blockchain se actualice
-    console.log("⏳ Esperando 5 segundos para obtener balance después del swap...");
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // ✅ Esperamos 2 segundos para asegurar que la blockchain se actualice
+    console.log("⏳ Esperando 2 segundos antes de obtener balance después del swap...");
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // ✅ Obtener saldo después del swap
+    // ✅ Obtener saldo **después** del swap
+    console.log(`🔄 Consultando balance **después** del swap para ${receivedTokenMint}...`);
     let balanceAfter = await getTokenBalance(chatId, receivedTokenMint);
     console.log(`✅ Balance después del swap: ${balanceAfter}`);
 
-    // ✅ Calcular cuántos tokens se recibieron
+    // ✅ Calcular cuántos tokens se recibieron correctamente
     let receivedAmount = balanceAfter - balanceBefore;
 
-    // ✅ Asegurar que receivedAmount sea un número válido antes de usar .toFixed()
+    // ✅ Asegurar que `receivedAmount` sea un número válido antes de usar `.toFixed()`
     if (isNaN(receivedAmount) || receivedAmount < 0) {
         console.warn("⚠️ Advertencia: No se pudo calcular correctamente la cantidad de tokens recibidos.");
         receivedAmount = 0;
