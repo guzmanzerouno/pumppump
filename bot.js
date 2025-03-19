@@ -1351,19 +1351,22 @@ async function confirmBuy(chatId, swapDetails) {
     const tokenDecimals = await getTokenDecimals(swapDetails.receivedTokenMint);
 
     // ✅ Buscar el balance final del token recibido en postTokenBalances
-    let receivedAmount = swapDetails.receivedAmount || 0; // Fallback si `postTokenBalances` no tiene datos
+    let receivedAmount = 0;  // Fallback inicial
 
     if (swapDetails.postTokenBalances) {
         const tokenBalance = swapDetails.postTokenBalances.find(
             (balance) => balance.mint === swapDetails.receivedTokenMint
         );
         if (tokenBalance && tokenBalance.uiTokenAmount) {
-            receivedAmount = parseFloat(tokenBalance.uiTokenAmount.uiAmountString) || 0;  // ✅ Asegura que sea un número
+            let amountParsed = parseFloat(tokenBalance.uiTokenAmount.uiAmountString);
+            receivedAmount = isNaN(amountParsed) ? 0 : amountParsed; // ✅ Asegura que siempre sea un número
         }
     }
 
-    // ✅ Evitar error si receivedAmount no es un número
-    receivedAmount = isNaN(receivedAmount) ? 0 : receivedAmount;
+    // ✅ Si sigue sin ser un número, asignamos 0 como default
+    if (typeof receivedAmount !== "number" || isNaN(receivedAmount)) {
+        receivedAmount = 0;
+    }
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
