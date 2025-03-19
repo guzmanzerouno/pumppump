@@ -1264,10 +1264,13 @@ bot.on("callback_query", async (query) => {
 
 async function confirmSell(chatId, sellDetails, soldAmount) {
     let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint);
-    let tokenSymbol = sellTokenData?.symbol || "Unknown";
+    
+    // 🔹 Corregimos el problema asegurando que el token tenga nombre y símbolo válidos
+    let tokenSymbol = sellTokenData?.symbol && sellTokenData.symbol !== "N/A" ? sellTokenData.symbol : "Unknown";
+    let tokenName = sellTokenData?.name && sellTokenData.name !== "N/A" ? sellTokenData.name : "Unknown";
 
     const sellMessage = `✅ *Sell completed successfully*\n` +
-        `${escapeMarkdown(swapTokenData.symbol || "Unknown")}*/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
+        `*${escapeMarkdown(tokenSymbol)}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
         `💰 *Got:* ${sellDetails.inputAmount} SOL\n` +
@@ -1282,7 +1285,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     // 🔥 Guardar en swaps.json
     saveSwap(chatId, "Sell", {
         "Sell completed successfully": true,
-        "Pair": `${swapTokenData.symbol || "Unknown"}/SOL`,
+        "Pair": `${tokenSymbol}/SOL`, // 🔹 Ahora siempre tendrá un valor correcto
         "Sold": `${soldAmount} Tokens`,
         "Got": `${sellDetails.inputAmount} SOL`,
         "Sell Fee": `${sellDetails.swapFee} SOL`,
