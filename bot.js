@@ -1036,7 +1036,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
         try {
             console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
 
-            const response = await axios.post("https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY", {
+            const response = await axios.post("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "getTransaction",
