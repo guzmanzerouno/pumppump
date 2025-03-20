@@ -1155,17 +1155,9 @@ function detectDexPlatform(accountKeys) {
     return "Unknown DEX";
 }
 
-// 🔹 Obtener timestamp de una transacción en EST
-async function getTransactionTimestamp(txId) {
-    try {
-        const transaction = await connection.getTransaction(txId, { commitment: "confirmed" });
-        if (!transaction || !transaction.blockTime) return "N/A";
-
-        return DateTime.fromSeconds(transaction.blockTime).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
-    } catch (error) {
-        console.error("❌ Error obteniendo timestamp de la transacción:", error);
-        return "N/A";
-    }
+// 🔹 Obtener timestamp en EST
+function getTimestampEST() {
+    return DateTime.now().setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 }
 
 bot.on("callback_query", async (query) => {
@@ -1359,8 +1351,6 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            const timestampEST = await getTransactionTimestamp(txSignature);
-
             bot.sendMessage(
                 chatId,
                 `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`, 
@@ -1397,7 +1387,7 @@ bot.on("callback_query", async (query) => {
             }
 
             // ✅ Llamar a confirmBuy() para manejar la conversión y el mensaje
-            await confirmBuy(chatId, swapDetails, timestampEST);
+            await confirmBuy(chatId, swapDetails);
 
         } catch (error) {
             console.error("❌ Error in purchase process:", error);
@@ -1408,7 +1398,7 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails, timestampEST)) {
+async function confirmBuy(chatId, swapDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
     // ✅ Extraer directamente la cantidad de tokens recibidos
@@ -1442,8 +1432,7 @@ async function confirmBuy(chatId, swapDetails, timestampEST)) {
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
-        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`
-        `🕒 *Timestamp:* ${timestampEST}n`;
+        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
 
     bot.sendMessage(chatId, confirmationMessage, {
         parse_mode: "Markdown",
