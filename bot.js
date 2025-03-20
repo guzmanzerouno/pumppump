@@ -5,6 +5,7 @@ import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
+import { Liquidity, Token, TokenAmount, Raydium, MAINNET_PROGRAM_ID } from "@raydium-io/raydium-sdk";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -348,6 +349,42 @@ function saveSwap(chatId, type, details) {
 //TODAS LAS FUNCIONES DE ALMACENADO DEL BOT FINISH
 
 //RAYDIUM SWAP
+//RAYDIUM SDK
+// 🔹 Función para verificar si un token tiene liquidez en Raydium
+async function isTokenTradableOnRaydium(mintAddress) {
+    try {
+        console.log(`🔍 Verificando liquidez para el token ${mintAddress} en Raydium...`);
+
+        // Obtener la lista de pools de Raydium
+        const poolInfo = await Raydium.fetchPools({ connection });
+
+        if (!poolInfo || !poolInfo.pools) {
+            console.warn("⚠️ No se pudieron obtener los pools de Raydium.");
+            return false;
+        }
+
+        // Buscar si el token existe en algún pool con liquidez
+        const tokenExists = Object.values(poolInfo.pools).some(pool =>
+            pool.baseMint.toBase58() === mintAddress || pool.quoteMint.toBase58() === mintAddress
+        );
+
+        if (tokenExists) {
+            console.log(`✅ El token ${mintAddress} tiene liquidez en Raydium.`);
+            return true;
+        } else {
+            console.log(`❌ El token ${mintAddress} no tiene liquidez en Raydium.`);
+            return false;
+        }
+    } catch (error) {
+        console.error("❌ Error verificando la liquidez en Raydium:", error);
+        return false;
+    }
+}
+
+
+
+
+//RAYDIUM SDK FINISH
 // 🔹 Función para obtener una cotización de swap en Raydium
 async function getRaydiumSwapQuote(inputMint, outputMint, amountIn) {
     try {
@@ -396,28 +433,13 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
             throw new Error("⚠️ User not registered or missing privateKey.");
         }
 
-        // 🔹 Obtener Keypair del usuario
-        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const userPublicKey = userKeypair.publicKey;
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-
-        // 🔹 Verificar si la cuenta ATA existe, si no, crearla
-        const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
-        if (!ata) {
-            console.log(`⚠️ ATA not found, waiting for creation... Retrying purchase.`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await buyToken(chatId, mint, amountSOL, attempt + 1);
+        // 🔹 Verificar si el token tiene liquidez en Raydium antes de continuar
+        const isTradable = await isTokenTradableOnRaydium(mint);
+        if (!isTradable) {
+            throw new Error(`❌ The token ${mint} has no liquidity in Raydium.`);
         }
 
-        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
-
-        // 🔹 Verificar si hay suficiente SOL en la wallet
-        const balance = await connection.getBalance(userPublicKey) / 1e9;
-        if (balance < amountSOL) {
-            throw new Error(`❌ Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
-        }
-
-        console.log("🔹 Fetching best quote from Raydium...");
+        console.log("🔹 Token verified as tradable. Fetching best quote from Raydium...");
 
         // 🔹 Obtener la mejor cotización desde Raydium
         const quoteResponse = await axios.get(`${RAYDIUM_SWAP_URL}/quote`, {
@@ -439,7 +461,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         // 🔹 Solicitar la transacción de swap a Raydium
         const swapResponse = await axios.post(`${RAYDIUM_SWAP_URL}/transaction`, {
             quote: quoteResponse.data.routes[0], // Tomar la mejor ruta disponible
-            userPublicKey: userPublicKey.toBase58(),
+            userPublicKey: user.publicKey.toBase58(),
             priorityFee: PRIORITY_FEE_SOL * 1e9 // 0.01 SOL en lamports
         });
 
@@ -488,6 +510,14 @@ async function executeRaydiumSell(chatId, mint, amount, attempt = 1) {
             throw new Error("⚠ Private key not found or user not registered.");
         }
 
+        // 🔹 Verificar si el token tiene liquidez en Raydium antes de continuar
+        const isTradable = await isTokenTradableOnRaydium(mint);
+        if (!isTradable) {
+            throw new Error(`❌ The token ${mint} has no liquidity in Raydium.`);
+        }
+
+        console.log("🔹 Token verified as tradable. Proceeding with sale...");
+
         // 🔹 Obtener Keypair del usuario
         const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
         const connection = new Connection(SOLANA_RPC_URL, "confirmed");
@@ -511,6 +541,10 @@ async function executeRaydiumSell(chatId, mint, amount, attempt = 1) {
         // 🔹 Obtener balance actual en UI units
         let balance = await getTokenBalance(chatId, mint);
         console.log(`✅ Balance found: ${balance} tokens`);
+
+        if (balance <= 0) {
+            throw new Error("❌ You do not have any tokens available to sell.");
+        }
 
         // 🔹 Convertir balance y cantidad a vender a unidades mínimas
         const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
