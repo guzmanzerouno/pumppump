@@ -1,12 +1,11 @@
-import axios from "axios";
-import WebSocket from "ws";
-import fs from "fs";
-import TelegramBot from "node-telegram-bot-api";
-import { Connection } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
-import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
-import { DateTime } from "luxon";
-import bs58 from "bs58";
+const axios = await import("axios");
+const WebSocket = await import("ws");
+const fs = await import("fs");
+const TelegramBot = await import("node-telegram-bot-api");
+const { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } = await import("@solana/web3.js");
+const { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } = await import("@solana/spl-token");
+const { DateTime } = await import("luxon");
+const bs58 = await import("bs58");
 
 // 🔹 Configuración
 const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
