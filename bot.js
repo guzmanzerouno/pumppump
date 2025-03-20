@@ -16,6 +16,7 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
@@ -1036,7 +1037,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
         try {
             console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
 
-            const response = await axios.post("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", {
+            const response = await axios.post(HELIUS_RPC_URL, {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "getTransaction",
@@ -1058,7 +1059,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token comprado en postTokenBalances (compra)
+            // 🔍 Buscar el token recibido en postTokenBalances (compra)
             let receivedToken = meta.postTokenBalances.find(token => token.owner === walletAddress);
             let receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
             let receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
