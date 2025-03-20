@@ -978,7 +978,6 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
                 ],
                 [
-                    { text: "💵 Sell 25%", callback_data: `sell_${mint}_25` },
                     { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
                     { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
                 ],
