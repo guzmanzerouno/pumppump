@@ -1028,7 +1028,7 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-async function getSwapDetailsFromHeliusRPC(signature, userWallet) {
+async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
     let retryAttempts = 0;
     let delay = 5000; // 5 segundos inicial antes de la primera consulta
 
@@ -1036,7 +1036,7 @@ async function getSwapDetailsFromHeliusRPC(signature, userWallet) {
         try {
             console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
 
-            const response = await axios.post("https://mainnet.helius-rpc.com/?api-key=TU_API_KEY", {
+            const response = await axios.post("https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY", {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "getTransaction",
@@ -1058,20 +1058,19 @@ async function getSwapDetailsFromHeliusRPC(signature, userWallet) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token comprado en postTokenBalances (solo nos importa esto en la compra)
-            let receivedToken = meta.postTokenBalances.find(token => token.owner === userWallet);
+            // 🔍 Buscar el token recibido (compra) en postTokenBalances
+            let receivedToken = meta.postTokenBalances.find(token => token.owner === walletAddress);
+            let receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
+            let receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            if (!receivedToken) {
-                throw new Error("❌ No valid received token found.");
-            }
-
-            const receivedAmount = parseFloat(receivedToken.uiTokenAmount.uiAmountString);
-            const receivedTokenMint = receivedToken.mint;
-
-            // 🔍 Buscar el token vendido (SOL u otro)
-            let soldToken = meta.preTokenBalances.find(token => token.owner === userWallet && token.mint !== receivedTokenMint);
-            let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+            // 🔍 Buscar el token vendido (venta) en preTokenBalances
+            let soldToken = meta.preTokenBalances.find(token => token.owner === walletAddress);
+            let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : 0;
             let soldTokenMint = soldToken ? soldToken.mint : "Unknown";
+
+            // 📌 Determinar si es una compra o venta
+            let isBuy = receivedAmount > 0; // Si tenemos tokens en postTokenBalances, es una compra.
+            let isSell = soldAmount > 0; // Si tenemos tokens en preTokenBalances, es una venta.
 
             // 🔹 Obtener nombres y símbolos de los tokens
             let soldTokenInfo = getTokenInfo(soldTokenMint);
@@ -1086,14 +1085,17 @@ async function getSwapDetailsFromHeliusRPC(signature, userWallet) {
             // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
             const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
+            // 📌 Calcular inputAmount (lo que se gastó) basado en SOL o token vendido
             const solBefore = preBalances[0] / 1e9;
             const solAfter = postBalances[0] / 1e9;
-            const inputAmount = soldTokenSymbol === "SOL" ? (solBefore - solAfter - swapFee).toFixed(6) : soldAmount.toFixed(6);
+            const inputAmount = isBuy ? (solBefore - solAfter - swapFee).toFixed(6) : soldAmount.toFixed(6);
 
             return {
+                isBuy: isBuy,
+                isSell: isSell,
                 inputAmount: inputAmount,
-                soldAmount: soldAmount,
-                receivedAmount: receivedAmount.toFixed(9),  // ✅ Ahora siempre muestra la cantidad exacta de tokens recibidos
+                soldAmount: soldAmount.toFixed(6),
+                receivedAmount: receivedAmount.toFixed(6),
                 swapFee: swapFee.toFixed(6),
                 soldTokenMint: soldTokenMint,
                 receivedTokenMint: receivedTokenMint,
@@ -1102,7 +1104,7 @@ async function getSwapDetailsFromHeliusRPC(signature, userWallet) {
                 receivedTokenName: receivedTokenName,
                 receivedTokenSymbol: receivedTokenSymbol,
                 dexPlatform: dexPlatform,
-                walletAddress: userWallet,
+                walletAddress: txData.transaction.message.accountKeys[0],
                 solBefore: solBefore.toFixed(3),
                 solAfter: solAfter.toFixed(3)
             };
