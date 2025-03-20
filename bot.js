@@ -1278,49 +1278,46 @@ bot.on("callback_query", async (query) => {
 });
 
 async function confirmSell(chatId, sellDetails, soldAmount) {
-    // 🔹 Obtener información del token vendido
     let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
     let tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
 
-    // ✅ Obtener el monto real recibido en SOL (ya corregido)
     let gotSol = parseFloat(sellDetails.receivedAmount).toFixed(9);
-
-    // ✅ Verificar si `sellDetails.receivedTokenMint` es válido antes de mostrarlo
     let receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
-
-    // ✅ Corregir el formato del Swap Fee a 6 decimales
     let swapFee = parseFloat(sellDetails.swapFee).toFixed(6);
 
-    // ✅ Construcción del mensaje mejorada
     const sellMessage = `✅ *Sell completed successfully*\n` +
         `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
-        `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
-        `💰 *Got:* ${gotSol} SOL\n` +  // 🔥 Ahora siempre se muestra correctamente formateado
+        `💰 *Got:* ${gotSol} SOL\n` +  
         `🔄 *Sell Fee:* ${swapFee} SOL\n` +
         `📌 *Sold Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
         `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
         `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
 
-    // 🔹 Enviar mensaje con información detallada de la venta
-    bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
+    try {
+        await bot.sendMessage(chatId, sellMessage, { parse_mode: "Markdown" });
+    } catch (error) {
+        console.error("❌ Error enviando mensaje de venta a Telegram:", error);
+    }
 
-    // 🔥 Guardar en swaps.json con validaciones mejoradas
-    saveSwap(chatId, "Sell", {
-        "Sell completed successfully": true,
-        "Pair": `${tokenSymbol}/SOL`,
-        "Sold": `${soldAmount} Tokens`,
-        "Got": `${gotSol} SOL`,  // 🔥 Ahora se guarda correctamente formateado
-        "Sell Fee": `${swapFee} SOL`,
-        "Sold Token": tokenSymbol,
-        "Sold Token Address": receivedTokenMint,
-        "Wallet": sellDetails.walletAddress,
-        "SOL before sell": `${sellDetails.solBefore} SOL`,
-        "SOL after sell": `${sellDetails.solAfter} SOL`
-    });
-
-    console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
+    try {
+        saveSwap(chatId, "Sell", {
+            "Sell completed successfully": true,
+            "Pair": `${tokenSymbol}/SOL`,
+            "Sold": `${soldAmount} Tokens`,
+            "Got": `${gotSol} SOL`,
+            "Sell Fee": `${swapFee} SOL`,
+            "Sold Token": tokenSymbol,
+            "Sold Token Address": receivedTokenMint,
+            "Wallet": sellDetails.walletAddress,
+            "SOL before sell": `${sellDetails.solBefore} SOL`,
+            "SOL after sell": `${sellDetails.solAfter} SOL`
+        });
+        console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
+    } catch (error) {
+        console.error("❌ Error guardando en swaps.json:", error);
+    }
 }
 
 bot.on("callback_query", async (query) => {
@@ -1406,18 +1403,15 @@ bot.on("callback_query", async (query) => {
 async function confirmBuy(chatId, swapDetails) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
-    // 🔹 1️⃣ Verificar que `swapDetails` sea válido antes de continuar
     if (!swapDetails || !swapDetails.receivedTokenMint || !swapDetails.inputAmount) {
         console.error("❌ Error: swapDetails inválido o incompleto.");
         bot.sendMessage(chatId, "⚠️ Error: No se pudo procesar la compra.");
         return;
     }
 
-    // 🔹 2️⃣ Extraer la cantidad de tokens recibidos correctamente
-    let receivedAmount = parseFloat(swapDetails.receivedAmount);  // 🔥 YA NO USAMOS FALLBACKS ERRÓNEOS
+    let receivedAmount = parseFloat(swapDetails.receivedAmount);
     let receivedTokenMint = swapDetails.receivedTokenMint;
 
-    // 🔹 3️⃣ Verificar que el mint del token sea válido
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
         console.error("❌ Error: No se pudo determinar un token recibido válido.");
         bot.sendMessage(chatId, "⚠️ Error: No se pudo identificar el token recibido.");
@@ -1426,7 +1420,6 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token recibido correctamente: ${receivedTokenMint}`);
 
-    // 🔹 4️⃣ Obtener información del token y manejar errores
     const swapTokenData = getTokenInfo(receivedTokenMint);
     let tokenDecimals;
     try {
@@ -1438,10 +1431,8 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log(`✅ Token encontrado: ${swapTokenData.symbol || "Desconocido"} (${receivedTokenMint}), Decimales: ${tokenDecimals}`);
 
-    // 🔹 5️⃣ Formatear correctamente el mensaje de confirmación
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
-        `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
         `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
@@ -1450,7 +1441,6 @@ async function confirmBuy(chatId, swapDetails) {
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
         `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
 
-    // 🔹 6️⃣ Enviar mensaje a Telegram con manejo de errores
     try {
         await bot.sendMessage(chatId, confirmationMessage, {
             parse_mode: "Markdown",
@@ -1470,13 +1460,12 @@ async function confirmBuy(chatId, swapDetails) {
         console.error("❌ Error enviando mensaje de compra a Telegram:", error);
     }
 
-    // 🔹 7️⃣ Guardar en swaps.json con manejo seguro
     try {
         saveSwap(chatId, "Buy", {
             "Swap completed successfully": true,
             "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
             "Spent": `${swapDetails.inputAmount} SOL`,
-            "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // 🔥 FORMATO CORRECTO
+            "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,
             "Swap Fee": `${swapDetails.swapFee} SOL`,
             "Received Token": swapTokenData.symbol || "Unknown",
             "Received Token Address": receivedTokenMint,
