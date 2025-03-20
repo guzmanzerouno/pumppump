@@ -1037,37 +1037,57 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
         try {
             console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
 
-            const response = await axios.post(HELIUS_RPC_URL, {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "getTransaction",
-                params: [signature, { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 }]
+            const response = await fetch(HELIUS_RPC_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "getTransaction",
+                    params: [signature, { encoding: "json", commitment: "confirmed" }]
+                })
             });
 
-            if (!response.data || !response.data.result) {
-                throw new Error("❌ No transaction details found.");
+            const result = await response.json();
+
+            if (!result || !result.result || !result.result.meta) {
+                throw new Error("❌ No transaction metadata found.");
             }
 
-            const txData = response.data.result;
-            const meta = txData.meta;
+            const meta = result.result.meta;
+            const preTokenBalances = meta.preTokenBalances || [];
+            const postTokenBalances = meta.postTokenBalances || [];
+            const preBalances = meta.preBalances || [];
+            const postBalances = meta.postBalances || [];
 
-            if (meta.err) {
-                throw new Error("Transaction failed on Solana.");
-            }
-
-            const preBalances = meta.preBalances;
-            const postBalances = meta.postBalances;
+            // 🔹 SOL antes y después del swap
+            const solBefore = preBalances[0] / 1e9;
+            const solAfter = postBalances[0] / 1e9;
             const swapFee = meta.fee / 1e9;
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
 
-            // 🔍 Buscar el token recibido en postTokenBalances (compra)
-            let receivedToken = meta.postTokenBalances.find(token => token.owner === walletAddress);
+            console.log(`💰 SOL Before: ${solBefore}, SOL After: ${solAfter}, Swap Fee: ${swapFee}`);
+
+            // 🔹 Buscar el token recibido en postTokenBalances (compra)
+            const receivedToken = postTokenBalances.find(balance =>
+                balance.owner === walletAddress &&
+                balance.mint !== "So11111111111111111111111111111111111111112"
+            );
+
             let receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
             let receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // 🔍 Buscar el token vendido en preTokenBalances (venta)
-            let soldToken = meta.preTokenBalances.find(token => token.owner === walletAddress);
+            // 🔹 Buscar el token vendido en preTokenBalances (venta)
+            const soldToken = preTokenBalances.find(balance => balance.owner === walletAddress);
             let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : 0;
             let soldTokenMint = soldToken ? soldToken.mint : "Unknown";
+
+            console.log(`📥 Received Token: ${receivedTokenMint}, Amount: ${receivedAmount}`);
+            console.log(`📤 Sold Token: ${soldTokenMint}, Amount: ${soldAmount}`);
+
+            if (receivedTokenMint === "Unknown") {
+                console.error("⚠️ No valid received token found in postTokenBalances.");
+            }
 
             // 🔹 Obtener nombres y símbolos de los tokens
             let soldTokenInfo = getTokenInfo(soldTokenMint);
@@ -1080,11 +1100,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
             const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
 
             // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
-            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
-
-            const solBefore = preBalances[0] / 1e9;
-            const solAfter = postBalances[0] / 1e9;
-            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
+            const dexPlatform = detectDexPlatform(result.result.transaction.message.accountKeys);
 
             return {
                 inputAmount: inputAmount,
@@ -1105,7 +1121,6 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
 
         } catch (error) {
             console.error(`❌ Error retrieving swap details (Attempt ${retryAttempts + 1}):`, error.message);
-
             delay *= 1.2;
             await new Promise(resolve => setTimeout(resolve, delay));
             retryAttempts++;
@@ -1152,11 +1167,15 @@ bot.on("callback_query", async (query) => {
         bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens...`);
 
         try {
-            const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
+            // 🔹 Obtener la dirección de la wallet del usuario
+            const privateKeyUint8 = new Uint8Array(bs58.decode(users[chatId].privateKey));
+            const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
+            const userPublicKey = userKeypair.publicKey.toBase58();  // ✅ Convertimos a base58
+
             const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
             // 🔹 Asegurar que la ATA existe antes de intentar vender
-            const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
+            const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
             if (!ata) {
                 throw new Error(`❌ Failed to create or retrieve the ATA for ${mint}`);
             }
@@ -1227,8 +1246,8 @@ bot.on("callback_query", async (query) => {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
                 
-                // 🔥 Ahora pasamos la WALLET del usuario en lugar del mint
-                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, wallet.publicKey.toBase58());
+                // ✅ Ahora pasamos la wallet del usuario en lugar del mint
+                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, userPublicKey);
 
                 if (!sellDetails) {
                     console.log(`❌ Error retrieving swap details (Attempt ${attempt}): No transaction details found.`);
@@ -1321,6 +1340,11 @@ bot.on("callback_query", async (query) => {
         bot.sendMessage(chatId, `🛒 Attempting to buy *${amountSOL} SOL* worth of *${mint}*...`, { parse_mode: "Markdown" });
 
         try {
+            // 🔹 Obtener la dirección de la wallet del usuario
+            const privateKeyUint8 = new Uint8Array(bs58.decode(users[chatId].privateKey));
+            const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
+            const userPublicKey = userKeypair.publicKey.toBase58();  // ✅ Convertimos a base58
+
             const txSignature = await buyToken(chatId, mint, amountSOL);
 
             if (!txSignature) {
@@ -1348,7 +1372,7 @@ bot.on("callback_query", async (query) => {
                 swapDetails = await getSwapDetailsFromHeliusRPC(
                     txSignature, 
                     mint, 
-                    users[chatId].walletAddress // 🔥 PASANDO LA WALLET DEL USUARIO
+                    userPublicKey  // ✅ PASAMOS LA WALLET DEL USUARIO CORRECTAMENTE
                 );
 
                 if (!swapDetails) {
