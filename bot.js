@@ -5,7 +5,6 @@ import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
-import { Liquidity, Token, TokenAmount, Raydium, MAINNET_PROGRAM_ID } from "@raydium-io/raydium-sdk";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -20,6 +19,7 @@ const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
+const { Liquidity, Token, TokenAmount, MAINNET_PROGRAM_ID } = require("@raydium-io/raydium-sdk");
 const RAYDIUM_SWAP_URL = "https://api.raydium.io/v2/swap";
 const SLIPPAGE_TOLERANCE = 0.005; // 0.5%
 const LIQUIDITY_SLIPPAGE = 0.025; // 2.5%
@@ -381,6 +381,35 @@ async function isTokenTradableOnRaydium(mintAddress) {
     }
 }
 
+async function getRaydiumPair(mint) {
+    try {
+        console.log(`🔍 Checking liquidity pool for token: ${mint} on Raydium...`);
+
+        // Obtener todos los pools en Raydium
+        const poolKeys = await Liquidity.fetchAllPoolKeys(connection);
+
+        if (!poolKeys || Object.keys(poolKeys).length === 0) {
+            console.warn("⚠️ No pools found on Raydium.");
+            return null;
+        }
+
+        // Buscar si el token existe en algún pool con liquidez
+        const pool = Object.values(poolKeys).find(p =>
+            p.baseMint.toBase58() === mint || p.quoteMint.toBase58() === mint
+        );
+
+        if (pool) {
+            console.log(`✅ Pool found: ${pool.id.toBase58()} for token ${mint}`);
+            return pool.id.toBase58(); // Devolver el pool ID
+        } else {
+            console.warn(`❌ No liquidity pool found for ${mint} on Raydium.`);
+            return null;
+        }
+    } catch (error) {
+        console.error(`❌ Error checking liquidity pool for ${mint}:`, error.message);
+        return null;
+    }
+}
 
 
 
@@ -440,6 +469,14 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         }
 
         console.log("🔹 Token verified as tradable. Fetching best quote from Raydium...");
+
+         // ✅ Verificar si el token tiene liquidez en Raydium
+         const poolId = await getRaydiumPair(mint);
+         if (!poolId) {
+             console.log("❌ No se encontró un pool en Raydium para este token. Abortando operación...");
+             bot.sendMessage(chatId, "⚠️ This token is not tradeable on Raydium.");
+             return;
+         }
 
         // 🔹 Obtener la mejor cotización desde Raydium
         const quoteResponse = await axios.get(`${RAYDIUM_SWAP_URL}/quote`, {
