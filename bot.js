@@ -1359,6 +1359,8 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
+            const timestampEST = await getTransactionTimestamp(txSignature);
+
             bot.sendMessage(
                 chatId,
                 `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`, 
@@ -1395,7 +1397,7 @@ bot.on("callback_query", async (query) => {
             }
 
             // ✅ Llamar a confirmBuy() para manejar la conversión y el mensaje
-            await confirmBuy(chatId, swapDetails);
+            await confirmBuy(chatId, swapDetails, timestampEST);
 
         } catch (error) {
             console.error("❌ Error in purchase process:", error);
@@ -1406,7 +1408,7 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails) {
+async function confirmBuy(chatId, swapDetails, timestampEST)) {
     console.log("🔍 Validando swapDetails:", swapDetails);
 
     // ✅ Extraer directamente la cantidad de tokens recibidos
