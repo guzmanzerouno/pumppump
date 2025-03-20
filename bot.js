@@ -1030,9 +1030,9 @@ async function getTokenNameFromSolana(mintAddress) {
 
 async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
     let retryAttempts = 0;
-    let delay = 5000; // 5 segundos inicial antes de la primera consulta
+    let delay = 5000;
 
-    while (retryAttempts < 6) { // Máximo de 6 intentos
+    while (retryAttempts < 6) {
         try {
             console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
 
@@ -1058,19 +1058,15 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // 🔍 Buscar el token recibido (compra) en postTokenBalances
+            // 🔍 Buscar el token comprado en postTokenBalances (compra)
             let receivedToken = meta.postTokenBalances.find(token => token.owner === walletAddress);
             let receivedAmount = receivedToken ? parseFloat(receivedToken.uiTokenAmount.uiAmountString) : 0;
             let receivedTokenMint = receivedToken ? receivedToken.mint : "Unknown";
 
-            // 🔍 Buscar el token vendido (venta) en preTokenBalances
+            // 🔍 Buscar el token vendido en preTokenBalances (venta)
             let soldToken = meta.preTokenBalances.find(token => token.owner === walletAddress);
             let soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : 0;
             let soldTokenMint = soldToken ? soldToken.mint : "Unknown";
-
-            // 📌 Determinar si es una compra o venta
-            let isBuy = receivedAmount > 0; // Si tenemos tokens en postTokenBalances, es una compra.
-            let isSell = soldAmount > 0; // Si tenemos tokens en preTokenBalances, es una venta.
 
             // 🔹 Obtener nombres y símbolos de los tokens
             let soldTokenInfo = getTokenInfo(soldTokenMint);
@@ -1085,14 +1081,11 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
             // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
             const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
-            // 📌 Calcular inputAmount (lo que se gastó) basado en SOL o token vendido
             const solBefore = preBalances[0] / 1e9;
             const solAfter = postBalances[0] / 1e9;
-            const inputAmount = isBuy ? (solBefore - solAfter - swapFee).toFixed(6) : soldAmount.toFixed(6);
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
 
             return {
-                isBuy: isBuy,
-                isSell: isSell,
                 inputAmount: inputAmount,
                 soldAmount: soldAmount.toFixed(6),
                 receivedAmount: receivedAmount.toFixed(6),
@@ -1104,7 +1097,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
                 receivedTokenName: receivedTokenName,
                 receivedTokenSymbol: receivedTokenSymbol,
                 dexPlatform: dexPlatform,
-                walletAddress: txData.transaction.message.accountKeys[0],
+                walletAddress: walletAddress,
                 solBefore: solBefore.toFixed(3),
                 solAfter: solAfter.toFixed(3)
             };
@@ -1112,13 +1105,7 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
         } catch (error) {
             console.error(`❌ Error retrieving swap details (Attempt ${retryAttempts + 1}):`, error.message);
 
-            if (error.response && error.response.status === 429) {
-                console.log("⚠️ Rate limit reached, waiting longer before retrying...");
-                delay *= 1.5;
-            } else {
-                delay *= 1.2;
-            }
-
+            delay *= 1.2;
             await new Promise(resolve => setTimeout(resolve, delay));
             retryAttempts++;
         }
@@ -1239,7 +1226,8 @@ bot.on("callback_query", async (query) => {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
                 
-                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, mint); // 🔥 PASANDO EL MINT
+                // 🔥 Ahora pasamos la WALLET del usuario en lugar del mint
+                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, wallet.publicKey.toBase58());
 
                 if (!sellDetails) {
                     console.log(`❌ Error retrieving swap details (Attempt ${attempt}): No transaction details found.`);
@@ -1274,19 +1262,22 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     let sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
     let tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
 
-    // ✅ Obtener el monto real recibido en SOL, asegurando que sea un número correcto
-    let gotSol = parseFloat(sellDetails.receivedAmount) || parseFloat((sellDetails.solAfter - sellDetails.solBefore).toFixed(6));
+    // ✅ Obtener el monto real recibido en SOL (ya corregido)
+    let gotSol = parseFloat(sellDetails.receivedAmount).toFixed(9);
 
     // ✅ Verificar si `sellDetails.receivedTokenMint` es válido antes de mostrarlo
     let receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
+
+    // ✅ Corregir el formato del Swap Fee a 6 decimales
+    let swapFee = parseFloat(sellDetails.swapFee).toFixed(6);
 
     // ✅ Construcción del mensaje mejorada
     const sellMessage = `✅ *Sell completed successfully*\n` +
         `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
-        `💰 *Got:* ${gotSol.toFixed(9)} SOL\n` +  // 🔥 Fix final: muestra correctamente sin notación científica
-        `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
+        `💰 *Got:* ${gotSol} SOL\n` +  // 🔥 Ahora siempre se muestra correctamente formateado
+        `🔄 *Sell Fee:* ${swapFee} SOL\n` +
         `📌 *Sold Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
         `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
@@ -1300,8 +1291,8 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         "Sell completed successfully": true,
         "Pair": `${tokenSymbol}/SOL`,
         "Sold": `${soldAmount} Tokens`,
-        "Got": `${gotSol.toFixed(9)} SOL`,  // 🔥 Ahora se guarda correctamente formateado
-        "Sell Fee": `${sellDetails.swapFee} SOL`,
+        "Got": `${gotSol} SOL`,  // 🔥 Ahora se guarda correctamente formateado
+        "Sell Fee": `${swapFee} SOL`,
         "Sold Token": tokenSymbol,
         "Sold Token Address": receivedTokenMint,
         "Wallet": sellDetails.walletAddress,
@@ -1353,7 +1344,11 @@ bot.on("callback_query", async (query) => {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius: ${txSignature} (Attempt ${attempt})`);
 
-                swapDetails = await getSwapDetailsFromHeliusRPC(txSignature, mint); // 🔥 PASANDO EL MINT
+                swapDetails = await getSwapDetailsFromHeliusRPC(
+                    txSignature, 
+                    mint, 
+                    users[chatId].walletAddress // 🔥 PASANDO LA WALLET DEL USUARIO
+                );
 
                 if (!swapDetails) {
                     console.log(`❌ Attempt ${attempt}: No transaction details found. Retrying in ${delay / 1000} sec...`);
@@ -1393,8 +1388,8 @@ async function confirmBuy(chatId, swapDetails) {
         return;
     }
 
-    // 🔹 2️⃣ Extraer la cantidad de tokens recibidos de manera segura
-    let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
+    // 🔹 2️⃣ Extraer la cantidad de tokens recibidos correctamente
+    let receivedAmount = parseFloat(swapDetails.receivedAmount);  // 🔥 YA NO USAMOS FALLBACKS ERRÓNEOS
     let receivedTokenMint = swapDetails.receivedTokenMint;
 
     // 🔹 3️⃣ Verificar que el mint del token sea válido
@@ -1456,7 +1451,7 @@ async function confirmBuy(chatId, swapDetails) {
             "Swap completed successfully": true,
             "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
             "Spent": `${swapDetails.inputAmount} SOL`,
-            "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`, 
+            "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,  // 🔥 FORMATO CORRECTO
             "Swap Fee": `${swapDetails.swapFee} SOL`,
             "Received Token": swapTokenData.symbol || "Unknown",
             "Received Token Address": receivedTokenMint,
