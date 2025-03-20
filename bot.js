@@ -17,12 +17,9 @@ const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
-const RAYDIUM_SWAP_URL = "https://api.raydium.io/v2/swap";
-const SLIPPAGE_TOLERANCE = 0.005; // 0.5%
-const LIQUIDITY_SLIPPAGE = 0.025; // 2.5%
-const PRIORITY_FEE_SOL = 0.01; // 0.01 SOL
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
@@ -41,10 +38,19 @@ function loadUsers() {
     }
 }
 
+// 📝 Guardar usuarios en el archivo JSON
+function saveUsers() {
+    try {
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+        console.log("📂 Usuarios actualizados.");
+    } catch (error) {
+        console.error("❌ Error guardando usuarios:", error);
+    }
+}
+
 // 🔥 Cargar usuarios antes de iniciar el WebSocket
 loadUsers();
 
-//COMANDO DEL BOT FINISH
 /* 🔹 USER REGISTRATION PROCESS */
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -123,9 +129,7 @@ bot.onText(/\/stop/, (msg) => {
         bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
     }
 });
-//COMANDO DEL BOT FINISH
 
-// WEBSOCKET CONNECTION
 // 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
     if (ws) {
@@ -196,478 +200,7 @@ function startHeartbeat() {
 }
 
 startHeartbeat();
-// WEBSOCKET CONNECTION FINISH
 
-//TODAS LAS FUNCIONES DE ALMACENADO DEL BOT
-//FUNCION PARA ALMACENAR USUARIOS DEL BOT
-// 📝 Guardar usuarios en el archivo JSON
-function saveUsers() {
-    try {
-        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-        console.log("📂 Usuarios actualizados.");
-    } catch (error) {
-        console.error("❌ Error guardando usuarios:", error);
-    }
-}
-//FUNCION PARA ALMACENAR USUARIOS DEL BOT FINISH
-
-// FUNCION PARA ALMACENAR LA INFO DE LOS TOKENS DETECTADOS POR EL BOT
-function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
-    console.log("🔄 Intentando guardar datos en tokens.json...");
-
-    // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
-    if (!dexData || !mintData || !rugCheckData) {
-        console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
-        return;
-    }
-
-    console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
-
-    // 🔹 2️⃣ Formatear datos antes de guardar
-    const tokenInfo = {
-        symbol: dexData.symbol || "Unknown",
-        name: dexData.name || "Unknown",
-        USD: dexData.priceUsd || "N/A",
-        SOL: dexData.priceSol || "N/A",
-        liquidity: dexData.liquidity || "N/A",
-        marketCap: dexData.marketCap || "N/A",
-        FDV: dexData.fdv || "N/A",
-        age: age || "N/A",
-        "24H": priceChange24h || "N/A",
-        warning: rugCheckData.riskDescription || "N/A",
-        LPLOCKED: rugCheckData.lpLocked || "N/A",
-        chain: dexData.chain || "solana",
-        dex: dexData.dex || "N/A",
-        migrationDate: mintData.date || "N/A",
-        graduations: graduations || "N/A",
-        status: mintData.status || "N/A",
-        pair: dexData.pairAddress || "N/A",
-        token: mintData.mintAddress || "N/A"
-    };
-
-    console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
-
-    // 🔹 3️⃣ Verificar si el archivo `tokens.json` existe y es válido
-    let tokens = {};
-    const filePath = 'tokens.json';
-
-    if (fs.existsSync(filePath)) {
-        try {
-            const fileContent = fs.readFileSync(filePath, 'utf-8');
-            tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
-            console.log("📂 Archivo tokens.json leído correctamente.");
-        } catch (error) {
-            console.error("❌ Error leyendo tokens.json:", error);
-            console.log("🔄 Restaurando tokens.json vacío...");
-            fs.writeFileSync(filePath, "{}", 'utf-8');
-            tokens = {};
-        }
-    } else {
-        console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
-    }
-
-    // 🔹 4️⃣ Verificar que `mintData.mintAddress` no sea `undefined`
-    if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
-        console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
-        return;
-    }
-
-    console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
-
-    // 🔹 5️⃣ Guardar los datos en `tokens.json`
-    tokens[mintData.mintAddress] = tokenInfo;
-
-    try {
-        fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-        console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
-    } catch (error) {
-        console.error("❌ Error guardando token en tokens.json:", error);
-    }
-
-    // 🔹 6️⃣ Verificar permisos de escritura en `tokens.json`
-    try {
-        fs.accessSync(filePath, fs.constants.W_OK);
-        console.log("✅ Permisos de escritura en tokens.json verificados.");
-    } catch (error) {
-        console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-        console.log("🔄 Ejecuta este comando para arreglarlo:");
-        console.log(`chmod 666 ${filePath}`);
-    }
-}
-// FUNCION PARA ALMACENAR LA INFO DE LOS TOKENS DETECTADOS POR EL BOT FINISH
-
-// FUNCION PARA ALMACENAR TODOS LOS SWAPS
-// 🔥 Cargar swaps desde el archivo JSON
-function loadSwaps() {
-    if (fs.existsSync(SWAPS_FILE)) {
-        try {
-            const data = fs.readFileSync(SWAPS_FILE, "utf8");
-            return JSON.parse(data);
-        } catch (error) {
-            console.error("❌ Error cargando swaps:", error);
-            return {};
-        }
-    }
-    return {};
-}
-
-// 📝 Guardar swaps en el archivo JSON
-function saveSwaps(swaps) {
-    try {
-        fs.writeFileSync(SWAPS_FILE, JSON.stringify(swaps, null, 2));
-        console.log("📂 Swaps actualizados.");
-    } catch (error) {
-        console.error("❌ Error guardando swaps:", error);
-    }
-}
-
-// 🔥 Cargar swaps al iniciar
-let swaps = loadSwaps();
-
-/**
- * 🔹 Función para guardar un swap en swaps.json
- * @param {string} chatId - ID del usuario en Telegram
- * @param {string} type - Tipo de swap ("Buy" o "Sell")
- * @param {object} details - Detalles del swap
- */
-function saveSwap(chatId, type, details) {
-    if (!swaps[chatId]) {
-        swaps[chatId] = [];
-    }
-
-    swaps[chatId].push({
-        type,
-        ...details,
-        timestamp: new Date().toISOString()
-    });
-
-    saveSwaps(swaps);
-}
-// FUNCION PARA ALMACENAR TODOS LOS SWAPS FINISH
-//TODAS LAS FUNCIONES DE ALMACENADO DEL BOT FINISH
-
-//RAYDIUM SWAP
-// 🔹 Función para obtener una cotización de swap en Raydium
-async function getRaydiumSwapQuote(inputMint, outputMint, amountIn) {
-    try {
-        const response = await axios.post(`${RAYDIUM_SWAP_URL}/quote`, {
-            inputMint,
-            outputMint,
-            amountIn,
-            slippage: SLIPPAGE_TOLERANCE,
-            maxPriorityFee: PRIORITY_FEE_SOL
-        });
-        return response.data;
-    } catch (error) {
-        console.error("❌ Error fetching Raydium swap quote:", error);
-        return null;
-    }
-}
-
-// 🔹 Función para ejecutar un swap en Raydium
-async function executeRaydiumSwap(userPrivateKey, inputMint, outputMint, amountIn) {
-    try {
-        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(userPrivateKey)));
-        const quote = await getRaydiumSwapQuote(inputMint, outputMint, amountIn);
-
-        if (!quote || !quote.tx) {
-            throw new Error("❌ Invalid quote response from Raydium.");
-        }
-
-        const transaction = Transaction.from(Buffer.from(quote.tx, "base64"));
-        transaction.sign(userKeypair);
-
-        const signature = await sendAndConfirmTransaction(connection, transaction, [userKeypair]);
-        console.log(`✅ Swap executed: https://solscan.io/tx/${signature}`);
-        return signature;
-    } catch (error) {
-        console.error("❌ Error executing swap:", error);
-        return null;
-    }
-}
-
-async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-    try {
-        console.log(`🛒 Attempt ${attempt}: Processing purchase of ${amountSOL} SOL for ${mint} via Raydium...`);
-
-        const user = users[chatId];
-        if (!user || !user.privateKey) {
-            throw new Error("⚠️ User not registered or missing privateKey.");
-        }
-
-        // 🔹 Obtener Keypair del usuario
-        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const userPublicKey = userKeypair.publicKey;
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-
-        // 🔹 Verificar si la cuenta ATA existe, si no, crearla
-        const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
-        if (!ata) {
-            console.log(`⚠️ ATA not found, waiting for creation... Retrying purchase.`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await buyToken(chatId, mint, amountSOL, attempt + 1);
-        }
-
-        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
-
-        // 🔹 Verificar si hay suficiente SOL en la wallet
-        const balance = await connection.getBalance(userPublicKey) / 1e9;
-        if (balance < amountSOL) {
-            throw new Error(`❌ Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
-        }
-
-        console.log("🔹 Fetching best quote from Raydium...");
-
-        // 🔹 Obtener la mejor cotización desde Raydium
-        const quoteResponse = await axios.get(`${RAYDIUM_SWAP_URL}/quote`, {
-            params: {
-                inputMint: "So11111111111111111111111111111111111111112", // SOL
-                outputMint: mint,
-                inAmount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
-                slippage: SLIPPAGE_TOLERANCE, // 0.5% de slippage
-                liquiditySlippage: LIQUIDITY_SLIPPAGE // 2.5% tolerancia liquidez
-            }
-        });
-
-        if (!quoteResponse.data || !quoteResponse.data.routes || quoteResponse.data.routes.length === 0) {
-            throw new Error("❌ No valid routes found from Raydium.");
-        }
-
-        console.log("✅ Quote obtained, requesting swap transaction...");
-
-        // 🔹 Solicitar la transacción de swap a Raydium
-        const swapResponse = await axios.post(`${RAYDIUM_SWAP_URL}/transaction`, {
-            quote: quoteResponse.data.routes[0], // Tomar la mejor ruta disponible
-            userPublicKey: userPublicKey.toBase58(),
-            priorityFee: PRIORITY_FEE_SOL * 1e9 // 0.01 SOL en lamports
-        });
-
-        if (!swapResponse.data || !swapResponse.data.transaction) {
-            throw new Error("❌ Failed to construct swap transaction.");
-        }
-
-        console.log("✅ Swap transaction received from Raydium.");
-
-        // 🔹 Decodificar la transacción y firmarla
-        const transactionBuffer = Buffer.from(swapResponse.data.transaction, "base64");
-        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-        versionedTransaction.sign([userKeypair]);
-
-        console.log("✅ Transaction successfully signed. Sending to Solana...");
-
-        // 🔹 Enviar y confirmar la transacción
-        const txId = await connection.sendTransaction(versionedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed"
-        });
-
-        console.log(`✅ Purchase completed successfully: ${txId}`);
-        return txId;
-
-    } catch (error) {
-        console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
-
-        if (attempt < 3) {
-            console.log(`🔄 Retrying purchase (Attempt ${attempt + 1})...`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await buyToken(chatId, mint, amountSOL, attempt + 1);
-        } else {
-            console.error("❌ Maximum retries reached. Purchase failed.");
-            return null;
-        }
-    }
-}
-
-async function executeRaydiumSell(chatId, mint, amount, attempt = 1) {
-    try {
-        console.log(`🔄 Attempt ${attempt}: Preparing sale of ${amount} tokens for mint: ${mint} via Raydium...`);
-
-        const user = users[chatId];
-        if (!user || !user.privateKey) {
-            throw new Error("⚠ Private key not found or user not registered.");
-        }
-
-        // 🔹 Obtener Keypair del usuario
-        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-
-        console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
-
-        // 🔹 Asegurar que la ATA existe antes de vender
-        const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
-        if (!ata) {
-            console.log(`⚠️ ATA not found, waiting for creation... Retrying sale.`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await executeRaydiumSell(chatId, mint, amount, attempt + 1);
-        }
-
-        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
-
-        // 🔹 Obtener decimales del token
-        const tokenDecimals = await getTokenDecimals(mint);
-        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
-
-        // 🔹 Obtener balance actual en UI units
-        let balance = await getTokenBalance(chatId, mint);
-        console.log(`✅ Balance found: ${balance} tokens`);
-
-        // 🔹 Convertir balance y cantidad a vender a unidades mínimas
-        const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
-        let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
-
-        console.log(`🔹 Balance en unidades mínimas: ${balanceInUnits}`);
-        console.log(`🔹 Cantidad a vender en unidades mínimas: ${amountInUnits}`);
-
-        // 🔹 Ajustar cantidad a vender si es mayor al balance disponible
-        if (amountInUnits > balanceInUnits) {
-            console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-            amountInUnits = balanceInUnits;
-        }
-
-        // 🔹 Validación adicional para evitar fallos
-        if (!balanceInUnits || balanceInUnits < amountInUnits || amountInUnits <= 0) {
-            throw new Error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-        }
-
-        console.log("🔹 Fetching Raydium sell quote...");
-
-        // 🔹 Obtener cotización de venta en Raydium
-        const quoteResponse = await axios.get(`${RAYDIUM_SWAP_URL}/quote`, {
-            params: {
-                inputMint: mint,
-                outputMint: "So11111111111111111111111111111111111111112", // SOL
-                inAmount: amountInUnits,
-                slippage: SLIPPAGE_TOLERANCE, // 0.5% de slippage
-                liquiditySlippage: LIQUIDITY_SLIPPAGE // 2.5% tolerancia liquidez
-            }
-        });
-
-        if (!quoteResponse.data || !quoteResponse.data.routes || quoteResponse.data.routes.length === 0) {
-            throw new Error("❌ No valid quote retrieved from Raydium.");
-        }
-
-        console.log("✅ Successfully obtained sell quote.");
-
-        // 🔹 Solicitar transacción de swap a Raydium con prioridad de ejecución
-        const swapResponse = await axios.post(`${RAYDIUM_SWAP_URL}/transaction`, {
-            quote: quoteResponse.data.routes[0], // Tomar la mejor ruta disponible
-            userPublicKey: wallet.publicKey.toBase58(),
-            priorityFee: PRIORITY_FEE_SOL * 1e9 // 0.01 SOL en lamports
-        });
-
-        if (!swapResponse.data || !swapResponse.data.transaction) {
-            throw new Error("❌ Failed to construct swap transaction.");
-        }
-
-        console.log("✅ Swap transaction received from Raydium.");
-
-        // 🔹 Decodificar y firmar la transacción
-        const transactionBuffer = Buffer.from(swapResponse.data.transaction, "base64");
-        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-        versionedTransaction.sign([wallet]);
-
-        console.log("✅ Transaction successfully signed.");
-        console.log("🚀 Sending transaction to Solana network...");
-
-        // 🔹 Enviar transacción a Solana
-        const txSignature = await connection.sendTransaction(versionedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed"
-        });
-
-        console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-        return txSignature;
-
-    } catch (error) {
-        console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
-
-        if (attempt < 3) {
-            console.log(`🔄 Retrying sale (Attempt ${attempt + 1})...`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await executeRaydiumSell(chatId, mint, amount, attempt + 1);
-        } else {
-            console.error("❌ Maximum retries reached. Sale failed.");
-            return null;
-        }
-    }
-}
-
-// 🔹 Función para verificar y crear la ATA si no existe
-async function ensureAssociatedTokenAccount(wallet, mint, connection) {
-    try {
-        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-
-        // 🔹 Verificar si la cuenta ya existe en la blockchain
-        const ataInfo = await connection.getAccountInfo(ata);
-        if (ataInfo !== null) {
-            console.log(`✅ ATA already exists for ${mint}: ${ata.toBase58()}`);
-            return ata;
-        }
-
-        console.log(`⚠️ ATA not found, creating a new one for token ${mint}...`);
-
-        // 🔹 Crear la instrucción para la ATA
-        const transaction = new Transaction().add(
-            createAssociatedTokenAccountInstruction(
-                wallet.publicKey,  // Payer (quién paga la transacción)
-                ata,               // Dirección de la ATA
-                wallet.publicKey,  // Owner (propietario)
-                new PublicKey(mint) // Mint del token
-            )
-        );
-
-        // 🔹 Firmar y enviar la transacción
-        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
-
-        console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
-
-        return ata;
-    } catch (error) {
-        console.error(`❌ Error creating ATA for ${mint}:`, error);
-        return null;
-    }
-}
-
-async function getTokenBalance(chatId, mint) {
-    try {
-        if (!users[chatId] || !users[chatId].walletPublicKey) {
-            console.error(`⚠️ No se encontró el usuario ${chatId} o no tiene walletPublicKey.`);
-            return 0;
-        }
-
-        const userPublicKeyString = users[chatId].walletPublicKey;
-        
-        if (!userPublicKeyString || typeof userPublicKeyString !== "string") {
-            console.error(`⚠️ walletPublicKey inválido para el usuario ${chatId}:`, userPublicKeyString);
-            return 0;
-        }
-
-        const userPublicKey = new PublicKey(userPublicKeyString); // 🔥 Corrección aquí
-
-        console.log(`🔎 Consultando balance del token ${mint} para la wallet ${userPublicKey.toBase58()}`);
-
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, {
-            mint: new PublicKey(mint)
-        });
-
-        if (tokenAccounts.value.length > 0) {
-            const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
-            console.log(`✅ Balance encontrado: ${balance} tokens`);
-            return balance;
-        }
-
-        console.log("⚠️ No se encontraron tokens en la wallet.");
-        return 0;
-    } catch (error) {
-        console.error("❌ Error obteniendo balance:", error);
-        return 0;
-    }
-}
-
-//RAYDIUM FINISH
-
-// FUNCION PARA EJETURAR PROCESO PRINCIPAL DE FIRMA EXTRAIDE DEL WEBSOCKET (PARTE DE LAS FUCIONES PARA EXTRAER LA UNFORMACION)
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
 let DELAY_BEFORE_ANALYSIS = 30 * 1000; // 30 segundos por defecto
 
@@ -738,7 +271,7 @@ async function getMintAddressFromTransaction(signature) {
         return null;
     }
 }
-// COMVERTIR VALORES EN STRINGS
+
 function escapeMarkdown(text) {
     if (typeof text !== "string") {
         return String(text || "N/A"); // Asegurar que siempre sea string
@@ -872,9 +405,452 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
         }
     }
 }
-// FUNCION PARA EJETURAR PROCESO PRINCIPAL DE FIRMA EXTRAIDE DEL WEBSOCKET (PARTE DE LAS FUCIONES PARA EXTRAER LA UNFORMACION) FINISH
 
-//FUNCION PARA EJETURAR PROCESO PRINCIPAL DE FIRMA EXTRAIDE DEL WEBSOCKET 
+function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
+    console.log("🔄 Intentando guardar datos en tokens.json...");
+
+    // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
+    if (!dexData || !mintData || !rugCheckData) {
+        console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
+        return;
+    }
+
+    console.log("✅ Datos validados correctamente.");
+    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
+
+    // 🔹 2️⃣ Formatear datos antes de guardar
+    const tokenInfo = {
+        symbol: dexData.symbol || "Unknown",
+        name: dexData.name || "Unknown",
+        USD: dexData.priceUsd || "N/A",
+        SOL: dexData.priceSol || "N/A",
+        liquidity: dexData.liquidity || "N/A",
+        marketCap: dexData.marketCap || "N/A",
+        FDV: dexData.fdv || "N/A",
+        age: age || "N/A",
+        "24H": priceChange24h || "N/A",
+        warning: rugCheckData.riskDescription || "N/A",
+        LPLOCKED: rugCheckData.lpLocked || "N/A",
+        chain: dexData.chain || "solana",
+        dex: dexData.dex || "N/A",
+        migrationDate: mintData.date || "N/A",
+        graduations: graduations || "N/A",
+        status: mintData.status || "N/A",
+        pair: dexData.pairAddress || "N/A",
+        token: mintData.mintAddress || "N/A"
+    };
+
+    console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
+
+    // 🔹 3️⃣ Verificar si el archivo `tokens.json` existe y es válido
+    let tokens = {};
+    const filePath = 'tokens.json';
+
+    if (fs.existsSync(filePath)) {
+        try {
+            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
+            console.log("📂 Archivo tokens.json leído correctamente.");
+        } catch (error) {
+            console.error("❌ Error leyendo tokens.json:", error);
+            console.log("🔄 Restaurando tokens.json vacío...");
+            fs.writeFileSync(filePath, "{}", 'utf-8');
+            tokens = {};
+        }
+    } else {
+        console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
+    }
+
+    // 🔹 4️⃣ Verificar que `mintData.mintAddress` no sea `undefined`
+    if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
+        console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
+        return;
+    }
+
+    console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
+
+    // 🔹 5️⃣ Guardar los datos en `tokens.json`
+    tokens[mintData.mintAddress] = tokenInfo;
+
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
+        console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+    } catch (error) {
+        console.error("❌ Error guardando token en tokens.json:", error);
+    }
+
+    // 🔹 6️⃣ Verificar permisos de escritura en `tokens.json`
+    try {
+        fs.accessSync(filePath, fs.constants.W_OK);
+        console.log("✅ Permisos de escritura en tokens.json verificados.");
+    } catch (error) {
+        console.error("❌ Error: No hay permisos de escritura en tokens.json.");
+        console.log("🔄 Ejecuta este comando para arreglarlo:");
+        console.log(`chmod 666 ${filePath}`);
+    }
+}
+
+function getTokenInfo(mintAddress) {
+    if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
+
+    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8')) || {};
+
+    return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
+}
+
+// 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
+async function buyToken(chatId, mint, amountSOL, attempt = 1) {
+    try {
+        console.log(`🛒 Attempt ${attempt}: Processing purchase of ${amountSOL} SOL for ${mint}...`);
+
+        const user = users[chatId];
+        if (!user || !user.privateKey) {
+            throw new Error("User not registered or missing privateKey.");
+        }
+
+        // 🔹 Obtener Keypair del usuario correctamente
+        const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
+        const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
+        const userPublicKey = userKeypair.publicKey;
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+        // 🔹 Verificar si la cuenta ATA existe, si no, crearla
+        const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
+        if (!ata) {
+            console.log(`⚠️ ATA not found, waiting for creation... Retrying purchase.`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar antes de reintentar
+            return await buyToken(chatId, mint, amountSOL, attempt + 1);
+        }
+
+        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
+
+        // 🔹 Verificar si hay suficiente SOL en la wallet
+        const balance = await connection.getBalance(userPublicKey) / 1e9;
+        if (balance < amountSOL) {
+            throw new Error(`❌ Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
+        }
+
+        console.log("🔹 Fetching best quote from Jupiter...");
+
+        // 🔹 Obtener la mejor cotización de compra desde Jupiter con optimización de slippage
+        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
+            params: {
+                inputMint: "So11111111111111111111111111111111111111112", // SOL
+                outputMint: mint,
+                amount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
+                dynamicSlippage: true, // 🔹 Activar optimización de slippage dinámico (recomendado)
+                swapMode: "ExactIn" // 🔹 Garantiza que se usa exactamente la cantidad de SOL especificada
+            }
+        });
+
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
+            throw new Error("❌ Failed to retrieve a valid quote from Jupiter.");
+        }
+
+        console.log("✅ Quote obtained, requesting swap transaction...");
+
+        // 🔹 Solicitar transacción de swap a Jupiter con optimización de prioridad
+        const swapResponse = await axios.post(JUPITER_API_URL, {
+            quoteResponse: quoteResponse.data,
+            userPublicKey: userPublicKey.toBase58(), // 🔹 Corregido (antes estaba wallet.publicKey)
+            wrapAndUnwrapSol: true,
+            prioritizationFeeLamports: 5000 // 🔹 Asegura ejecución más rápida
+        });
+
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            throw new Error("❌ Failed to construct swap transaction.");
+        }
+
+        console.log("✅ Swap transaction received from Jupiter.");
+
+        // 🔹 Decodificar la transacción versión 0 correctamente
+        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+
+        // 🔹 Firmar la transacción
+        versionedTransaction.sign([userKeypair]);
+
+        console.log("✅ Transaction successfully signed. Sending to Solana...");
+
+        // 🔹 Enviar y confirmar la transacción
+        const txId = await connection.sendTransaction(versionedTransaction, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed"
+        });
+
+        console.log(`✅ Purchase completed successfully: ${txId}`);
+        return txId;
+
+    } catch (error) {
+        console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
+        console.error(error.stack);
+
+        if (attempt < 3) {
+            console.log(`🔄 Retrying purchase (Attempt ${attempt + 1})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // 🔹 Esperar antes de reintentar
+            return await buyToken(chatId, mint, amountSOL, attempt + 1);
+        } else {
+            console.error("❌ Maximum retries reached. Purchase failed.");
+            return null;
+        }
+    }
+}
+
+async function getTokenBalance(chatId, mint) {
+    try {
+        if (!users[chatId] || !users[chatId].walletPublicKey) {
+            console.error(`⚠️ No se encontró el usuario ${chatId} o no tiene walletPublicKey.`);
+            return 0;
+        }
+
+        const userPublicKeyString = users[chatId].walletPublicKey;
+        
+        if (!userPublicKeyString || typeof userPublicKeyString !== "string") {
+            console.error(`⚠️ walletPublicKey inválido para el usuario ${chatId}:`, userPublicKeyString);
+            return 0;
+        }
+
+        const userPublicKey = new PublicKey(userPublicKeyString); // 🔥 Corrección aquí
+
+        console.log(`🔎 Consultando balance del token ${mint} para la wallet ${userPublicKey.toBase58()}`);
+
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(userPublicKey, {
+            mint: new PublicKey(mint)
+        });
+
+        if (tokenAccounts.value.length > 0) {
+            const balance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+            console.log(`✅ Balance encontrado: ${balance} tokens`);
+            return balance;
+        }
+
+        console.log("⚠️ No se encontraron tokens en la wallet.");
+        return 0;
+    } catch (error) {
+        console.error("❌ Error obteniendo balance:", error);
+        return 0;
+    }
+}
+
+async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
+    try {
+        console.log(`🔄 Attempt ${attempt}: Preparing sale of ${amount} tokens for mint: ${mint}`);
+
+        const user = users[chatId];
+        if (!user || !user.privateKey) {
+            console.error(`⚠ Private key not found for user: ${JSON.stringify(user || {})}`);
+            return null;
+        }
+
+        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+        console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
+
+        // 🔹 Asegurar que la ATA existe antes de vender
+        const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
+        if (!ata) {
+            console.log(`⚠️ ATA not found, waiting for creation... Retrying sale.`);
+            return await executeJupiterSell(chatId, mint, amount, attempt + 1); // Reintentar después de crear la ATA
+        }
+
+        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
+
+        // 🔹 Obtener decimales del token
+        const tokenDecimals = await getTokenDecimals(mint);
+        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
+
+        // 🔹 Obtener balance actual en UI units
+        let balance = await getTokenBalance(chatId, mint);
+        console.log(`✅ Balance found: ${balance} tokens`);
+
+        // 🔹 Convertir balance y cantidad a vender a unidades mínimas
+        const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
+        let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
+
+        console.log(`🔹 Balance en unidades mínimas: ${balanceInUnits}`);
+        console.log(`🔹 Cantidad a vender en unidades mínimas: ${amountInUnits}`);
+
+        // 🔹 Ajustar cantidad a vender si es mayor al balance disponible
+        if (amountInUnits > balanceInUnits) {
+            console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
+            amountInUnits = balanceInUnits;
+        }
+
+        // 🔹 Validación adicional para evitar fallos
+        if (!balanceInUnits || balanceInUnits < amountInUnits || amountInUnits <= 0) {
+            console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
+            return null;
+        }
+
+        console.log("🔹 Fetching Jupiter sell quote...");
+
+        // 🔹 Obtener cotización de venta en Jupiter con optimización de slippage
+        const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
+            params: {
+                inputMint: mint,
+                outputMint: "So11111111111111111111111111111111111111112", // SOL
+                amount: amountInUnits,
+                dynamicSlippage: true, // 🔹 Activar optimización de slippage dinámico
+                swapMode: "ExactIn" // 🔹 Se garantiza que la cantidad vendida sea exacta
+            }
+        });
+
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
+            console.error("❌ No valid quote retrieved from Jupiter.");
+            return null;
+        }
+
+        console.log("✅ Successfully obtained sell quote.", quoteResponse.data);
+
+        // 🔹 Solicitar transacción de swap a Jupiter con optimización de prioridad
+        const swapResponse = await axios.post(JUPITER_API_URL, {
+            quoteResponse: quoteResponse.data,
+            userPublicKey: wallet.publicKey.toBase58(),
+            wrapAndUnwrapSol: true,
+            prioritizationFeeLamports: 5000 // 🔹 Asegura ejecución más rápida
+        });
+
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            console.error("❌ Failed to construct swap transaction.");
+            return null;
+        }
+
+        console.log("✅ Swap transaction received from Jupiter.");
+
+        // 🔹 Decodificar y firmar la transacción
+        const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
+        const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+        versionedTransaction.sign([wallet]);
+
+        console.log("✅ Transaction successfully signed.");
+        console.log("🚀 Sending transaction to Solana network...");
+
+        // 🔹 Enviar transacción a Solana
+        const txSignature = await connection.sendTransaction(versionedTransaction, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed"
+        });
+
+        console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
+        return txSignature;
+
+    } catch (error) {
+        console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
+
+        // 🔄 Reintentar la venta si hay un error, hasta 3 intentos
+        if (attempt < 3) {
+            console.log(`🔄 Retrying sale (Attempt ${attempt + 1})...`);
+            return await executeJupiterSell(chatId, mint, amount, attempt + 1);
+        } else {
+            console.error("❌ Maximum retries reached. Sale failed.");
+            return null;
+        }
+    }
+}
+
+// 🔹 Obtener los decimales del token
+async function getTokenDecimals(mint) {
+    try {
+        const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mint));
+        
+        if (!tokenInfo.value || !tokenInfo.value.data) {
+            console.warn(`⚠️ No se encontró información del token ${mint}, usando 6 decimales por defecto.`);
+            return 6; // Asume 6 si no encuentra info
+        }
+
+        const decimals = tokenInfo.value.data.parsed.info.decimals;
+        console.log(`✅ Token ${mint} tiene ${decimals} decimales.`);
+        return decimals;
+    } catch (error) {
+        console.error(`❌ Error obteniendo decimales del token ${mint}:`, error);
+        return 6; // Devuelve 6 como fallback
+    }
+}
+
+// 🔹 Función para verificar y crear la ATA si no existe
+async function ensureAssociatedTokenAccount(wallet, mint, connection) {
+    try {
+        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+
+        // 🔹 Verificar si la cuenta ya existe en la blockchain
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (ataInfo !== null) {
+            console.log(`✅ ATA already exists for ${mint}: ${ata.toBase58()}`);
+            return ata;
+        }
+
+        console.log(`⚠️ ATA not found, creating a new one for token ${mint}...`);
+
+        // 🔹 Crear la instrucción para la ATA
+        const transaction = new Transaction().add(
+            createAssociatedTokenAccountInstruction(
+                wallet.publicKey,  // Payer (quién paga la transacción)
+                ata,               // Dirección de la ATA
+                wallet.publicKey,  // Owner (propietario)
+                new PublicKey(mint) // Mint del token
+            )
+        );
+
+        // 🔹 Firmar y enviar la transacción
+        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+
+        console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
+
+        return ata;
+    } catch (error) {
+        console.error(`❌ Error creating ATA for ${mint}:`, error);
+        return null;
+    }
+}
+
+// 🔥 Cargar swaps desde el archivo JSON
+function loadSwaps() {
+    if (fs.existsSync(SWAPS_FILE)) {
+        try {
+            const data = fs.readFileSync(SWAPS_FILE, "utf8");
+            return JSON.parse(data);
+        } catch (error) {
+            console.error("❌ Error cargando swaps:", error);
+            return {};
+        }
+    }
+    return {};
+}
+
+// 📝 Guardar swaps en el archivo JSON
+function saveSwaps(swaps) {
+    try {
+        fs.writeFileSync(SWAPS_FILE, JSON.stringify(swaps, null, 2));
+        console.log("📂 Swaps actualizados.");
+    } catch (error) {
+        console.error("❌ Error guardando swaps:", error);
+    }
+}
+
+// 🔥 Cargar swaps al iniciar
+let swaps = loadSwaps();
+
+/**
+ * 🔹 Función para guardar un swap en swaps.json
+ * @param {string} chatId - ID del usuario en Telegram
+ * @param {string} type - Tipo de swap ("Buy" o "Sell")
+ * @param {object} details - Detalles del swap
+ */
+function saveSwap(chatId, type, details) {
+    if (!swaps[chatId]) {
+        swaps[chatId] = [];
+    }
+
+    swaps[chatId].push({
+        type,
+        ...details,
+        timestamp: new Date().toISOString()
+    });
+
+    saveSwaps(swaps);
+}
+
 // 🔹 Calcular el tiempo desde la creación del par en horas, minutos y segundos
 function calculateAge(timestamp) {
     if (!timestamp) return "N/A";
@@ -1030,16 +1006,14 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
         }
     }
 }
-//FUNCION PARA EJETURAR PROCESO PRINCIPAL DE FIRMA EXTRAIDE DEL WEBSOCKET FINISH
 
-//OTRAS FUNCIONES POR DEFINIR
-async function getTokenInfo(mint) {
+async function getTokenNameFromSolana(mintAddress) {
     try {
-        const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mint));
-
+        const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mintAddress));
+        
         if (!tokenInfo.value || !tokenInfo.value.data) {
-            console.warn(`⚠️ No se encontró información del token ${mint} en Solana RPC.`);
-            return { name: "Unknown", symbol: "N/A" };
+            console.warn(`⚠️ No se encontró información del token ${mintAddress} en Solana RPC.`);
+            return null;
         }
 
         const parsedData = tokenInfo.value.data.parsed.info;
@@ -1049,29 +1023,11 @@ async function getTokenInfo(mint) {
         };
 
     } catch (error) {
-        console.error(`❌ Error obteniendo información del token ${mint}:`, error);
-        return { name: "Unknown", symbol: "N/A" };
+        console.error(`❌ Error obteniendo información del token ${mintAddress}:`, error);
+        return null;
     }
 }
 
-async function getTokenDecimals(mint) {
-    try {
-        const tokenAccount = await connection.getParsedAccountInfo(new PublicKey(mint));
-
-        if (!tokenAccount.value || !tokenAccount.value.data) {
-            console.warn(`⚠️ No se encontraron datos del token ${mint}`);
-            return 0;
-        }
-
-        return tokenAccount.value.data.parsed.info.decimals || 0;
-    } catch (error) {
-        console.error(`❌ Error obteniendo decimales del token ${mint}:`, error);
-        return 0;
-    }
-}
-//OTRAS FUNCIONES POR DEFINIR FINISH
-
-//FUNCION PARA ANALIZAR LA FIRMA DEL SWAP Y SACAR LOS VALORES PARA GENERAR EL MENSAJE DE COMPRA/VENTA
 async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
     let retryAttempts = 0;
     let delay = 3000; // 3 segundos inicial antes de la primera consulta
@@ -1110,16 +1066,10 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
             const postBalances = meta.postBalances;
             const swapFee = meta.fee / 1e9;
 
-            // Validar `expectedMint` antes de usarlo
-            if (!expectedMint || expectedMint.length < 32) {
-                console.warn("⚠️ `expectedMint` no es válido, se intentará buscar automáticamente.");
-                expectedMint = null; // Permitir que se busque cualquier token recibido
-            }
-
-            // Buscar el token comprado en `postTokenBalances`
+            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
             let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
 
-            // Si `expectedMint` no está definido, buscar cualquier token recibido que NO sea WSOL
+            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
             if (!receivedToken) {
                 receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
             }
@@ -1137,8 +1087,8 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
             const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
 
             // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
-            let soldTokenInfo = await getTokenInfo(soldTokenMint);
-            let receivedTokenInfo = await getTokenInfo(receivedToken.mint);
+            let soldTokenInfo = getTokenInfo(soldTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
 
             const soldTokenName = soldTokenInfo?.name || "Unknown";
             const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
@@ -1146,7 +1096,7 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
             const receivedTokenName = receivedTokenInfo?.name || "Unknown";
             const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
 
-            // 🔍 Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
             const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
 
             const solBefore = preBalances[0] / 1e9;
@@ -1189,16 +1139,22 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
     return null;
 }
 
-
 function detectDexPlatform(accountKeys) {
-    if (accountKeys.some(key => key.includes("JUP4"))) return "Jupiter";
-    if (accountKeys.some(key => key.includes("RAY")) || accountKeys.some(key => key.includes("Raydium"))) return "Raydium";  
-    if (accountKeys.some(key => key.includes("METEORA"))) return "Meteora";
+    const dexIdentifiers = {
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter Aggregator v6",
+        "mete1GCG6pESFVkMyfrgXW1UV3pR7xyF6LT1r6dTC4y": "Meteora",
+        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium Liquidity Pool V4",
+        "9Wq5m2K2JhE7G7q8jK8HgyR7Atsj6qGkTRS8UnToV2pj": "Orca"
+    };
+
+    for (const key of accountKeys) {
+        if (dexIdentifiers[key]) {
+            return dexIdentifiers[key];
+        }
+    }
     return "Unknown DEX";
 }
-//FUNCION PARA ANALIZAR LA FIRMA DEL SWAP Y SACAR LOS VALORES PARA GENERAR EL MENSAJE DE COMPRA/VENTA FINISH
 
-//FUNCION PARA DETECTAR INTERACION DE USUARIO CON BOTONES DE COMPRA/VENTA Y MENSAJE DE CONFIRMACION
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data = query.data;
@@ -1216,7 +1172,7 @@ bot.on("callback_query", async (query) => {
             return;
         }
 
-        bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens via Raydium...`);
+        bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${mint} tokens...`);
 
         try {
             const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
@@ -1254,15 +1210,15 @@ bot.on("callback_query", async (query) => {
                 return;
             }
 
-            // 🔹 Ejecutar venta con reintento progresivo usando Raydium
+            // 🔹 Ejecutar venta con reintento progresivo
             let attempts = 0;
             let txSignature = null;
             let delayBetweenAttempts = 5000; // Inicialmente 5s
 
             while (attempts < 3 && !txSignature) {
                 attempts++;
-                console.log(`🔄 Attempt ${attempts}/3 to execute sale on Raydium...`);
-                txSignature = await executeRaydiumSell(chatId, mint, amountToSell);
+                console.log(`🔄 Attempt ${attempts}/3 to execute sale...`);
+                txSignature = await executeJupiterSell(chatId, mint, amountToSell);
 
                 if (!txSignature) {
                     console.log(`⚠️ Sale attempt ${attempts} failed. Retrying in ${delayBetweenAttempts / 1000} sec...`);
@@ -1278,7 +1234,7 @@ bot.on("callback_query", async (query) => {
 
             bot.sendMessage(
                 chatId,
-                `✅ *Sell order executed on Raydium!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
+                `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
                 { parse_mode: "Markdown", disable_web_page_preview: true }
             );
 
@@ -1293,7 +1249,7 @@ bot.on("callback_query", async (query) => {
             while (attempt < maxAttempts && !sellDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
-                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature, mint);
+                sellDetails = await getSwapDetailsFromHeliusRPC(txSignature);
 
                 if (!sellDetails) {
                     console.log(`❌ Error retrieving swap details (Attempt ${attempt}): No transaction details found.`);
@@ -1335,8 +1291,8 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
     let receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
 
     // ✅ Construcción del mensaje mejorada
-    const sellMessage = `✅ *Sell completed successfully on Raydium*\n` +
-        `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Raydium")})\n\n` +
+    const sellMessage = `✅ *Sell completed successfully*\n` +
+        `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Sold:* ${soldAmount} Tokens\n` +
         `💰 *Got:* ${gotSol} SOL\n` +
@@ -1363,7 +1319,7 @@ async function confirmSell(chatId, sellDetails, soldAmount) {
         "SOL after sell": `${sellDetails.solAfter} SOL`
     });
 
-    console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol} on Raydium`);
+    console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
 }
 
 bot.on("callback_query", async (query) => {
@@ -1380,11 +1336,10 @@ bot.on("callback_query", async (query) => {
             return;
         }
 
-        bot.sendMessage(chatId, `🛒 Processing purchase of ${amountSOL} SOL for ${mint} via Raydium...`);
+        bot.sendMessage(chatId, `🛒 Processing purchase of ${amountSOL} SOL for ${mint}...`);
 
         try {
-            // ✅ Asegurar que `buyToken()` usa Raydium
-            const txSignature = await buyToken(chatId, mint, amountSOL, "raydium");
+            const txSignature = await buyToken(chatId, mint, amountSOL);
 
             if (!txSignature) {
                 bot.sendMessage(chatId, "❌ The purchase could not be completed.");
@@ -1402,13 +1357,13 @@ bot.on("callback_query", async (query) => {
             let swapDetails = null;
             let attempt = 0;
             const maxAttempts = 5;
-            let delay = 3000; // 3 segundos inicial
+            let delay = 3000; // Iniciar con 5 segundos
 
             while (attempt < maxAttempts && !swapDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius: ${txSignature} (Attempt ${attempt})`);
                 
-                swapDetails = await getSwapDetailsFromHeliusRPC(txSignature); // ✅ Usa Helius para obtener el swap
+                swapDetails = await getSwapDetailsFromHeliusRPC(txSignature); // 🔥 Ahora usa Helius
 
                 if (!swapDetails) {
                     console.log(`❌ Attempt ${attempt}: No transaction details found. Retrying in ${delay / 1000} sec...`);
@@ -1444,7 +1399,7 @@ async function confirmBuy(chatId, swapDetails) {
     // ✅ Extraer directamente la cantidad de tokens recibidos
     let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
 
-    // ✅ Determinar el token recibido correctamente
+    // ✅ Determinar el token recibido de manera correcta
     let receivedTokenMint = swapDetails.receivedTokenMint;
 
     // ✅ Verificar que el token es válido
@@ -1464,7 +1419,7 @@ async function confirmBuy(chatId, swapDetails) {
 
     // ✅ Formatear correctamente el resultado final
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
-        `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (Raydium)\n\n` +
+        `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
         `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +  
@@ -1505,9 +1460,7 @@ async function confirmBuy(chatId, swapDetails) {
 
     console.log("✅ Swap confirmado correctamente. Datos guardados.");
 }
-//FUNCION PARA DETECTAR INTERACION DE USUARIO CON BOTONES DE COMPRA/VENTA Y MENSAJE DE CONFIRMACION FINISH
 
-//FUNCION PARA CONSULTAR FIRMA O MINT DESDE EL CHAT DE TELEGRAM
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -1546,7 +1499,6 @@ bot.onText(/^check (.+)/, async (msg, match) => {
         bot.sendMessage(chatId, "❌ Error retrieving data.");
     }
 });
-//FUNCION PARA CONSULTAR FIRMA O MINT DESDE EL CHAT DE TELEGRAM FINISH
 
 // 🔥 Cargar suscriptores al iniciar
 loadUsers();
