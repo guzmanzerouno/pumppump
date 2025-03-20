@@ -973,11 +973,12 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
                     { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
                 ],
                 [
-                    { text: "💰 0.4 Sol", callback_data: `buy_${mint}_0.4` },
                     { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                    { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
                 ],
                 [
+                    { text: "💵 Sell 25%", callback_data: `sell_${mint}_25` },
                     { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
                     { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
                 ],
@@ -1153,6 +1154,11 @@ function detectDexPlatform(accountKeys) {
         }
     }
     return "Unknown DEX";
+}
+
+// 🔹 Obtener timestamp en EST
+function getTimestampEST() {
+    return DateTime.now().setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 }
 
 bot.on("callback_query", async (query) => {
