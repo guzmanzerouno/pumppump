@@ -1031,11 +1031,11 @@ async function getTokenNameFromSolana(mintAddress) {
 
 async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
     let retryAttempts = 0;
-    let delay = 5000;
+    let delay = 5000; // Empezamos con 5 segundos de espera
 
     while (retryAttempts < 6) {
         try {
-            console.log(`🔍 Fetching transaction details for: ${signature} (Attempt ${retryAttempts + 1})`);
+            console.log(`🔍 Attempt ${retryAttempts + 1}: Fetching transaction details from Helius RPC: ${signature}`);
 
             const response = await fetch(HELIUS_RPC_URL, {
                 method: "POST",
@@ -1050,8 +1050,13 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
 
             const result = await response.json();
 
+            // 🔹 Verificar si la respuesta de Helius es válida
             if (!result || !result.result || !result.result.meta) {
-                throw new Error("❌ No transaction metadata found.");
+                console.error(`❌ Error: No transaction metadata found (Attempt ${retryAttempts + 1}).`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                retryAttempts++;
+                delay *= 1.5; // Aumentamos progresivamente el tiempo de espera
+                continue;
             }
 
             const meta = result.result.meta;
@@ -1059,6 +1064,13 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
             const postTokenBalances = meta.postTokenBalances || [];
             const preBalances = meta.preBalances || [];
             const postBalances = meta.postBalances || [];
+
+            if (!preBalances.length || !postBalances.length) {
+                console.error(`❌ No balance data found in transaction (Attempt ${retryAttempts + 1}).`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                retryAttempts++;
+                continue;
+            }
 
             // 🔹 SOL antes y después del swap
             const solBefore = preBalances[0] / 1e9;
@@ -1121,9 +1133,9 @@ async function getSwapDetailsFromHeliusRPC(signature, walletAddress) {
 
         } catch (error) {
             console.error(`❌ Error retrieving swap details (Attempt ${retryAttempts + 1}):`, error.message);
-            delay *= 1.2;
             await new Promise(resolve => setTimeout(resolve, delay));
             retryAttempts++;
+            delay *= 1.5; // Incrementamos el tiempo de espera antes de reintentar
         }
     }
 
