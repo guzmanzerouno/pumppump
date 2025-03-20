@@ -1155,9 +1155,17 @@ function detectDexPlatform(accountKeys) {
     return "Unknown DEX";
 }
 
-// 🔹 Obtener timestamp en EST
-function getTimestampEST() {
-    return DateTime.now().setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
+// 🔹 Obtener timestamp de una transacción en EST
+async function getTransactionTimestamp(txId) {
+    try {
+        const transaction = await connection.getTransaction(txId, { commitment: "confirmed" });
+        if (!transaction || !transaction.blockTime) return "N/A";
+
+        return DateTime.fromSeconds(transaction.blockTime).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
+    } catch (error) {
+        console.error("❌ Error obteniendo timestamp de la transacción:", error);
+        return "N/A";
+    }
 }
 
 bot.on("callback_query", async (query) => {
@@ -1432,7 +1440,8 @@ async function confirmBuy(chatId, swapDetails) {
         `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
-        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
+        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`
+        `🕒 *Timestamp:* ${timestampEST}n`;
 
     bot.sendMessage(chatId, confirmationMessage, {
         parse_mode: "Markdown",
