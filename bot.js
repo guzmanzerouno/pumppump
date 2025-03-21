@@ -976,9 +976,9 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint) {
         try {
             const actionButtons = [
                 [
+                    { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
                     { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
                     { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-                    { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
                 ],
                 [
                     { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
