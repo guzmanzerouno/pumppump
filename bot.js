@@ -323,12 +323,14 @@ function calculateGraduations(migrationDate, age) {
     }
 }
 
-// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"`
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    
+    const maxWaitTime = 120000; // 2 minutos en milisegundos
+    const startTime = Date.now();
+
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
-    
+
     while (!dexData || dexData.dexId === "pumpfun") {
         try {
             const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
@@ -338,6 +340,12 @@ async function getDexScreenerData(mintAddress) {
             }
         } catch (error) {
             console.error("⚠️ Error en DexScreener:", error.message);
+        }
+
+        // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
+        if (Date.now() - startTime >= maxWaitTime) {
+            console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
+            break;
         }
 
         if (!dexData || dexData.dexId === "pumpfun") {
