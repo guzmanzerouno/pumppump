@@ -240,8 +240,8 @@ async function getMintAddressFromTransaction(signature) {
         }
 
         const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
-
-        const dateEST = DateTime.fromSeconds(transaction.blockTime)
+        const blockTime = transaction.blockTime; // timestamp en segundos
+        const dateEST = DateTime.fromSeconds(blockTime)
             .setZone("America/New_York")
             .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
@@ -255,14 +255,14 @@ async function getMintAddressFromTransaction(signature) {
         return {
             mintAddress,
             date: dateEST,
-            status: status
+            status: status,
+            blockTime // se devuelve para validación de migration date
         };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
         return null;
     }
 }
-
 function escapeMarkdown(text) {
     if (typeof text !== "string") {
         return String(text || "N/A"); // Asegurar que siempre sea string
@@ -889,11 +889,37 @@ function calculateAge(timestamp) {
     }
 }
 
+const MINTS_FILE = "mint.json";
+let processedMints = {};
+
+// Cargar los mint procesados al iniciar
+function loadProcessedMints() {
+    if (fs.existsSync(MINTS_FILE)) {
+        try {
+            const data = fs.readFileSync(MINTS_FILE, "utf8");
+            processedMints = JSON.parse(data);
+            console.log(`✅ ${Object.keys(processedMints).length} mints cargados.`);
+        } catch (error) {
+            console.error("❌ Error cargando mints:", error);
+            processedMints = {};
+        }
+    } else {
+        processedMints = {};
+    }
+}
+
+// Guardar los mint procesados en el archivo
+function saveProcessedMints() {
+    try {
+        fs.writeFileSync(MINTS_FILE, JSON.stringify(processedMints, null, 2));
+        console.log("📂 Mints actualizados.");
+    } catch (error) {
+        console.error("❌ Error guardando mints:", error);
+    }
+}
+
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
-
-//no procesar un minttokens 2 veces
-const notifiedMintTokens = new Set();
 
 async function analyzeTransaction(signature, forceCheck = false) {
     console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
@@ -922,14 +948,24 @@ async function analyzeTransaction(signature, forceCheck = false) {
 
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
 
-    // Verificar si el mint token ya fue notificado
-    if (notifiedMintTokens.has(mintData.mintAddress)) {
-        console.log(`⏩ El mint token ${mintData.mintAddress} ya fue notificado. Se omite este procesamiento.`);
+    // Validar la migration date (por ejemplo, que la transacción sea reciente)
+    const currentTime = DateTime.now().toSeconds();
+    if (currentTime - mintData.blockTime > 119) {
+        console.log(`⏩ Migration date de ${mintData.date} es mayor a 119 segundos. Token ${mintData.mintAddress} descartado.`);
         return;
     }
-    // Si no, lo agregamos para evitar futuras notificaciones duplicadas
-    notifiedMintTokens.add(mintData.mintAddress);
 
+    // Consultar en el JSON de mints procesados
+    if (processedMints[mintData.mintAddress]) {
+        console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
+        return;
+    }
+
+    // Si no, agregarlo para evitar futuras notificaciones duplicadas
+    processedMints[mintData.mintAddress] = true;
+    saveProcessedMints();
+
+    // Continuar con el procesamiento: consultar DexScreener, RugCheck, etc.
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
         console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
@@ -951,7 +987,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
 
-    // Guardar la información en tokens.json
     console.log("💾 Guardando datos en tokens.json...");
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
 
@@ -972,14 +1007,12 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
-    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
 
-    // Enviar mensaje a los suscriptores en Telegram
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
 }
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, pairAddress, mint, signature) {
+async function notifySubscribers(message, imageUrl, pairAddress, mint) {
     if (!mint) {
         console.error("⚠️ Mint inválido, no se enviará notificación.");
         return;
