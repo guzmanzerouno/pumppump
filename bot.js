@@ -16,7 +16,7 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-const PUMPSWAP_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+const RAYDIUM_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
@@ -146,7 +146,7 @@ function connectWebSocket() {
             id: 1,
             method: "logsSubscribe",
             params: [
-                { mentions: [PUMPSWAP_PROGRAM_ID] },
+                { mentions: [RAYDIUM_PROGRAM_ID] },
                 { commitment: "finalized" }
             ]
         };
@@ -202,7 +202,7 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 10 * 1000; // 30 segundos por defecto
+let DELAY_BEFORE_ANALYSIS = 15 * 1000; // 30 segundos por defecto
 
 // 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
@@ -212,9 +212,9 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
-        if (logs.some(log => log.includes("Program log: Instruction: Buy"))) {
+        if (logs.some(log => log.includes("Program log: Instruction: Migrate"))) {
             console.log(`📌 Transacción detectada: ${signature}`);
-            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
+            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1500} segundos antes de ejecutar el análisis...`);
 
             setTimeout(async () => {
                 console.log(`🚀 Ejecutando análisis para la transacción: ${signature}`);
@@ -318,15 +318,15 @@ function calculateGraduations(migrationDate, age) {
 
 const ADMIN_CHAT_ID = "472101348";
 
-// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
+// 🔹 Obtener datos desde DexScreener hasta que se obtenga algún dato o pasen 30 segundos
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    const maxWaitTime = 120000; // 2 minutos en milisegundos
+    const maxWaitTime = 30000; // 30 segundos en milisegundos
     const startTime = Date.now();
   
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
   
-    while (!dexData || dexData.dexId === "pumpfun") {
+    while (!dexData) {
       try {
         const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
         if (response.data && response.data.length > 0) {
@@ -352,21 +352,20 @@ async function getDexScreenerData(mintAddress) {
         }
       }
   
-      // Si pasaron más de 2 minutos, romper el bucle
+      // Si pasaron más de 30 segundos, romper el bucle
       if (Date.now() - startTime >= maxWaitTime) {
         console.warn("⏱️ Tiempo máximo de espera alcanzado.");
         break;
       }
   
-      if (!dexData || dexData.dexId === "pumpfun") {
+      if (!dexData) {
         console.log("⏳ Esperando 1 segundo para volver a intentar...");
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   
-    // Si al salir del bucle el dexId sigue siendo "pumpfun", descartamos la notificación
-    if (!dexData || dexData.dexId === "pumpfun") {
-      console.warn(`❌ DexScreener sigue devolviendo 'pumpfun' para ${mintAddress} tras 2 minutos. Token descartado.`);
+    if (!dexData) {
+      console.warn(`❌ No se obtuvieron datos de DexScreener para ${mintAddress} en 30 segundos.`);
       return null;
     }
   
