@@ -16,7 +16,7 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const PUMPSWAP_PROGRAM_ID = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
@@ -146,7 +146,7 @@ function connectWebSocket() {
             id: 1,
             method: "logsSubscribe",
             params: [
-                { mentions: [MIGRATION_PROGRAM_ID] },
+                { mentions: [PUMPSWAP_PROGRAM_ID] },
                 { commitment: "finalized" }
             ]
         };
@@ -202,23 +202,7 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 30 * 1000; // 30 segundos por defecto
-
-// 🔹 Comando `/delay X` para cambiar el tiempo de espera dinámicamente
-bot.onText(/\/delay (\d+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const newDelay = parseInt(match[1]);
-
-    if (isNaN(newDelay) || newDelay < 10 || newDelay > 300) {
-        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 10 y 300 segundos.", { parse_mode: "Markdown" });
-        return;
-    }
-
-    DELAY_BEFORE_ANALYSIS = newDelay * 1000;
-    bot.sendMessage(chatId, `⏳ *Nuevo tiempo de espera configurado:* ${newDelay} segundos.`, { parse_mode: "Markdown" });
-
-    console.log(`🔧 Delay actualizado a ${newDelay} segundos por el usuario.`);
-});
+let DELAY_BEFORE_ANALYSIS = 10 * 1000; // 30 segundos por defecto
 
 // 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
@@ -228,7 +212,7 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
-        if (logs.some(log => log.includes("Program log: Create"))) {
+        if (logs.some(log => log.includes("Program log: Instruction: Buy"))) {
             console.log(`📌 Transacción detectada: ${signature}`);
             console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
 
@@ -261,8 +245,15 @@ async function getMintAddressFromTransaction(signature) {
             .setZone("America/New_York")
             .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
+        const mintAddress = transaction.meta?.preTokenBalances?.[0]?.mint || "N/A";
+        
+        // Verifica si el mint address termina con "pump"
+        if (!mintAddress.toLowerCase().endsWith("pump")) {
+            console.warn("⚠️ Mint address no coincide con el patrón 'pump':", mintAddress);
+        }
+
         return {
-            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || "N/A",
+            mintAddress,
             date: dateEST,
             status: status
         };
@@ -358,9 +349,9 @@ async function getDexScreenerData(mintAddress) {
             }
         }
 
-        // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
+        // Si pasaron más de 2 minutos, rompemos el bucle
         if (Date.now() - startTime >= maxWaitTime) {
-            console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
+            console.warn("⏱️ Tiempo máximo de espera alcanzado.");
             break;
         }
 
@@ -368,6 +359,12 @@ async function getDexScreenerData(mintAddress) {
             console.log("⏳ Esperando 1 segundo para volver a intentar...");
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
+    }
+
+    // Si al salir del bucle el dexId sigue siendo "pumpfun", descartamos la notificación
+    if (!dexData || dexData.dexId === "pumpfun") {
+        console.warn("❌ DexScreener sigue devolviendo 'pumpfun' tras 2 minutos. Token descartado.");
+        return null;
     }
 
     console.log("✅ DexScreener confirmado en:", dexData.dexId);
@@ -895,34 +892,43 @@ function calculateAge(timestamp) {
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
-// 🔹 Función principal que ejecuta todo el proceso
+//no procesar un minttokens 2 veces
+const notifiedMintTokens = new Set();
+
 async function analyzeTransaction(signature, forceCheck = false) {
     console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
 
-    // Si no es un check manual y ya fue procesado, ignorarlo
+    // Evitar procesar firmas duplicadas
     if (!forceCheck && processedSignatures.has(signature)) {
         console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
-
-    // Si es un "check xxxx", permitimos que se analice de nuevo
     if (!forceCheck) {
         processedSignatures.add(signature);
     }
 
+    // Obtener información del mint token
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
         console.log("⚠️ No se pudo obtener el Mint Address. Asumiendo que la firma es un Mint Address.");
         mintData = { mintAddress: signature };
     }
 
-
+    // Si es Wrapped SOL, ignorar
     if (mintData.mintAddress === "So11111111111111111111111111111111111111112") {
         console.log("⏩ Transacción ignorada: Wrapped SOL detectado.");
         return;
     }
 
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
+
+    // Verificar si el mint token ya fue notificado
+    if (notifiedMintTokens.has(mintData.mintAddress)) {
+        console.log(`⏩ El mint token ${mintData.mintAddress} ya fue notificado. Se omite este procesamiento.`);
+        return;
+    }
+    // Si no, lo agregamos para evitar futuras notificaciones duplicadas
+    notifiedMintTokens.add(mintData.mintAddress);
 
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
@@ -945,12 +951,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
 
-    // 🔹 🔥 **GUARDAR LOS DATOS EN tokens.json**
+    // Guardar la información en tokens.json
     console.log("💾 Guardando datos en tokens.json...");
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
 
-
-    // 5️⃣ Formatear mensaje para Telegram
+    // Formatear mensaje para Telegram
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
     message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
     message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
@@ -958,22 +963,18 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
     message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
     message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
-
     message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
-
-    message += ` **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
+    message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
-
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
     message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
     message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
-
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
     message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
 
-    // 6️⃣ Enviar mensaje a los suscriptores en Telegram
+    // Enviar mensaje a los suscriptores en Telegram
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
 }
 
