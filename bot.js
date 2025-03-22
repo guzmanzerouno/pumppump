@@ -897,11 +897,11 @@ const processedSignatures = new Set();
 
 // 🔹 Función principal que ejecuta todo el proceso
 async function analyzeTransaction(signature, forceCheck = false) {
-    console.log(🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck}));
+    console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
 
     // Si no es un check manual y ya fue procesado, ignorarlo
     if (!forceCheck && processedSignatures.has(signature)) {
-        console.log(⏩ Transacción ignorada: Firma duplicada (${signature}));
+        console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
         return;
     }
 
@@ -921,24 +921,24 @@ async function analyzeTransaction(signature, forceCheck = false) {
         return;
     }
 
-    console.log(✅ Mint Address identificado: ${mintData.mintAddress});
+    console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
 
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
-        console.log(⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress});
+        console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
         return;
     }
-    console.log(✅ Datos de DexScreener obtenidos para ${mintData.mintAddress});
+    console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
 
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) {
-        console.log(⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress});
+        console.log(`⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress}`);
         return;
     }
-    console.log(✅ Datos de RugCheck obtenidos para ${mintData.mintAddress});
+    console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
 
     const priceChange24h = dexData.priceChange24h !== "N/A"
-        ? ${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%
+        ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
         : "N/A";
 
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
@@ -949,27 +949,27 @@ async function analyzeTransaction(signature, forceCheck = false) {
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
 
     // 5️⃣ Formatear mensaje para Telegram
-    let message = 💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n;
-    message += 💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n;
-    message += 💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n;
-    message += 💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n;
-    message += 💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n;
-    message += 📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n;
-    message += 💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n;
+    let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
+    message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
+    message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
+    message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
+    message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
 
-    message += ⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n;
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
 
-    message +=  **${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n;
-    message += 🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n;
+    message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
 
-    message += ⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n;
-    message += 📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n;
-    message += 🎓 **Graduations:** ${escapeMarkdown(graduations)}\n;
-    message += 🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n;
+    message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
+    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
+    message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
+    message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
 
-    message += 🔗 **Pair:** \${escapeMarkdown(String(dexData.pairAddress))}\\n;
-    message += 🔗 **Token:** \${escapeMarkdown(String(mintData.mintAddress))}\\n\n;
-    message += 🔗 **Signature:** \${escapeMarkdown(signature)}\\n\n;
+    message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
 
     // 6️⃣ Enviar mensaje a los suscriptores en Telegram
     await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
@@ -991,21 +991,21 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint, signature
         try {
             const actionButtons = [
                 [
-                    { text: "💰 0.01 Sol", callback_data: buy_${mint}_0.01 },
-                    { text: "💰 0.1 Sol", callback_data: buy_${mint}_0.1 },
-                    { text: "💰 0.2 Sol", callback_data: buy_${mint}_0.2 },
+                    { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                    { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                    { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
                 ],
                 [
-                    { text: "💰 0.5 Sol", callback_data: buy_${mint}_0.5 },
-                    { text: "💰 1.0 Sol", callback_data: buy_${mint}_1.0 },
-                    { text: "💰 2.0 Sol", callback_data: buy_${mint}_2.0 }
+                    { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                    { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
                 ],
                 [
-                    { text: "💵 Sell 50%", callback_data: sell_${mint}_50 },
-                    { text: "💯 Sell MAX", callback_data: sell_${mint}_max }
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
                 ],
                 [
-                    { text: "📊 Dexscreener", url: https://dexscreener.com/solana/${pairAddress} }
+                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
                 ]
             ];
 
@@ -1022,10 +1022,10 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint, signature
                 });
             }
 
-            console.log(✅ Mensaje enviado a ${userId});
+            console.log(`✅ Mensaje enviado a ${userId}`);
 
         } catch (error) {
-            console.error(❌ Error enviando mensaje a ${userId}:, error);
+            console.error(`❌ Error enviando mensaje a ${userId}:`, error);
         }
     }
 }
