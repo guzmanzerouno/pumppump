@@ -323,6 +323,8 @@ function calculateGraduations(migrationDate, age) {
     }
 }
 
+const ADMIN_CHAT_ID = "472101348";
+
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
@@ -340,6 +342,20 @@ async function getDexScreenerData(mintAddress) {
             }
         } catch (error) {
             console.error("⚠️ Error en DexScreener:", error.message);
+            if (error.response && error.response.status === 429) {
+                // Preparamos la información estructural de la API que estamos consultando
+                const apiInfo = {
+                    endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+                    method: "GET",
+                    status: error.response.status,
+                    data: error.response.data
+                };
+                // Enviar mensaje al chat de administración con los detalles
+                bot.sendMessage(
+                    ADMIN_CHAT_ID,
+                    `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
+                );
+            }
         }
 
         // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
