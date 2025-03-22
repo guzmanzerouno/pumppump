@@ -955,13 +955,14 @@ async function analyzeTransaction(signature, forceCheck = false) {
 
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
 
     // 6️⃣ Enviar mensaje a los suscriptores en Telegram
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
 }
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, pairAddress, mint) {
+async function notifySubscribers(message, imageUrl, pairAddress, mint, signature) {
     if (!mint) {
         console.error("⚠️ Mint inválido, no se enviará notificación.");
         return;
