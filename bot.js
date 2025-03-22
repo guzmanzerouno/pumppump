@@ -323,111 +323,118 @@ async function getDexScreenerData(mintAddress) {
     let dexData = null;
     const maxWaitTime = 120000; // 2 minutos en milisegundos
     const startTime = Date.now();
-
+  
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
-
+  
     while (!dexData || dexData.dexId === "pumpfun") {
-        try {
-            const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-            if (response.data && response.data.length > 0) {
-                dexData = response.data[0];
-                console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
-            }
-        } catch (error) {
-            console.error("⚠️ Error en DexScreener:", error.message);
-            if (error.response && error.response.status === 429) {
-                // Preparamos la información estructural de la API que estamos consultando
-                const apiInfo = {
-                    endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-                    method: "GET",
-                    status: error.response.status,
-                    data: error.response.data
-                };
-                // Enviar mensaje al chat de administración con los detalles
-                bot.sendMessage(
-                    ADMIN_CHAT_ID,
-                    `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
-                );
-            }
+      try {
+        const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+        if (response.data && response.data.length > 0) {
+          dexData = response.data[0];
+          console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
         }
-
-        // Si pasaron más de 2 minutos, rompemos el bucle
-        if (Date.now() - startTime >= maxWaitTime) {
-            console.warn("⏱️ Tiempo máximo de espera alcanzado.");
-            break;
+      } catch (error) {
+        const status = error.response?.status;
+        console.error(`⚠️ Error en DexScreener para ${mintAddress}: Status ${status} - ${error.message}`);
+        if (status === 429) {
+          // Preparar la información estructural de la API que estamos consultando
+          const apiInfo = {
+            endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+            method: "GET",
+            status: status,
+            data: error.response.data
+          };
+          // Enviar mensaje al chat de administración con los detalles
+          bot.sendMessage(
+            ADMIN_CHAT_ID,
+            `Error 429 en DexScreener para token ${mintAddress}:\n${JSON.stringify(apiInfo, null, 2)}`
+          );
         }
-
-        if (!dexData || dexData.dexId === "pumpfun") {
-            console.log("⏳ Esperando 1 segundo para volver a intentar...");
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+      }
+  
+      // Si pasaron más de 2 minutos, romper el bucle
+      if (Date.now() - startTime >= maxWaitTime) {
+        console.warn("⏱️ Tiempo máximo de espera alcanzado.");
+        break;
+      }
+  
+      if (!dexData || dexData.dexId === "pumpfun") {
+        console.log("⏳ Esperando 1 segundo para volver a intentar...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
-
+  
     // Si al salir del bucle el dexId sigue siendo "pumpfun", descartamos la notificación
     if (!dexData || dexData.dexId === "pumpfun") {
-        console.warn("❌ DexScreener sigue devolviendo 'pumpfun' tras 2 minutos. Token descartado.");
-        return null;
+      console.warn(`❌ DexScreener sigue devolviendo 'pumpfun' para ${mintAddress} tras 2 minutos. Token descartado.`);
+      return null;
     }
-
-    console.log("✅ DexScreener confirmado en:", dexData.dexId);
-
+  
+    console.log(`✅ DexScreener confirmado en: ${dexData.dexId}`);
+  
     return {
-        name: dexData.baseToken?.name || "Desconocido",
-        symbol: dexData.baseToken?.symbol || "N/A",
-        priceUsd: dexData.priceUsd || "N/A",
-        priceSol: dexData.priceNative || "N/A",
-        liquidity: dexData.liquidity?.usd || "N/A",
-        marketCap: dexData.marketCap || "N/A",
-        fdv: dexData.fdv || "N/A",
-        pairAddress: dexData.pairAddress || "N/A",
-        dex: dexData.dexId || "N/A",
-        chain: dexData.chainId || "solana",
-        creationTimestamp: dexData.pairCreatedAt || null,
-        priceChange24h: dexData.priceChange?.h24 || "N/A",
-        volume24h: dexData.volume?.h24 || "N/A",
-        buys24h: dexData.txns?.h24?.buys || "N/A",
-        sells24h: dexData.txns?.h24?.sells || "N/A",
-        website: dexData.info?.websites?.[0]?.url || "N/A"
+      name: dexData.baseToken?.name || "Desconocido",
+      symbol: dexData.baseToken?.symbol || "N/A",
+      priceUsd: dexData.priceUsd || "N/A",
+      priceSol: dexData.priceNative || "N/A",
+      liquidity: dexData.liquidity?.usd || "N/A",
+      marketCap: dexData.marketCap || "N/A",
+      fdv: dexData.fdv || "N/A",
+      pairAddress: dexData.pairAddress || "N/A",
+      dex: dexData.dexId || "N/A",
+      chain: dexData.chainId || "solana",
+      creationTimestamp: dexData.pairCreatedAt || null,
+      priceChange24h: dexData.priceChange?.h24 || "N/A",
+      volume24h: dexData.volume?.h24 || "N/A",
+      buys24h: dexData.txns?.h24?.buys || "N/A",
+      sells24h: dexData.txns?.h24?.sells || "N/A",
+      website: dexData.info?.websites?.[0]?.url || "N/A"
     };
-}
+  }
 
 // 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
 async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
     let attempt = 1;
-
+  
     while (attempt <= retries) {
-        try {
-            console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
-            const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
-
-            if (!response.data) {
-                throw new Error("No response data from RugCheck.");
-            }
-
-            const data = response.data;
-            return {
-                name: data.fileMeta?.name || "N/A",
-                symbol: data.fileMeta?.symbol || "N/A",
-                imageUrl: data.fileMeta?.image || "",
-                riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
-                riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
-                lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
-            };
-
-        } catch (error) {
-            console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
-
-            if (attempt < retries && error.response?.status === 502) {
-                console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-                attempt++;
-            } else {
-                console.log(`❌ RugCheck API failed after ${retries} attempts.`);
-                return null;
-            }
+      try {
+        console.log(`🔍 Fetching RugCheck data for token ${tokenAddress} (Attempt ${attempt}/${retries})...`);
+        const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+  
+        if (!response.data) {
+          throw new Error("No response data from RugCheck.");
         }
+  
+        const data = response.data;
+        return {
+          name: data.fileMeta?.name || "N/A",
+          symbol: data.fileMeta?.symbol || "N/A",
+          imageUrl: data.fileMeta?.image || "",
+          riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
+          riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+          lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
+        };
+  
+      } catch (error) {
+        const status = error.response?.status;
+        console.error(`❌ Error fetching RugCheck data for token ${tokenAddress} (Attempt ${attempt}): Status ${status} - ${error.message}`);
+  
+        if (status === 429) {
+          console.warn(`⚠️ Rate limit (429) encountered for token ${tokenAddress}. Retrying after ${delayMs}ms delay...`);
+        } else if (attempt < retries && status === 502) {
+          console.warn(`⚠ RugCheck API returned 502 for token ${tokenAddress}. Retrying in ${delayMs / 1000} seconds...`);
+        }
+  
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          attempt++;
+        } else {
+          console.log(`❌ RugCheck API failed for token ${tokenAddress} after ${retries} attempts.`);
+          return null;
+        }
+      }
     }
-}
+  }
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
@@ -894,37 +901,44 @@ function calculateAge(timestamp) {
 const MINTS_FILE = "mint.json";
 let processedMints = {};
 
-// Cargar los mint procesados al iniciar
+// Cargar los mint procesados al iniciar (esto debe llamarse una sola vez al arrancar el bot)
 function loadProcessedMints() {
     if (fs.existsSync(MINTS_FILE)) {
-        try {
-            const data = fs.readFileSync(MINTS_FILE, "utf8");
-            processedMints = JSON.parse(data);
-            console.log(`✅ ${Object.keys(processedMints).length} mints cargados.`);
-        } catch (error) {
-            console.error("❌ Error cargando mints:", error);
-            processedMints = {};
-        }
-    } else {
+      try {
+        const data = fs.readFileSync(MINTS_FILE, "utf8");
+        processedMints = JSON.parse(data);
+        console.log(`✅ ${Object.keys(processedMints).length} mints cargados.`);
+      } catch (error) {
+        console.error("❌ Error cargando mints:", error);
         processedMints = {};
+      }
+    } else {
+      processedMints = {};
     }
-}
+  }
 
 // Guardar los mint procesados en el archivo
 function saveProcessedMints() {
     try {
-        fs.writeFileSync(MINTS_FILE, JSON.stringify(processedMints, null, 2));
-        console.log("📂 Mints actualizados.");
+      fs.writeFileSync(MINTS_FILE, JSON.stringify(processedMints, null, 2));
+      console.log("📂 Mints actualizados.");
     } catch (error) {
-        console.error("❌ Error guardando mints:", error);
+      console.error("❌ Error guardando mints:", error);
     }
-}
+  }
+  
+  // Llamamos a loadProcessedMints() al inicio para cargar lo que ya se haya procesado
+  loadProcessedMints();
 
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
+// ANALISIS DEL TOKEN
 async function analyzeTransaction(signature, forceCheck = false) {
     console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
+  
+    // Agregar 1 segundo de retraso adicional en cada verificación
+    await new Promise(resolve => setTimeout(resolve, 1000));
   
     // Evitar procesar firmas duplicadas
     if (!forceCheck && processedSignatures.has(signature)) {
@@ -935,7 +949,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
       processedSignatures.add(signature);
     }
   
-    // Obtener información del mint token (solo retorna si termina en "pump")
+    // Obtener información del mint token (getMintAddressFromTransaction se encargará de
+    // retornar null si el mint no termina en "pump")
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
       console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
@@ -950,12 +965,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
   
-    // Validar que la transacción sea reciente (migration date < 119 segundos)
-    const currentTime = DateTime.now().toSeconds();
-    if (currentTime - mintData.blockTime > 119) {
-      console.log(`⏩ Migration date de ${mintData.date} es mayor a 119 segundos. Token ${mintData.mintAddress} descartado.`);
-      return;
-    }
+    // (Se removió la validación de 119 segundos)
   
     // Consultar en el JSON de mints procesados (mint.json)
     if (processedMints[mintData.mintAddress]) {
@@ -963,7 +973,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       return;
     }
   
-    // Agregar el mint address para evitar futuras notificaciones duplicadas
+    // Agregar el mint para evitar futuras notificaciones duplicadas
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
@@ -1089,116 +1099,125 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
+// VERIFICACON DE FIRMA getTransaction
 async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
     let retryAttempts = 0;
     let delay = 3000; // 3 segundos inicial antes de la primera consulta
     const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-
+  
     while (retryAttempts < 6) { // Máximo de 6 intentos
-        try {
-            console.log(`🔍 Fetching transaction details from Helius: ${signature} (Attempt ${retryAttempts + 1})`);
-
-            const response = await axios.post(HELIUS_RPC_URL, {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "getTransaction",
-                params: [
-                    signature,
-                    {
-                        encoding: "json",
-                        commitment: "confirmed",
-                        maxSupportedTransactionVersion: 0
-                    }
-                ]
-            });
-
-            if (!response.data || !response.data.result) {
-                throw new Error("❌ No transaction details found.");
+      try {
+        console.log(`🔍 Fetching transaction details from Helius: ${signature} (Attempt ${retryAttempts + 1})`);
+  
+        const response = await axios.post(HELIUS_RPC_URL, {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getTransaction",
+          params: [
+            signature,
+            {
+              encoding: "json",
+              commitment: "confirmed",
+              maxSupportedTransactionVersion: 0
             }
-
-            const txData = response.data.result;
-            const meta = txData.meta;
-
-            if (meta.err) {
-                throw new Error("Transaction failed on Solana.");
-            }
-
-            const preBalances = meta.preBalances;
-            const postBalances = meta.postBalances;
-            const swapFee = meta.fee / 1e9;
-
-            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
-            let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
-
-            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
-            if (!receivedToken) {
-                receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
-            }
-
-            if (!receivedToken) {
-                throw new Error("❌ No valid received token found.");
-            }
-
-            // 🔹 Capturar la cantidad correcta del token comprado
-            const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
-
-            // 🔹 Identificar el token vendido
-            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
-            const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
-            const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
-
-            // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
-            let soldTokenInfo = getTokenInfo(soldTokenMint);
-            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
-
-            const soldTokenName = soldTokenInfo?.name || "Unknown";
-            const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
-
-            const receivedTokenName = receivedTokenInfo?.name || "Unknown";
-            const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
-
-            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
-            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
-
-            const solBefore = preBalances[0] / 1e9;
-            const solAfter = postBalances[0] / 1e9;
-            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
-
-            return {
-                inputAmount: inputAmount,
-                soldAmount: soldAmount,
-                receivedAmount: receivedAmount,  // ✅ Ahora la cantidad correcta del token comprado
-                swapFee: swapFee.toFixed(6),
-                soldTokenMint: soldTokenMint,
-                receivedTokenMint: receivedToken.mint,
-                soldTokenName: soldTokenName,
-                soldTokenSymbol: soldTokenSymbol,
-                receivedTokenName: receivedTokenName,
-                receivedTokenSymbol: receivedTokenSymbol,
-                dexPlatform: dexPlatform,
-                walletAddress: txData.transaction.message.accountKeys[0],
-                solBefore: solBefore.toFixed(3),
-                solAfter: solAfter.toFixed(3)
-            };
-
-        } catch (error) {
-            console.error(`❌ Error retrieving swap details from Helius (Attempt ${retryAttempts + 1}):`, error.message);
-
-            if (error.response && error.response.status === 429) {
-                console.log("⚠️ Rate limit reached, waiting longer before retrying...");
-                delay *= 1.5;
-            } else {
-                delay *= 1.2;
-            }
-
-            await new Promise(resolve => setTimeout(resolve, delay));
-            retryAttempts++;
+          ]
+        });
+  
+        if (!response.data || !response.data.result) {
+          throw new Error("❌ No transaction details found.");
         }
+  
+        const txData = response.data.result;
+        const meta = txData.meta;
+  
+        if (meta.err) {
+          throw new Error("Transaction failed on Solana.");
+        }
+  
+        const preBalances = meta.preBalances;
+        const postBalances = meta.postBalances;
+        const swapFee = meta.fee / 1e9;
+  
+        // Buscar el token comprado en postTokenBalances usando expectedMint
+        let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
+  
+        // Fallback: si no encuentra el expectedMint, usar el primer token distinto a WSOL
+        if (!receivedToken) {
+          receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
+        }
+  
+        if (!receivedToken) {
+          throw new Error("❌ No valid received token found.");
+        }
+  
+        // Capturar la cantidad correcta del token comprado
+        const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
+  
+        // Identificar el token vendido
+        let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+        const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+        const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
+  
+        // Obtener nombre y símbolo de los tokens vendidos y recibidos
+        let soldTokenInfo = getTokenInfo(soldTokenMint);
+        let receivedTokenInfo = getTokenInfo(receivedToken.mint);
+  
+        const soldTokenName = soldTokenInfo?.name || "Unknown";
+        const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
+        const receivedTokenName = receivedTokenInfo?.name || "Unknown";
+        const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
+  
+        // Detectar en qué plataforma se realizó el swap (Jupiter, Raydium, etc.)
+        const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
+        const solBefore = preBalances[0] / 1e9;
+        const solAfter = postBalances[0] / 1e9;
+        const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
+  
+        return {
+          inputAmount: inputAmount,
+          soldAmount: soldAmount,
+          receivedAmount: receivedAmount,
+          swapFee: swapFee.toFixed(6),
+          soldTokenMint: soldTokenMint,
+          receivedTokenMint: receivedToken.mint,
+          soldTokenName: soldTokenName,
+          soldTokenSymbol: soldTokenSymbol,
+          receivedTokenName: receivedTokenName,
+          receivedTokenSymbol: receivedTokenSymbol,
+          dexPlatform: dexPlatform,
+          walletAddress: txData.transaction.message.accountKeys[0],
+          solBefore: solBefore.toFixed(3),
+          solAfter: solAfter.toFixed(3)
+        };
+  
+      } catch (error) {
+        console.error(`❌ Error retrieving swap details from Helius (Attempt ${retryAttempts + 1}):`, error.message);
+  
+        if (error.response && error.response.status === 429) {
+          console.log("⚠️ Rate limit reached, waiting longer before retrying...");
+          // Enviar notificación al chat de administración
+          bot.sendMessage(
+            ADMIN_CHAT_ID,
+            `Error 429 en Helius RPC para la firma ${signature}:\n${JSON.stringify({
+              endpoint: HELIUS_RPC_URL,
+              method: "POST",
+              status: error.response.status,
+              data: error.response.data
+            }, null, 2)}`
+          );
+          delay *= 1.5;
+        } else {
+          delay *= 1.2;
+        }
+  
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retryAttempts++;
+      }
     }
-
+  
     console.error("❌ Failed to retrieve swap details after multiple attempts.");
     return null;
-}
+  }
 
 function detectDexPlatform(accountKeys) {
     const dexIdentifiers = {
