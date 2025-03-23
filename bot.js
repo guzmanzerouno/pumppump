@@ -323,6 +323,33 @@ function escapeMarkdown(text) {
         .replace(/!/g, "\\!");
 }
 
+// 🔹 Calcular la diferencia en segundos para "Graduations"
+function calculateGraduations(migrationDate, age) {
+    try {
+        const migrationDateTime = DateTime.fromFormat(migrationDate, "MM/dd/yyyy HH:mm:ss 'EST'", { zone: "America/New_York" });
+
+        // Extraer horas, minutos y segundos correctamente
+        const ageParts = age.match(/(?:(\d+)h )?(\d+)m (\d+)s/);
+        if (!ageParts) return "N/A";
+
+        const hours = ageParts[1] ? parseInt(ageParts[1], 10) : 0;
+        const minutes = parseInt(ageParts[2], 10);
+        const seconds = parseInt(ageParts[3], 10);
+
+        // Calcular la fecha final sumando la edad al tiempo de migración
+        const finalTime = migrationDateTime.plus({ hours, minutes, seconds });
+
+        // Obtener la diferencia con el tiempo actual en EST
+        const nowEST = DateTime.now().setZone("America/New_York");
+        const diffSeconds = Math.abs(Math.round(nowEST.diff(finalTime, "seconds").seconds)); // Redondea a número entero
+
+        return `${diffSeconds} Seg`;
+    } catch (error) {
+        console.error("❌ Error calculando Graduations:", error);
+        return "N/A";
+    }
+}
+
 const ADMIN_CHAT_ID = "472101348";
 
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
@@ -430,7 +457,7 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
     }
 }
 
-function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
+function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
 
     // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
@@ -440,7 +467,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     }
 
     console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h}, null, 2));
+    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
 
     // 🔹 2️⃣ Formatear datos antes de guardar
     const tokenInfo = {
@@ -458,6 +485,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
         chain: dexData.chain || "solana",
         dex: dexData.dex || "N/A",
         migrationDate: mintData.date || "N/A",
+        graduations: graduations || "N/A",
         status: mintData.status || "N/A",
         pair: dexData.pairAddress || "N/A",
         token: mintData.mintAddress || "N/A"
@@ -975,10 +1003,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
       : "N/A";
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
+    const graduations = calculateGraduations(mintData.date, age) || "N/A";
   
     console.log("💾 Guardando datos en tokens.json...");
     // Guarda toda la información en tokens.json (asegúrate de que saveTokenData guarde todas las claves originales)
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
   
     // Construir el mensaje que se enviará a Telegram (se usan todos los datos, incluido la firma)
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
@@ -992,6 +1021,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
+    message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
@@ -1088,7 +1118,7 @@ bot.on("callback_query", async (query) => {
         : "N/A";
         
       // Construir el mensaje actualizado:
-      // Se usan los valores originales para los datos de RugCheck, migración, status y firma
+      // Se usan los valores originales para los datos de RugCheck, migración, graduations, status y firma
       let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
       updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
       // Valores actualizados de DexScreener:
