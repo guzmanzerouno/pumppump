@@ -983,18 +983,18 @@ async function analyzeTransaction(signature, forceCheck = false) {
     // Construir el mensaje que se enviará a Telegram (se usan todos los datos, incluido la firma)
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
     message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
     message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
     message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
     message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
     message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
     message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
-    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
     message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
-    message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
-    message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
+    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n\n`;
+    //message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
+    //message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
   
     // Se envía el mensaje a los usuarios, usando el mint para los botones
@@ -1011,6 +1011,10 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
+        [
+        // botón para refrescar los datos de DexScreener
+            { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }
+        ],
       [
         { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
         { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
@@ -1026,9 +1030,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
       ],
       [
-        // Botón para ver el token en Dexscreener y botón para refrescar los datos de DexScreener
+        // Botón para ver el token en Dexscreener 
         { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
-        { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
       ]
     ];
   
@@ -1092,21 +1095,21 @@ bot.on("callback_query", async (query) => {
       // Se usan los valores originales para los datos de RugCheck, migración, status y firma
       let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
       updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
+      updatedMessage += `⏳ **Age:** ${escapeMarkdown(newAge)} 📊 **24H:** ${escapeMarkdown(newPriceChange24h)}\n\n`;
       // Valores actualizados de DexScreener:
       updatedMessage += `💲 **USD:** ${escapeMarkdown(String(updatedDexData.priceUsd))}\n`;
       updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(updatedDexData.priceSol))}\n`;
       updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(String(updatedDexData.liquidity))}\n`;
       updatedMessage += `📈 **Market Cap:** $${escapeMarkdown(String(updatedDexData.marketCap))}\n`;
       updatedMessage += `💹 **FDV:** $${escapeMarkdown(String(updatedDexData.fdv))}\n\n`;
-      updatedMessage += `⏳ **Age:** ${escapeMarkdown(newAge)} 📊 **24H:** ${escapeMarkdown(newPriceChange24h)}\n\n`;
       // Datos originales de RugCheck
       updatedMessage += `**${escapeMarkdown(String(originalTokenData.warning))}**\n`;
       updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
       // Actualización de información de DexScreener para chain, dex y pair
       updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(updatedDexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(updatedDexData.dex))}\n`;
-      updatedMessage += `📆 **Migration Date:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n`;
-      updatedMessage += `🔄 **Status:** ${escapeMarkdown(String(originalTokenData.status))}\n\n`;
-      updatedMessage += `🔗 **Pair:** \`${escapeMarkdown(String(updatedDexData.pairAddress))}\`\n`;
+      updatedMessage += `📆 **Migration Date:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n\n`;
+      //updatedMessage += `🔄 **Status:** ${escapeMarkdown(String(originalTokenData.status))}\n\n`;
+      // updatedMessage += `🔗 **Pair:** \`${escapeMarkdown(String(updatedDexData.pairAddress))}\`\n`;
       // Se conserva el mint original
       updatedMessage += `🔗 **Token:** \`${escapeMarkdown(String(mint))}\`\n\n`;
       // Se conserva la firma original, si existe
@@ -1124,23 +1127,27 @@ bot.on("callback_query", async (query) => {
             reply_markup: {
               inline_keyboard: [
                 [
-                  { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                  { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                  { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-                ],
-                [
-                  { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                  { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                  { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-                ],
-                [
-                  { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                  { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-                ],
-                [
-                  { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
-                  { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
-                ]
+                    // botón para refrescar los datos de DexScreener
+                        { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }
+                    ],
+                  [
+                    { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                    { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                    { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+                  ],
+                  [
+                    { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                    { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+                  ],
+                  [
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                  ],
+                  [
+                    // Botón para ver el token en Dexscreener 
+                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+                  ]
               ]
             }
           });
@@ -1152,23 +1159,27 @@ bot.on("callback_query", async (query) => {
             reply_markup: {
               inline_keyboard: [
                 [
-                  { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                  { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                  { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-                ],
-                [
-                  { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                  { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                  { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-                ],
-                [
-                  { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                  { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-                ],
-                [
-                  { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
-                  { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
-                ]
+                    // botón para refrescar los datos de DexScreener
+                        { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }
+                    ],
+                  [
+                    { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                    { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                    { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+                  ],
+                  [
+                    { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                    { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+                  ],
+                  [
+                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                  ],
+                  [
+                    // Botón para ver el token en Dexscreener 
+                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+                  ]
               ]
             }
           });
