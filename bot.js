@@ -355,7 +355,7 @@ const ADMIN_CHAT_ID = "472101348";
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    const maxWaitTime = 30000; // 1/2 minutos en milisegundos
+    const maxWaitTime = 60000; // 1/2 minutos en milisegundos
     const startTime = Date.now();
 
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
@@ -954,11 +954,10 @@ function saveProcessedMints() {
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
-// 🔹 Función principal que ejecuta todo el proceso
+// Función principal que ejecuta todo el proceso
 async function analyzeTransaction(signature, forceCheck = false) {
     console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
   
-    // Si no es un check manual y la firma ya fue procesada, se omite
     if (!forceCheck && processedSignatures.has(signature)) {
       console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
       return;
@@ -967,7 +966,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       processedSignatures.add(signature);
     }
   
-    // Obtener el mint token desde la transacción (se busca el mint que termine en "pump")
+    // Obtener el mint token desde la transacción (buscando el mint que termine en "pump")
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
       console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
@@ -976,17 +975,15 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
   
-    // Consultar en el JSON de mints procesados (mint.json) para evitar notificaciones duplicadas
+    // Evitar notificaciones duplicadas (consultando el archivo mint.json)
     if (processedMints[mintData.mintAddress]) {
       console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
       return;
     }
-  
-    // Agregar el mint a processedMints y guardarlo en mint.json
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Continuar con el procesamiento: obtener datos de DexScreener y RugCheck
+    // Obtener datos de DexScreener y RugCheck
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
       console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
@@ -1004,14 +1001,13 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const priceChange24h = dexData.priceChange24h !== "N/A"
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
       : "N/A";
-  
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
     const graduations = calculateGraduations(mintData.date, age) || "N/A";
   
     console.log("💾 Guardando datos en tokens.json...");
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
   
-    // Formatear mensaje para Telegram
+    // Construir mensaje original con todos los datos
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
     message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
     message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
@@ -1028,64 +1024,139 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
+    // NOTA: Se pasa como tercer parámetro el mint (que es el token)
+    await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
   }
-
-// 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, mintAddress, mint) {
-  if (!mint) {
-    console.error("⚠️ Mint inválido, no se enviará notificación.");
-    return;
-  }
-
-  for (const userId in users) {
-    const user = users[userId];
-
-    // Evitar enviar mensajes a usuarios no registrados
-    if (!user || !user.subscribed || !user.privateKey) continue;
-
-    try {
-      const actionButtons = [
-        [
-          { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-          { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-          { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-        ],
-        [
-          { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-          { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-          { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-        ],
-        [
-          { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-          { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-        ],
-        [
-          { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mintAddress}` }
-        ]
-      ];
-
-      if (imageUrl) {
-        await bot.sendPhoto(userId, imageUrl, {
-          caption: message,
-          parse_mode: "Markdown",
-          reply_markup: { inline_keyboard: actionButtons }
-        });
-      } else {
-        await bot.sendMessage(userId, message, {
-          parse_mode: "Markdown",
-          reply_markup: { inline_keyboard: actionButtons }
-        });
+  
+  // Función para notificar a los usuarios (usa el mint para botones y URL de DexScreener)
+  async function notifySubscribers(message, imageUrl, mint) {
+    if (!mint) {
+      console.error("⚠️ Mint inválido, no se enviará notificación.");
+      return;
+    }
+  
+    // Crear botones: se usa el mismo valor 'mint' para la compra, venta, y para la URL de Dexscreener y botón Refresh
+    const actionButtons = [
+      [
+        { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+        { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+      ],
+      [
+        { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+        { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+        { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+      ],
+      [
+        { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+        { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+      ],
+      [
+        { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+        { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
+      ]
+    ];
+  
+    // Enviar mensaje a cada usuario suscrito
+    for (const userId in users) {
+      const user = users[userId];
+      if (!user || !user.subscribed || !user.privateKey) continue;
+      try {
+        if (imageUrl) {
+          await bot.sendPhoto(userId, imageUrl, {
+            caption: message,
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        } else {
+          await bot.sendMessage(userId, message, {
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        }
+        console.log(`✅ Mensaje enviado a ${userId}`);
+      } catch (error) {
+        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
       }
-
-      console.log(`✅ Mensaje enviado a ${userId}`);
-    } catch (error) {
-      console.error(`❌ Error enviando mensaje a ${userId}:`, error);
     }
   }
-}
 
+// Función que refresca solo los datos actualizados de Dexscreener
+bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data = query.data;
+  
+    if (data.startsWith("refresh_")) {
+      // Se espera que el callback venga en el formato: refresh_<mint>
+      const mint = data.split("_")[1];
+      console.log(`🔄 Refrescando datos de DexScreener para el token: ${mint}`);
+  
+      // Obtenemos los datos actualizados de DexScreener
+      const updatedDexData = await getDexScreenerData(mint);
+      if (!updatedDexData) {
+        await bot.answerCallbackQuery(query.id, { text: "No se pudieron actualizar los datos." });
+        return;
+      }
+      
+      // Leemos la información original guardada (que incluye los datos de RugCheck, firma, etc.)
+      const originalTokenData = getTokenInfo(mint);
+      if (!originalTokenData) {
+        await bot.answerCallbackQuery(query.id, { text: "No se encontró información original para este token." });
+        return;
+      }
+  
+      // Para recalcular campos derivados (por ejemplo, Age y 24H) con los nuevos datos de DexScreener:
+      const newAge = calculateAge(updatedDexData.creationTimestamp) || "N/A";
+      const newPriceChange24h = updatedDexData.priceChange24h !== "N/A"
+        ? `${updatedDexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${updatedDexData.priceChange24h}%`
+        : "N/A";
+      
+      // Construimos el mensaje actualizado usando los nuevos datos de DexScreener
+      // y conservamos los otros valores originales (por ejemplo, de RugCheck y demás)
+      let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
+      updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
+      // Campos actualizados de DexScreener:
+      updatedMessage += `💲 **USD:** ${escapeMarkdown(String(updatedDexData.priceUsd))}\n`;
+      updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(updatedDexData.priceSol))}\n`;
+      updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(String(updatedDexData.liquidity))}\n`;
+      updatedMessage += `📈 **Market Cap:** $${escapeMarkdown(String(updatedDexData.marketCap))}\n`;
+      updatedMessage += `💹 **FDV:** $${escapeMarkdown(String(updatedDexData.fdv))}\n\n`;
+      updatedMessage += `⏳ **Age:** ${escapeMarkdown(newAge)} 📊 **24H:** ${escapeMarkdown(newPriceChange24h)}\n\n`;
+      // Se mantienen los datos originales de RugCheck y otros:
+      updatedMessage += `**${escapeMarkdown(String(originalTokenData.riskLevel))}:** ${escapeMarkdown(String(originalTokenData.riskDescription))}\n`;
+      updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.lpLocked))}%\n\n`;
+      // Actualizamos también la cadena, dex y pair de Dexscreener con los nuevos valores
+      updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(updatedDexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(updatedDexData.dex))}\n`;
+      updatedMessage += `📆 **Migration Date:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n`;
+      updatedMessage += `🎓 **Graduations:** ${escapeMarkdown(String(originalTokenData.graduations))}\n`;
+      updatedMessage += `🔄 **Status:** ${escapeMarkdown(String(originalTokenData.status))}\n\n`;
+      updatedMessage += `🔗 **Pair:** \`${escapeMarkdown(String(updatedDexData.pairAddress))}\`\n`;
+      // El token se conserva de la info original
+      updatedMessage += `🔗 **Token:** \`${escapeMarkdown(String(mint))}\`\n\n`;
+      // También se podría conservar la firma original si se desea (si se guardó en tokens.json)
+      if (originalTokenData.signature) {
+        updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(String(originalTokenData.signature))}\`\n`;
+      }
+  
+      try {
+        await bot.editMessageText(updatedMessage, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: "Markdown"
+        });
+        await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
+        console.log(`✅ Datos actualizados para ${mint}`);
+      } catch (editError) {
+        console.error("❌ Error actualizando el mensaje:", editError);
+        await bot.answerCallbackQuery(query.id, { text: "Error al actualizar." });
+      }
+    } else {
+      await bot.answerCallbackQuery(query.id);
+    }
+  });
 
 async function getTokenNameFromSolana(mintAddress) {
     try {
