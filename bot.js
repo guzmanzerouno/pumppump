@@ -212,7 +212,7 @@ function processTransaction(transaction) {
 
         if (!logs.length || !signature) return;
 
-        if (logs.some(log => log.includes("Program log: Instruction: Migrate"))) {
+        if (logs.some(log => log.includes("Program log: Instruction: CreatePool"))) {
             console.log(`📌 Transacción detectada: ${signature}`);
             console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1500} segundos antes de ejecutar el análisis...`);
 
