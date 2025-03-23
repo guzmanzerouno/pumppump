@@ -432,86 +432,87 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
-
-    // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
+  
+    // 1️⃣ Verificar si los datos son válidos antes de guardar
     if (!dexData || !mintData || !rugCheckData) {
-        console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
-        return;
+      console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
+      return;
     }
-
+  
     console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h}, null, 2));
-
-    // 🔹 2️⃣ Formatear datos antes de guardar
+    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h }, null, 2));
+  
+    // 2️⃣ Formatear datos antes de guardar
     const tokenInfo = {
-        symbol: dexData.symbol || "Unknown",
-        name: dexData.name || "Unknown",
-        USD: dexData.priceUsd || "N/A",
-        SOL: dexData.priceSol || "N/A",
-        liquidity: dexData.liquidity || "N/A",
-        marketCap: dexData.marketCap || "N/A",
-        FDV: dexData.fdv || "N/A",
-        age: age || "N/A",
-        "24H": priceChange24h || "N/A",
-        warning: rugCheckData.riskDescription || "N/A",
-        LPLOCKED: rugCheckData.lpLocked || "N/A",
-        chain: dexData.chain || "solana",
-        dex: dexData.dex || "N/A",
-        migrationDate: mintData.date || "N/A",
-        status: mintData.status || "N/A",
-        pair: dexData.pairAddress || "N/A",
-        token: mintData.mintAddress || "N/A"
+      symbol: dexData.symbol || "Unknown",
+      name: dexData.name || "Unknown",
+      USD: dexData.priceUsd || "N/A",
+      SOL: dexData.priceSol || "N/A",
+      liquidity: dexData.liquidity || "N/A",
+      marketCap: dexData.marketCap || "N/A",
+      FDV: dexData.fdv || "N/A",
+      age: age || "N/A",
+      "24H": priceChange24h || "N/A",
+      riskLevel: rugCheckData.riskLevel || "N/A",         // Nuevo campo para el nivel de riesgo
+      warning: rugCheckData.riskDescription || "No risks detected",  // Nuevo campo para la descripción del riesgo
+      LPLOCKED: rugCheckData.lpLocked || "N/A",
+      chain: dexData.chain || "solana",
+      dex: dexData.dex || "N/A",
+      migrationDate: mintData.date || "N/A",
+      status: mintData.status || "N/A",
+      pair: dexData.pairAddress || "N/A",
+      token: mintData.mintAddress || "N/A"
     };
-
+  
     console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
-
-    // 🔹 3️⃣ Verificar si el archivo `tokens.json` existe y es válido
+  
+    // 3️⃣ Verificar si el archivo tokens.json existe y es válido
     let tokens = {};
     const filePath = 'tokens.json';
-
+  
     if (fs.existsSync(filePath)) {
-        try {
-            const fileContent = fs.readFileSync(filePath, 'utf-8');
-            tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
-            console.log("📂 Archivo tokens.json leído correctamente.");
-        } catch (error) {
-            console.error("❌ Error leyendo tokens.json:", error);
-            console.log("🔄 Restaurando tokens.json vacío...");
-            fs.writeFileSync(filePath, "{}", 'utf-8');
-            tokens = {};
-        }
+      try {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
+        console.log("📂 Archivo tokens.json leído correctamente.");
+      } catch (error) {
+        console.error("❌ Error leyendo tokens.json:", error);
+        console.log("🔄 Restaurando tokens.json vacío...");
+        fs.writeFileSync(filePath, "{}", 'utf-8');
+        tokens = {};
+      }
     } else {
-        console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
+      console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
     }
-
-    // 🔹 4️⃣ Verificar que `mintData.mintAddress` no sea `undefined`
+  
+    // 4️⃣ Verificar que mintData.mintAddress no sea undefined
     if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
-        console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
-        return;
+      console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
+      return;
     }
-
+  
     console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
-
-    // 🔹 5️⃣ Guardar los datos en `tokens.json`
+  
+    // 5️⃣ Guardar los datos en tokens.json
     tokens[mintData.mintAddress] = tokenInfo;
-
+  
     try {
-        fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-        console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+      fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
+      console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
     } catch (error) {
-        console.error("❌ Error guardando token en tokens.json:", error);
+      console.error("❌ Error guardando token en tokens.json:", error);
     }
-
-    // 🔹 6️⃣ Verificar permisos de escritura en `tokens.json`
+  
+    // 6️⃣ Verificar permisos de escritura en tokens.json
     try {
-        fs.accessSync(filePath, fs.constants.W_OK);
-        console.log("✅ Permisos de escritura en tokens.json verificados.");
+      fs.accessSync(filePath, fs.constants.W_OK);
+      console.log("✅ Permisos de escritura en tokens.json verificados.");
     } catch (error) {
-        console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-        console.log("🔄 Ejecuta este comando para arreglarlo:");
-        console.log(`chmod 666 ${filePath}`);
+      console.error("❌ Error: No hay permisos de escritura en tokens.json.");
+      console.log("🔄 Ejecuta este comando para arreglarlo:");
+      console.log(`chmod 666 ${filePath}`);
     }
-}
+  }
 
 function getTokenInfo(mintAddress) {
     if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
@@ -1103,7 +1104,7 @@ bot.on("callback_query", async (query) => {
       updatedMessage += `📈 **Market Cap:** $${escapeMarkdown(String(updatedDexData.marketCap))}\n`;
       updatedMessage += `💹 **FDV:** $${escapeMarkdown(String(updatedDexData.fdv))}\n\n`;
       // Datos originales de RugCheck
-      updatedMessage += `**${escapeMarkdown(String(originalTokenData.warning))}**\n`;
+      updatedMessage += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
       updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
       // Actualización de información de DexScreener para chain, dex y pair
       updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(updatedDexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(updatedDexData.dex))}\n`;
