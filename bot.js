@@ -1027,7 +1027,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
     message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
     // Enviar mensaje a los suscriptores vía Telegram
