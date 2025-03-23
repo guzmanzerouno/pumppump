@@ -1031,11 +1031,10 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
     // Enviar mensaje a los suscriptores vía Telegram
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.mintAddress, mintData.mintAddress, signature);
-  }
+    await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress, mintData.mintAddress);
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, mintAddress, mint, signature) {
+async function notifySubscribers(message, imageUrl, mintAddress, mint) {
     if (!mint) {
         console.error("⚠️ Mint inválido, no se enviará notificación.");
         return;
@@ -1064,6 +1063,7 @@ async function notifySubscribers(message, imageUrl, mintAddress, mint, signature
                     { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
                 ],
                 [
+                    // Ahora se usa el mintAddress para construir la URL de Dexscreener
                     { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mintAddress}` }
                 ]
             ];
