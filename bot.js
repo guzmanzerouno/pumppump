@@ -1028,10 +1028,9 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
-    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
-    // Enviar mensaje a los suscriptores vía Telegram
-    await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress, mintData.mintAddress);
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
+  }
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
 async function notifySubscribers(message, imageUrl, mintAddress, mint) {
@@ -1049,22 +1048,21 @@ async function notifySubscribers(message, imageUrl, mintAddress, mint) {
         try {
             const actionButtons = [
                 [
-                    { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                    { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                    { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+                    { text: "💰 0.01 Sol", callback_data: buy_${mint}_0.01 },
+                    { text: "💰 0.1 Sol", callback_data: buy_${mint}_0.1 },
+                    { text: "💰 0.2 Sol", callback_data: buy_${mint}_0.2 },
                 ],
                 [
-                    { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                    { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                    { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+                    { text: "💰 0.5 Sol", callback_data: buy_${mint}_0.5 },
+                    { text: "💰 1.0 Sol", callback_data: buy_${mint}_1.0 },
+                    { text: "💰 2.0 Sol", callback_data: buy_${mint}_2.0 }
                 ],
                 [
-                    { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                    { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                    { text: "💵 Sell 50%", callback_data: sell_${mint}_50 },
+                    { text: "💯 Sell MAX", callback_data: sell_${mint}_max }
                 ],
                 [
-                    // Ahora se usa el mintAddress para construir la URL de Dexscreener
-                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mintAddress}` }
+                    { text: "📊 Dexscreener", url: https://dexscreener.com/solana/${mintAddress} }
                 ]
             ];
 
@@ -1081,13 +1079,14 @@ async function notifySubscribers(message, imageUrl, mintAddress, mint) {
                 });
             }
 
-            console.log(`✅ Mensaje enviado a ${userId}`);
+            console.log(✅ Mensaje enviado a ${userId});
 
         } catch (error) {
-            console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+            console.error(❌ Error enviando mensaje a ${userId}:, error);
         }
     }
 }
+
 
 async function getTokenNameFromSolana(mintAddress) {
     try {
