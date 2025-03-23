@@ -966,7 +966,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       processedSignatures.add(signature);
     }
   
-    // Obtener el mint token desde la transacción (buscando el mint que termine en "pump")
+    // Obtener el mint token desde la transacción (se busca el mint que termine en "pump")
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
       console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
@@ -975,7 +975,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
   
-    // Evitar notificaciones duplicadas (consultando el archivo mint.json)
+    // Evitar notificaciones duplicadas (usando processedMints y mint.json)
     if (processedMints[mintData.mintAddress]) {
       console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
       return;
@@ -1007,7 +1007,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     console.log("💾 Guardando datos en tokens.json...");
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
   
-    // Construir mensaje original con todos los datos
+    // Construir mensaje completo con la información original
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
     message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
     message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
@@ -1026,18 +1026,18 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
     message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
-    // NOTA: Se pasa como tercer parámetro el mint (que es el token)
+    // Se envía el mensaje a los suscriptores (se pasa el mint, que es el token)
     await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
   }
   
-  // Función para notificar a los usuarios (usa el mint para botones y URL de DexScreener)
+  // Función para notificar a los usuarios
   async function notifySubscribers(message, imageUrl, mint) {
     if (!mint) {
       console.error("⚠️ Mint inválido, no se enviará notificación.");
       return;
     }
   
-    // Crear botones: se usa el mismo valor 'mint' para la compra, venta, y para la URL de Dexscreener y botón Refresh
+    // Construir botones usando el valor de mint para compras, ventas y para la URL de Dexscreener.
     const actionButtons = [
       [
         { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
@@ -1059,7 +1059,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ]
     ];
   
-    // Enviar mensaje a cada usuario suscrito
+    // Enviar el mensaje a cada usuario suscrito
     for (const userId in users) {
       const user = users[userId];
       if (!user || !user.subscribed || !user.privateKey) continue;
