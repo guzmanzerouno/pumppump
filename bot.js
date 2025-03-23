@@ -1089,17 +1089,17 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-// VERIFICACON DE FIRMA getTransaction
-async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
+// VERIFICACIÓN DE FIRMA getTransaction usando InstantNodes
+async function getSwapDetailsFromInstantNodesRPC(signature, expectedMint) {
     let retryAttempts = 0;
     let delay = 3000; // 3 segundos inicial antes de la primera consulta
-    const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+    const INSTANT_NODES_RPC_URL = "https://solana-api.instantnodes.io/token-hL8J457Dhvr7qc4c1GJ91VtxVaFnHzzW";
   
-    while (retryAttempts < 6) { // Máximo de 6 intentos
+    while (retryAttempts < 20) { // Máximo de 20 intentos
       try {
-        console.log(`🔍 Fetching transaction details from Helius: ${signature} (Attempt ${retryAttempts + 1})`);
+        console.log(`🔍 Fetching transaction details from InstantNodes: ${signature} (Attempt ${retryAttempts + 1})`);
   
-        const response = await axios.post(HELIUS_RPC_URL, {
+        const response = await axios.post(INSTANT_NODES_RPC_URL, {
           jsonrpc: "2.0",
           id: 1,
           method: "getTransaction",
@@ -1181,15 +1181,15 @@ async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
         };
   
       } catch (error) {
-        console.error(`❌ Error retrieving swap details from Helius (Attempt ${retryAttempts + 1}):`, error.message);
+        console.error(`❌ Error retrieving swap details from InstantNodes (Attempt ${retryAttempts + 1}):`, error.message);
   
         if (error.response && error.response.status === 429) {
           console.log("⚠️ Rate limit reached, waiting longer before retrying...");
           // Enviar notificación al chat de administración
           bot.sendMessage(
             ADMIN_CHAT_ID,
-            `Error 429 en Helius RPC para la firma ${signature}:\n${JSON.stringify({
-              endpoint: HELIUS_RPC_URL,
+            `Error 429 en InstantNodes RPC para la firma ${signature}:\n${JSON.stringify({
+              endpoint: INSTANT_NODES_RPC_URL,
               method: "POST",
               status: error.response.status,
               data: error.response.data
