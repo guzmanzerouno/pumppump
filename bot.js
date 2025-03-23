@@ -997,7 +997,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
-    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
     // Se envía el mensaje a los usuarios, usando el mint para los botones
     await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
