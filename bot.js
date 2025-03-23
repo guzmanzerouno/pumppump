@@ -16,7 +16,7 @@ const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-const RAYDIUM_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
@@ -146,7 +146,7 @@ function connectWebSocket() {
             id: 1,
             method: "logsSubscribe",
             params: [
-                { mentions: [RAYDIUM_PROGRAM_ID] },
+                { mentions: [MIGRATION_PROGRAM_ID] },
                 { commitment: "finalized" }
             ]
         };
@@ -202,7 +202,23 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 15 * 1000; // 30 segundos por defecto
+let DELAY_BEFORE_ANALYSIS = 10 * 1000; // 10 segundos por defecto
+
+// 🔹 Comando `/delay X` para cambiar el tiempo de espera dinámicamente
+bot.onText(/\/delay (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const newDelay = parseInt(match[1]);
+
+    if (isNaN(newDelay) || newDelay < 10 || newDelay > 300) {
+        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 10 y 300 segundos.", { parse_mode: "Markdown" });
+        return;
+    }
+
+    DELAY_BEFORE_ANALYSIS = newDelay * 1000;
+    bot.sendMessage(chatId, `⏳ *Nuevo tiempo de espera configurado:* ${newDelay} segundos.`, { parse_mode: "Markdown" });
+
+    console.log(`🔧 Delay actualizado a ${newDelay} segundos por el usuario.`);
+});
 
 // 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
 function processTransaction(transaction) {
@@ -214,7 +230,7 @@ function processTransaction(transaction) {
 
         if (logs.some(log => log.includes("Program log: Instruction: CreatePool"))) {
             console.log(`📌 Transacción detectada: ${signature}`);
-            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1500} segundos antes de ejecutar el análisis...`);
+            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
 
             setTimeout(async () => {
                 console.log(`🚀 Ejecutando análisis para la transacción: ${signature}`);
@@ -226,35 +242,62 @@ function processTransaction(transaction) {
     }
 }
 
-// 🔹 Obtener Mint Address desde una transacción en Solana
+// Actualización de getMintAddressFromTransaction:
+// Se recorre primero postTokenBalances y, si no se encuentra, se recorre preTokenBalances.
 async function getMintAddressFromTransaction(signature) {
     try {
-        const transaction = await connection.getTransaction(signature, {
-            maxSupportedTransactionVersion: 0,
-            commitment: "confirmed"
-        });
-
-        if (!transaction || !transaction.meta || !transaction.meta.preTokenBalances) {
-            console.error("❌ No se pudo obtener la transacción.");
-            return null;
-        }
-
-        const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
-
-        const dateEST = DateTime.fromSeconds(transaction.blockTime)
-            .setZone("America/New_York")
-            .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
-
-        return {
-            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || "N/A",
-            date: dateEST,
-            status: status
-        };
-    } catch (error) {
-        console.error("❌ Error al obtener Mint Address:", error);
+      const transaction = await connection.getTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "confirmed"
+      });
+  
+      if (!transaction || !transaction.meta) {
+        console.error("❌ No se pudo obtener la transacción.");
         return null;
+      }
+  
+      const blockTime = transaction.blockTime; // timestamp en segundos
+      const dateEST = DateTime.fromSeconds(blockTime)
+        .setZone("America/New_York")
+        .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
+      const status = transaction.meta.err ? "Failed ❌" : "Confirmed ✅";
+  
+      // Buscar en postTokenBalances el mint que termine en "pump"
+      let mintAddress = null;
+      if (transaction.meta.postTokenBalances && transaction.meta.postTokenBalances.length > 0) {
+        for (const tokenBalance of transaction.meta.postTokenBalances) {
+          if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
+            mintAddress = tokenBalance.mint;
+            break;
+          }
+        }
+      }
+      // Si no se encontró en postTokenBalances, buscar en preTokenBalances
+      if (!mintAddress && transaction.meta.preTokenBalances && transaction.meta.preTokenBalances.length > 0) {
+        for (const tokenBalance of transaction.meta.preTokenBalances) {
+          if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
+            mintAddress = tokenBalance.mint;
+            break;
+          }
+        }
+      }
+  
+      if (!mintAddress) {
+        console.warn("⚠️ No se encontró un mint que termine en 'pump'.");
+        return null;
+      }
+  
+      return {
+        mintAddress,
+        date: dateEST,
+        status,
+        blockTime
+      };
+    } catch (error) {
+      console.error("❌ Error al obtener Mint Address:", error);
+      return null;
     }
-}
+  }
 
 function escapeMarkdown(text) {
     if (typeof text !== "string") {
@@ -309,122 +352,110 @@ function calculateGraduations(migrationDate, age) {
 
 const ADMIN_CHAT_ID = "472101348";
 
-// 🔹 Obtener datos desde DexScreener hasta que se obtenga algún dato o pasen 30 segundos
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
 async function getDexScreenerData(mintAddress) {
     let dexData = null;
-    const maxWaitTime = 30000; // 30 segundos en milisegundos
+    const maxWaitTime = 30000; // 1/2 minutos en milisegundos
     const startTime = Date.now();
-  
+
     console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
-  
-    while (!dexData) {
-      try {
-        const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-        if (response.data && response.data.length > 0) {
-          dexData = response.data[0];
-          console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+
+    while (!dexData || dexData.dexId === "pumpfun") {
+        try {
+            const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+            if (response.data && response.data.length > 0) {
+                dexData = response.data[0];
+                console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+            }
+        } catch (error) {
+            console.error("⚠️ Error en DexScreener:", error.message);
+            if (error.response && error.response.status === 429) {
+                // Preparamos la información estructural de la API que estamos consultando
+                const apiInfo = {
+                    endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+                    method: "GET",
+                    status: error.response.status,
+                    data: error.response.data
+                };
+                // Enviar mensaje al chat de administración con los detalles
+                bot.sendMessage(
+                    ADMIN_CHAT_ID,
+                    `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
+                );
+            }
         }
-      } catch (error) {
-        const status = error.response?.status;
-        console.error(`⚠️ Error en DexScreener para ${mintAddress}: Status ${status} - ${error.message}`);
-        if (status === 429) {
-          // Preparar la información estructural de la API que estamos consultando
-          const apiInfo = {
-            endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-            method: "GET",
-            status: status,
-            data: error.response.data
-          };
-          // Enviar mensaje al chat de administración con los detalles
-          bot.sendMessage(
-            ADMIN_CHAT_ID,
-            `Error 429 en DexScreener para token ${mintAddress}:\n${JSON.stringify(apiInfo, null, 2)}`
-          );
+
+        // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
+        if (Date.now() - startTime >= maxWaitTime) {
+            console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
+            break;
         }
-      }
-  
-      // Si pasaron más de 30 segundos, romper el bucle
-      if (Date.now() - startTime >= maxWaitTime) {
-        console.warn("⏱️ Tiempo máximo de espera alcanzado.");
-        break;
-      }
-  
-      if (!dexData) {
-        console.log("⏳ Esperando 1 segundo para volver a intentar...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+
+        if (!dexData || dexData.dexId === "pumpfun") {
+            console.log("⏳ Esperando 1 segundo para volver a intentar...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
-  
-    if (!dexData) {
-      console.warn(`❌ No se obtuvieron datos de DexScreener para ${mintAddress} en 30 segundos.`);
-      return null;
-    }
-  
-    console.log(`✅ DexScreener confirmado en: ${dexData.dexId}`);
-  
+
+    console.log("✅ DexScreener confirmado en:", dexData.dexId);
+
     return {
-      name: dexData.baseToken?.name || "Desconocido",
-      symbol: dexData.baseToken?.symbol || "N/A",
-      priceUsd: dexData.priceUsd || "N/A",
-      priceSol: dexData.priceNative || "N/A",
-      liquidity: dexData.liquidity?.usd || "N/A",
-      marketCap: dexData.marketCap || "N/A",
-      fdv: dexData.fdv || "N/A",
-      pairAddress: dexData.pairAddress || "N/A",
-      dex: dexData.dexId || "N/A",
-      chain: dexData.chainId || "solana",
-      creationTimestamp: dexData.pairCreatedAt || null,
-      priceChange24h: dexData.priceChange?.h24 || "N/A",
-      volume24h: dexData.volume?.h24 || "N/A",
-      buys24h: dexData.txns?.h24?.buys || "N/A",
-      sells24h: dexData.txns?.h24?.sells || "N/A",
-      website: dexData.info?.websites?.[0]?.url || "N/A"
+        name: dexData.baseToken?.name || "Desconocido",
+        symbol: dexData.baseToken?.symbol || "N/A",
+        priceUsd: dexData.priceUsd || "N/A",
+        priceSol: dexData.priceNative || "N/A",
+        liquidity: dexData.liquidity?.usd || "N/A",
+        marketCap: dexData.marketCap || "N/A",
+        fdv: dexData.fdv || "N/A",
+        pairAddress: dexData.pairAddress || "N/A",
+        dex: dexData.dexId || "N/A",
+        chain: dexData.chainId || "solana",
+        creationTimestamp: dexData.pairCreatedAt || null,
+        priceChange24h: dexData.priceChange?.h24 || "N/A",
+        volume24h: dexData.volume?.h24 || "N/A",
+        buys24h: dexData.txns?.h24?.buys || "N/A",
+        sells24h: dexData.txns?.h24?.sells || "N/A",
+        website: dexData.info?.websites?.[0]?.url || "N/A"
     };
-  }
+}
 
 // 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
 async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
     let attempt = 1;
-  
+
     while (attempt <= retries) {
-      try {
-        console.log(`🔍 Fetching RugCheck data for token ${tokenAddress} (Attempt ${attempt}/${retries})...`);
-        const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
-  
-        if (!response.data) {
-          throw new Error("No response data from RugCheck.");
+        try {
+            console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
+            const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+
+            if (!response.data) {
+                throw new Error("No response data from RugCheck.");
+            }
+
+            const data = response.data;
+            return {
+                name: data.fileMeta?.name || "N/A",
+                symbol: data.fileMeta?.symbol || "N/A",
+                imageUrl: data.fileMeta?.image || "",
+                riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
+                riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+                lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
+            };
+
+        } catch (error) {
+            console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
+
+            if (attempt < retries && error.response?.status === 502) {
+                console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                attempt++;
+            } else {
+                console.log(`❌ RugCheck API failed after ${retries} attempts.`);
+                return null;
+            }
         }
-  
-        const data = response.data;
-        return {
-          name: data.fileMeta?.name || "N/A",
-          symbol: data.fileMeta?.symbol || "N/A",
-          imageUrl: data.fileMeta?.image || "",
-          riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
-          riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
-          lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
-        };
-  
-      } catch (error) {
-        const status = error.response?.status;
-        console.error(`❌ Error fetching RugCheck data for token ${tokenAddress} (Attempt ${attempt}): Status ${status} - ${error.message}`);
-  
-        if (status === 429) {
-          console.warn(`⚠️ Rate limit (429) encountered for token ${tokenAddress}. Retrying after ${delayMs}ms delay...`);
-        } else if (attempt < retries && status === 502) {
-          console.warn(`⚠ RugCheck API returned 502 for token ${tokenAddress}. Retrying in ${delayMs / 1000} seconds...`);
-        }
-  
-        if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-          attempt++;
-        } else {
-          console.log(`❌ RugCheck API failed for token ${tokenAddress} after ${retries} attempts.`);
-          return null;
-        }
-      }
     }
-  }
+}
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
@@ -923,14 +954,11 @@ function saveProcessedMints() {
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
-// ANALISIS DEL TOKEN
+// 🔹 Función principal que ejecuta todo el proceso
 async function analyzeTransaction(signature, forceCheck = false) {
     console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
   
-    // Agregar 1 segundo de retraso adicional en cada verificación
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  
-    // Evitar procesar firmas duplicadas
+    // Si no es un check manual y la firma ya fue procesada, se omite
     if (!forceCheck && processedSignatures.has(signature)) {
       console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
       return;
@@ -939,35 +967,26 @@ async function analyzeTransaction(signature, forceCheck = false) {
       processedSignatures.add(signature);
     }
   
-    // Obtener información del mint token (getMintAddressFromTransaction se encargará de
-    // retornar null si el mint no termina en "pump")
+    // Obtener el mint token desde la transacción (se busca el mint que termine en "pump")
     let mintData = await getMintAddressFromTransaction(signature);
     if (!mintData || !mintData.mintAddress) {
       console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
       return;
     }
   
-    // Si es Wrapped SOL, ignorar
-    if (mintData.mintAddress === "So11111111111111111111111111111111111111112") {
-      console.log("⏩ Transacción ignorada: Wrapped SOL detectado.");
-      return;
-    }
-  
     console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
   
-    // (Se removió la validación de 119 segundos)
-  
-    // Consultar en el JSON de mints procesados (mint.json)
+    // Consultar en el JSON de mints procesados (mint.json) para evitar notificaciones duplicadas
     if (processedMints[mintData.mintAddress]) {
       console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
       return;
     }
   
-    // Agregar el mint para evitar futuras notificaciones duplicadas
+    // Agregar el mint a processedMints y guardarlo en mint.json
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Continuar con el procesamiento: consultar DexScreener, RugCheck, etc.
+    // Continuar con el procesamiento: obtener datos de DexScreener y RugCheck
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
       console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
@@ -1009,12 +1028,14 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+    message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress);
+    // Enviar mensaje a los suscriptores vía Telegram
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
   }
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, pairAddress, mint) {
+async function notifySubscribers(message, imageUrl, pairAddress, mint, signature) {
     if (!mint) {
         console.error("⚠️ Mint inválido, no se enviará notificación.");
         return;
@@ -1089,125 +1110,116 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-// VERIFICACIÓN DE FIRMA getTransaction usando InstantNodes
-async function getSwapDetailsFromInstantNodesRPC(signature, expectedMint) {
+async function getSwapDetailsFromHeliusRPC(signature, expectedMint) {
     let retryAttempts = 0;
     let delay = 3000; // 3 segundos inicial antes de la primera consulta
-    const INSTANT_NODES_RPC_URL = "https://solana-api.instantnodes.io/token-hL8J457Dhvr7qc4c1GJ91VtxVaFnHzzW";
-  
-    while (retryAttempts < 20) { // Máximo de 20 intentos
-      try {
-        console.log(`🔍 Fetching transaction details from InstantNodes: ${signature} (Attempt ${retryAttempts + 1})`);
-  
-        const response = await axios.post(INSTANT_NODES_RPC_URL, {
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getTransaction",
-          params: [
-            signature,
-            {
-              encoding: "json",
-              commitment: "confirmed",
-              maxSupportedTransactionVersion: 0
+    const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+
+    while (retryAttempts < 6) { // Máximo de 6 intentos
+        try {
+            console.log(`🔍 Fetching transaction details from Helius: ${signature} (Attempt ${retryAttempts + 1})`);
+
+            const response = await axios.post(HELIUS_RPC_URL, {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "getTransaction",
+                params: [
+                    signature,
+                    {
+                        encoding: "json",
+                        commitment: "confirmed",
+                        maxSupportedTransactionVersion: 0
+                    }
+                ]
+            });
+
+            if (!response.data || !response.data.result) {
+                throw new Error("❌ No transaction details found.");
             }
-          ]
-        });
-  
-        if (!response.data || !response.data.result) {
-          throw new Error("❌ No transaction details found.");
+
+            const txData = response.data.result;
+            const meta = txData.meta;
+
+            if (meta.err) {
+                throw new Error("Transaction failed on Solana.");
+            }
+
+            const preBalances = meta.preBalances;
+            const postBalances = meta.postBalances;
+            const swapFee = meta.fee / 1e9;
+
+            // 🔍 Buscar el token comprado en postTokenBalances usando expectedMint
+            let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
+
+            // Fallback: Si no encuentra el expectedMint, usa el primer token distinto a WSOL
+            if (!receivedToken) {
+                receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
+            }
+
+            if (!receivedToken) {
+                throw new Error("❌ No valid received token found.");
+            }
+
+            // 🔹 Capturar la cantidad correcta del token comprado
+            const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
+
+            // 🔹 Identificar el token vendido
+            let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
+            const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
+            const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
+
+            // 🔹 Intentar obtener el nombre y símbolo del token vendido y comprado
+            let soldTokenInfo = getTokenInfo(soldTokenMint);
+            let receivedTokenInfo = getTokenInfo(receivedToken.mint);
+
+            const soldTokenName = soldTokenInfo?.name || "Unknown";
+            const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
+
+            const receivedTokenName = receivedTokenInfo?.name || "Unknown";
+            const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
+
+            // Detectar en qué plataforma se hizo el swap (Jupiter, Raydium, Meteora, etc.)
+            const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
+
+            const solBefore = preBalances[0] / 1e9;
+            const solAfter = postBalances[0] / 1e9;
+            const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
+
+            return {
+                inputAmount: inputAmount,
+                soldAmount: soldAmount,
+                receivedAmount: receivedAmount,  // ✅ Ahora la cantidad correcta del token comprado
+                swapFee: swapFee.toFixed(6),
+                soldTokenMint: soldTokenMint,
+                receivedTokenMint: receivedToken.mint,
+                soldTokenName: soldTokenName,
+                soldTokenSymbol: soldTokenSymbol,
+                receivedTokenName: receivedTokenName,
+                receivedTokenSymbol: receivedTokenSymbol,
+                dexPlatform: dexPlatform,
+                walletAddress: txData.transaction.message.accountKeys[0],
+                solBefore: solBefore.toFixed(3),
+                solAfter: solAfter.toFixed(3)
+            };
+
+        } catch (error) {
+            console.error(`❌ Error retrieving swap details from Helius (Attempt ${retryAttempts + 1}):`, error.message);
+
+            if (error.response && error.response.status === 429) {
+                console.log("⚠️ Rate limit reached, waiting longer before retrying...");
+                delay *= 1.5;
+            } else {
+                delay *= 1.2;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+            retryAttempts++;
         }
-  
-        const txData = response.data.result;
-        const meta = txData.meta;
-  
-        if (meta.err) {
-          throw new Error("Transaction failed on Solana.");
-        }
-  
-        const preBalances = meta.preBalances;
-        const postBalances = meta.postBalances;
-        const swapFee = meta.fee / 1e9;
-  
-        // Buscar el token comprado en postTokenBalances usando expectedMint
-        let receivedToken = meta.postTokenBalances.find(token => token.mint === expectedMint);
-  
-        // Fallback: si no encuentra el expectedMint, usar el primer token distinto a WSOL
-        if (!receivedToken) {
-          receivedToken = meta.postTokenBalances.find(token => token.mint !== "So11111111111111111111111111111111111111112");
-        }
-  
-        if (!receivedToken) {
-          throw new Error("❌ No valid received token found.");
-        }
-  
-        // Capturar la cantidad correcta del token comprado
-        const receivedAmount = receivedToken.uiTokenAmount.uiAmountString;
-  
-        // Identificar el token vendido
-        let soldToken = meta.preTokenBalances.find(token => token.accountIndex !== 0);
-        const soldAmount = soldToken ? parseFloat(soldToken.uiTokenAmount.uiAmountString) : "N/A";
-        const soldTokenMint = soldToken ? soldToken.mint : "Unknown";
-  
-        // Obtener nombre y símbolo de los tokens vendidos y recibidos
-        let soldTokenInfo = getTokenInfo(soldTokenMint);
-        let receivedTokenInfo = getTokenInfo(receivedToken.mint);
-  
-        const soldTokenName = soldTokenInfo?.name || "Unknown";
-        const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
-        const receivedTokenName = receivedTokenInfo?.name || "Unknown";
-        const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
-  
-        // Detectar en qué plataforma se realizó el swap (Jupiter, Raydium, etc.)
-        const dexPlatform = detectDexPlatform(txData.transaction.message.accountKeys);
-        const solBefore = preBalances[0] / 1e9;
-        const solAfter = postBalances[0] / 1e9;
-        const inputAmount = (solBefore - solAfter - swapFee).toFixed(6);
-  
-        return {
-          inputAmount: inputAmount,
-          soldAmount: soldAmount,
-          receivedAmount: receivedAmount,
-          swapFee: swapFee.toFixed(6),
-          soldTokenMint: soldTokenMint,
-          receivedTokenMint: receivedToken.mint,
-          soldTokenName: soldTokenName,
-          soldTokenSymbol: soldTokenSymbol,
-          receivedTokenName: receivedTokenName,
-          receivedTokenSymbol: receivedTokenSymbol,
-          dexPlatform: dexPlatform,
-          walletAddress: txData.transaction.message.accountKeys[0],
-          solBefore: solBefore.toFixed(3),
-          solAfter: solAfter.toFixed(3)
-        };
-  
-      } catch (error) {
-        console.error(`❌ Error retrieving swap details from InstantNodes (Attempt ${retryAttempts + 1}):`, error.message);
-  
-        if (error.response && error.response.status === 429) {
-          console.log("⚠️ Rate limit reached, waiting longer before retrying...");
-          // Enviar notificación al chat de administración
-          bot.sendMessage(
-            ADMIN_CHAT_ID,
-            `Error 429 en InstantNodes RPC para la firma ${signature}:\n${JSON.stringify({
-              endpoint: INSTANT_NODES_RPC_URL,
-              method: "POST",
-              status: error.response.status,
-              data: error.response.data
-            }, null, 2)}`
-          );
-          delay *= 1.5;
-        } else {
-          delay *= 1.2;
-        }
-  
-        await new Promise(resolve => setTimeout(resolve, delay));
-        retryAttempts++;
-      }
     }
-  
+
     console.error("❌ Failed to retrieve swap details after multiple attempts.");
     return null;
-  }
+}
 
 function detectDexPlatform(accountKeys) {
     const dexIdentifiers = {
