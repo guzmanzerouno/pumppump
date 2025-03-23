@@ -1034,57 +1034,56 @@ async function analyzeTransaction(signature, forceCheck = false) {
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
 async function notifySubscribers(message, imageUrl, mintAddress, mint) {
-    if (!mint) {
-        console.error("⚠️ Mint inválido, no se enviará notificación.");
-        return;
+  if (!mint) {
+    console.error("⚠️ Mint inválido, no se enviará notificación.");
+    return;
+  }
+
+  for (const userId in users) {
+    const user = users[userId];
+
+    // Evitar enviar mensajes a usuarios no registrados
+    if (!user || !user.subscribed || !user.privateKey) continue;
+
+    try {
+      const actionButtons = [
+        [
+          { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+          { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+          { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+        ],
+        [
+          { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+          { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+          { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+        ],
+        [
+          { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+          { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+        ],
+        [
+          { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mintAddress}` }
+        ]
+      ];
+
+      if (imageUrl) {
+        await bot.sendPhoto(userId, imageUrl, {
+          caption: message,
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: actionButtons }
+        });
+      } else {
+        await bot.sendMessage(userId, message, {
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: actionButtons }
+        });
+      }
+
+      console.log(`✅ Mensaje enviado a ${userId}`);
+    } catch (error) {
+      console.error(`❌ Error enviando mensaje a ${userId}:`, error);
     }
-
-    for (const userId in users) {
-        const user = users[userId];
-
-        // Evitar enviar mensajes a usuarios no registrados
-        if (!user || !user.subscribed || !user.privateKey) continue;
-
-        try {
-            const actionButtons = [
-                [
-                    { text: "💰 0.01 Sol", callback_data: buy_${mint}_0.01 },
-                    { text: "💰 0.1 Sol", callback_data: buy_${mint}_0.1 },
-                    { text: "💰 0.2 Sol", callback_data: buy_${mint}_0.2 },
-                ],
-                [
-                    { text: "💰 0.5 Sol", callback_data: buy_${mint}_0.5 },
-                    { text: "💰 1.0 Sol", callback_data: buy_${mint}_1.0 },
-                    { text: "💰 2.0 Sol", callback_data: buy_${mint}_2.0 }
-                ],
-                [
-                    { text: "💵 Sell 50%", callback_data: sell_${mint}_50 },
-                    { text: "💯 Sell MAX", callback_data: sell_${mint}_max }
-                ],
-                [
-                    { text: "📊 Dexscreener", url: https://dexscreener.com/solana/${mintAddress} }
-                ]
-            ];
-
-            if (imageUrl) {
-                await bot.sendPhoto(userId, imageUrl, {
-                    caption: message,
-                    parse_mode: "Markdown",
-                    reply_markup: { inline_keyboard: actionButtons }
-                });
-            } else {
-                await bot.sendMessage(userId, message, {
-                    parse_mode: "Markdown",
-                    reply_markup: { inline_keyboard: actionButtons }
-                });
-            }
-
-            console.log(✅ Mensaje enviado a ${userId});
-
-        } catch (error) {
-            console.error(❌ Error enviando mensaje a ${userId}:, error);
-        }
-    }
+  }
 }
 
 
