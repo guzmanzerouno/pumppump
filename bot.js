@@ -1027,15 +1027,15 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n`;
     message += `🔗 **Signature:** \`${escapeMarkdown(signature)}\`\n\n`;
   
     // Enviar mensaje a los suscriptores vía Telegram
-    await notifySubscribers(message, rugCheckData.imageUrl, dexData.pairAddress, mintData.mintAddress, signature);
+    await notifySubscribers(message, rugCheckData.imageUrl, dexData.mintAddress, mintData.mintAddress, signature);
   }
 
 // 🔹 Notificar a los usuarios con botones de compra y venta
-async function notifySubscribers(message, imageUrl, pairAddress, mint, signature) {
+async function notifySubscribers(message, imageUrl, mintAddress, mint, signature) {
     if (!mint) {
         console.error("⚠️ Mint inválido, no se enviará notificación.");
         return;
@@ -1064,7 +1064,7 @@ async function notifySubscribers(message, imageUrl, pairAddress, mint, signature
                     { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
                 ],
                 [
-                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${pairAddress}` }
+                    { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mintAddress}` }
                 ]
             ];
 
