@@ -430,7 +430,7 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
     }
 }
 
-function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations) {
+function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
 
     // 🔹 1️⃣ Verificar si los datos son válidos antes de guardar
@@ -440,7 +440,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, gra
     }
 
     console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h, graduations }, null, 2));
+    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h}, null, 2));
 
     // 🔹 2️⃣ Formatear datos antes de guardar
     const tokenInfo = {
@@ -458,7 +458,6 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, gra
         chain: dexData.chain || "solana",
         dex: dexData.dex || "N/A",
         migrationDate: mintData.date || "N/A",
-        graduations: graduations || "N/A",
         status: mintData.status || "N/A",
         pair: dexData.pairAddress || "N/A",
         token: mintData.mintAddress || "N/A"
@@ -993,7 +992,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-    message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
@@ -1090,7 +1088,7 @@ bot.on("callback_query", async (query) => {
         : "N/A";
         
       // Construir el mensaje actualizado:
-      // Se usan los valores originales para los datos de RugCheck, migración, graduations, status y firma
+      // Se usan los valores originales para los datos de RugCheck, migración, status y firma
       let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
       updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
       // Valores actualizados de DexScreener:
