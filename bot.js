@@ -992,7 +992,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n\n`;
+    message += `📆 **Created:** ${escapeMarkdown(String(mintData.date))}\n\n`;
     //message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     //message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
@@ -1107,7 +1107,7 @@ bot.on("callback_query", async (query) => {
       updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
       // Actualización de información de DexScreener para chain, dex y pair
       updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(updatedDexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(updatedDexData.dex))}\n`;
-      updatedMessage += `📆 **Migration Date:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n\n`;
+      updatedMessage += `📆 **Created:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n\n`;
       //updatedMessage += `🔄 **Status:** ${escapeMarkdown(String(originalTokenData.status))}\n\n`;
       // updatedMessage += `🔗 **Pair:** \`${escapeMarkdown(String(updatedDexData.pairAddress))}\`\n`;
       // Se conserva el mint original
