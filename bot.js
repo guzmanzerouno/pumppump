@@ -323,33 +323,6 @@ function escapeMarkdown(text) {
         .replace(/!/g, "\\!");
 }
 
-// 🔹 Calcular la diferencia en segundos para "Graduations"
-function calculateGraduations(migrationDate, age) {
-    try {
-        const migrationDateTime = DateTime.fromFormat(migrationDate, "MM/dd/yyyy HH:mm:ss 'EST'", { zone: "America/New_York" });
-
-        // Extraer horas, minutos y segundos correctamente
-        const ageParts = age.match(/(?:(\d+)h )?(\d+)m (\d+)s/);
-        if (!ageParts) return "N/A";
-
-        const hours = ageParts[1] ? parseInt(ageParts[1], 10) : 0;
-        const minutes = parseInt(ageParts[2], 10);
-        const seconds = parseInt(ageParts[3], 10);
-
-        // Calcular la fecha final sumando la edad al tiempo de migración
-        const finalTime = migrationDateTime.plus({ hours, minutes, seconds });
-
-        // Obtener la diferencia con el tiempo actual en EST
-        const nowEST = DateTime.now().setZone("America/New_York");
-        const diffSeconds = Math.abs(Math.round(nowEST.diff(finalTime, "seconds").seconds)); // Redondea a número entero
-
-        return `${diffSeconds} Seg`;
-    } catch (error) {
-        console.error("❌ Error calculando Graduations:", error);
-        return "N/A";
-    }
-}
-
 const ADMIN_CHAT_ID = "472101348";
 
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
@@ -1003,11 +976,10 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
       : "N/A";
     const age = calculateAge(dexData.creationTimestamp) || "N/A";
-    const graduations = calculateGraduations(mintData.date, age) || "N/A";
   
     console.log("💾 Guardando datos en tokens.json...");
     // Guarda toda la información en tokens.json (asegúrate de que saveTokenData guarde todas las claves originales)
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h, graduations);
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
   
     // Construir el mensaje que se enviará a Telegram (se usan todos los datos, incluido la firma)
     let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
@@ -1021,7 +993,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
     message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-    message += `📆 **Migration Date:** ${escapeMarkdown(String(mintData.date))}\n`;
     message += `🎓 **Graduations:** ${escapeMarkdown(graduations)}\n`;
     message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
     message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
@@ -1113,93 +1084,95 @@ bot.on("callback_query", async (query) => {
         return;
       }
       
-      // Recalcular campos derivados (por ejemplo, Age y 24H) con los nuevos datos de DexScreener
+      // Recalcular campos derivados con los nuevos datos de DexScreener:
       const newAge = calculateAge(updatedDexData.creationTimestamp) || "N/A";
       const newPriceChange24h = updatedDexData.priceChange24h !== "N/A"
         ? `${updatedDexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${updatedDexData.priceChange24h}%`
         : "N/A";
         
-      // Construir el mensaje actualizado
+      // Construir el mensaje actualizado:
+      // Se usan los valores originales para los datos de RugCheck, migración, graduations, status y firma
       let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
       updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
-      // Valores actualizados de DexScreener
+      // Valores actualizados de DexScreener:
       updatedMessage += `💲 **USD:** ${escapeMarkdown(String(updatedDexData.priceUsd))}\n`;
       updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(updatedDexData.priceSol))}\n`;
       updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(String(updatedDexData.liquidity))}\n`;
       updatedMessage += `📈 **Market Cap:** $${escapeMarkdown(String(updatedDexData.marketCap))}\n`;
       updatedMessage += `💹 **FDV:** $${escapeMarkdown(String(updatedDexData.fdv))}\n\n`;
       updatedMessage += `⏳ **Age:** ${escapeMarkdown(newAge)} 📊 **24H:** ${escapeMarkdown(newPriceChange24h)}\n\n`;
-      // Conservamos los datos originales de RugCheck y demás
-      updatedMessage += `**${escapeMarkdown(String(originalTokenData.riskLevel))}:** ${escapeMarkdown(String(originalTokenData.riskDescription))}\n`;
-      updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.lpLocked))}%\n\n`;
-      // Actualizamos la información de DexScreener (cadena, dex y pair) con los nuevos valores
+      // Datos originales de RugCheck
+      updatedMessage += `**${escapeMarkdown(String(originalTokenData.warning))}**\n`;
+      updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
+      // Actualización de información de DexScreener para chain, dex y pair
       updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(updatedDexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(updatedDexData.dex))}\n`;
       updatedMessage += `📆 **Migration Date:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n`;
-      updatedMessage += `🎓 **Graduations:** ${escapeMarkdown(String(originalTokenData.graduations))}\n`;
       updatedMessage += `🔄 **Status:** ${escapeMarkdown(String(originalTokenData.status))}\n\n`;
       updatedMessage += `🔗 **Pair:** \`${escapeMarkdown(String(updatedDexData.pairAddress))}\`\n`;
       // Se conserva el mint original
       updatedMessage += `🔗 **Token:** \`${escapeMarkdown(String(mint))}\`\n\n`;
-      // Conservamos la firma original, si existe
+      // Se conserva la firma original, si existe
       if (originalTokenData.signature) {
         updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(String(originalTokenData.signature))}\`\n`;
       }
-    
+      
       try {
-        // Se comprueba si el mensaje original fue enviado como foto o solo texto
+        // Editar el mensaje original: se distingue si fue enviado como foto o como texto
         if (query.message.photo) {
-          // Si fue una foto, se edita el caption
           await bot.editMessageCaption(updatedMessage, {
             chat_id: chatId,
             message_id: messageId,
             parse_mode: "Markdown",
-            reply_markup: { inline_keyboard: [
-              [
-                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-              ],
-              [
-                { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-              ],
-              [
-                { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-              ],
-              [
-                { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
-                { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                  { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                  { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+                ],
+                [
+                  { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                  { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                  { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+                ],
+                [
+                  { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                  { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                ],
+                [
+                  { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+                  { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
+                ]
               ]
-            ] }
+            }
           });
         } else {
-          // Si el mensaje es de texto, se edita el texto
           await bot.editMessageText(updatedMessage, {
             chat_id: chatId,
             message_id: messageId,
             parse_mode: "Markdown",
-            reply_markup: { inline_keyboard: [
-              [
-                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-              ],
-              [
-                { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-                { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-              ],
-              [
-                { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-              ],
-              [
-                { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
-                { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                  { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                  { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+                ],
+                [
+                  { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                  { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                  { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+                ],
+                [
+                  { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+                  { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                ],
+                [
+                  { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+                  { text: "🔄 Refresh", callback_data: `refresh_${mint}` }
+                ]
               ]
-            ] }
+            }
           });
         }
         await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
