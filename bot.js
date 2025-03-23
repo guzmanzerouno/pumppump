@@ -240,24 +240,15 @@ async function getMintAddressFromTransaction(signature) {
         }
 
         const status = transaction.meta?.err ? "Failed ❌" : "Confirmed ✅";
-        const blockTime = transaction.blockTime; // timestamp en segundos
-        const dateEST = DateTime.fromSeconds(blockTime)
+
+        const dateEST = DateTime.fromSeconds(transaction.blockTime)
             .setZone("America/New_York")
             .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
 
-        const mintAddress = transaction.meta?.preTokenBalances?.[0]?.mint || "N/A";
-        
-        // Solo continuar si el mint address termina con "pump"
-        if (!mintAddress.toLowerCase().endsWith("pump")) {
-            console.warn("⚠️ Mint address no coincide con el patrón 'pump':", mintAddress);
-            return null; // O decide descartar la transacción
-        }
-
         return {
-            mintAddress,
+            mintAddress: transaction.meta?.preTokenBalances?.[0]?.mint || "N/A",
             date: dateEST,
-            status: status,
-            blockTime // para validar migration date
+            status: status
         };
     } catch (error) {
         console.error("❌ Error al obtener Mint Address:", error);
