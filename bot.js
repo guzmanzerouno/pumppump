@@ -1519,7 +1519,8 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     await bot.editMessageText(sellMessage, {
         chat_id: chatId,
         message_id: messageId,
-        parse_mode: "Markdown"
+        parse_mode: "Markdown",
+        disable_web_page_preview: true // 🔥 este es el update clave
     });
 
     // Guardar en JSON
@@ -1657,22 +1658,23 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
         `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
 
-    await bot.editMessageText(confirmationMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "💸 Sell 50%", callback_data: `sell_${receivedTokenMint}_50` },
-                    { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
-                ],
-                [
-                    { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+        await bot.editMessageText(confirmationMessage, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true, // 👈 esto evita la vista previa del link
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "💸 Sell 50%", callback_data: `sell_${receivedTokenMint}_50` },
+                        { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+                    ],
+                    [
+                        { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+                    ]
                 ]
-            ]
-        }
-    });
+            }
+        });
 
     // ✅ Guardar referencia para calcular "win/loss" en venta
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
