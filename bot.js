@@ -526,98 +526,60 @@ function getTokenInfo(mintAddress) {
 // 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     try {
-        console.log(`🛒 Attempt ${attempt}: Processing purchase of ${amountSOL} SOL for ${mint}...`);
-
         const user = users[chatId];
-        if (!user || !user.privateKey) {
-            throw new Error("User not registered or missing privateKey.");
-        }
+        if (!user || !user.privateKey) return null;
 
-        // 🔹 Obtener Keypair del usuario correctamente
-        const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
-        const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
-        const userPublicKey = userKeypair.publicKey;
+        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
         const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-        // 🔹 Verificar si la cuenta ATA existe, si no, crearla
-        const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
+        const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
         if (!ata) {
-            console.log(`⚠️ ATA not found, waiting for creation... Retrying purchase.`);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar antes de reintentar
+            await new Promise(resolve => setTimeout(resolve, 3000));
             return await buyToken(chatId, mint, amountSOL, attempt + 1);
         }
 
-        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
+        const balance = await connection.getBalance(wallet.publicKey) / 1e9;
+        if (balance < amountSOL) return null;
 
-        // 🔹 Verificar si hay suficiente SOL en la wallet
-        const balance = await connection.getBalance(userPublicKey) / 1e9;
-        if (balance < amountSOL) {
-            throw new Error(`❌ Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
-        }
-
-        console.log("🔹 Fetching best quote from Jupiter...");
-
-        // 🔹 Obtener la mejor cotización de compra desde Jupiter con optimización de slippage
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: "So11111111111111111111111111111111111111112", // SOL
                 outputMint: mint,
-                amount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
-                dynamicSlippage: true, // 🔹 Activar optimización de slippage dinámico (recomendado)
-                swapMode: "ExactIn" // 🔹 Garantiza que se usa exactamente la cantidad de SOL especificada
+                amount: Math.floor(amountSOL * 1e9), // En lamports
+                // dynamicSlippage: true,               // 🔄 Usa slippage dinámico
+                slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
+                swapMode: "ExactIn"
             }
         });
 
-        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-            throw new Error("❌ Failed to retrieve a valid quote from Jupiter.");
-        }
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) return null;
 
-        console.log("✅ Quote obtained, requesting swap transaction...");
-
-        // 🔹 Solicitar transacción de swap a Jupiter con optimización de prioridad
         const swapResponse = await axios.post(JUPITER_API_URL, {
             quoteResponse: quoteResponse.data,
-            userPublicKey: userPublicKey.toBase58(), // 🔹 Corregido (antes estaba wallet.publicKey)
+            userPublicKey: wallet.publicKey.toBase58(),
             wrapAndUnwrapSol: true,
-            prioritizationFeeLamports: 5000 // 🔹 Asegura ejecución más rápida
+            prioritizationFeeLamports: 5000
         });
 
-        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-            throw new Error("❌ Failed to construct swap transaction.");
-        }
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) return null;
 
-        console.log("✅ Swap transaction received from Jupiter.");
-
-        // 🔹 Decodificar la transacción versión 0 correctamente
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
         const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+        versionedTransaction.sign([wallet]);
 
-        // 🔹 Firmar la transacción
-        versionedTransaction.sign([userKeypair]);
-
-        console.log("✅ Transaction successfully signed. Sending to Solana...");
-
-        // 🔹 Enviar y confirmar la transacción
-        const txId = await connection.sendTransaction(versionedTransaction, {
+        const txSignature = await connection.sendTransaction(versionedTransaction, {
             skipPreflight: false,
             preflightCommitment: "confirmed"
         });
 
-        console.log(`✅ Purchase completed successfully: ${txId}`);
-        return txId;
+        return txSignature;
 
     } catch (error) {
-        console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
-        console.error(error.stack);
-
         if (attempt < 3) {
-            console.log(`🔄 Retrying purchase (Attempt ${attempt + 1})...`);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // 🔹 Esperar antes de reintentar
+            await new Promise(resolve => setTimeout(resolve, 3000));
             return await buyToken(chatId, mint, amountSOL, attempt + 1);
-        } else {
-            console.error("❌ Maximum retries reached. Purchase failed.");
-            return null;
         }
+        return null;
     }
 }
 
@@ -659,118 +621,64 @@ async function getTokenBalance(chatId, mint) {
 
 async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
     try {
-        console.log(`🔄 Attempt ${attempt}: Preparing sale of ${amount} tokens for mint: ${mint}`);
-
         const user = users[chatId];
-        if (!user || !user.privateKey) {
-            console.error(`⚠ Private key not found for user: ${JSON.stringify(user || {})}`);
-            return null;
-        }
+        if (!user?.privateKey) return null;
 
         const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
         const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 
-        console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
-
-        // 🔹 Asegurar que la ATA existe antes de vender
         const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
         if (!ata) {
-            console.log(`⚠️ ATA not found, waiting for creation... Retrying sale.`);
-            return await executeJupiterSell(chatId, mint, amount, attempt + 1); // Reintentar después de crear la ATA
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            return await executeJupiterSell(chatId, mint, amount, attempt + 1);
         }
 
-        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
+        const decimals = await getTokenDecimals(mint);
+        const balance = await getTokenBalance(chatId, mint);
+        const balanceUnits = Math.floor(balance * Math.pow(10, decimals));
+        let amountUnits = Math.floor(amount * Math.pow(10, decimals));
 
-        // 🔹 Obtener decimales del token
-        const tokenDecimals = await getTokenDecimals(mint);
-        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
+        if (amountUnits > balanceUnits) amountUnits = balanceUnits;
+        if (!balanceUnits || amountUnits <= 0 || balanceUnits < amountUnits) return null;
 
-        // 🔹 Obtener balance actual en UI units
-        let balance = await getTokenBalance(chatId, mint);
-        console.log(`✅ Balance found: ${balance} tokens`);
-
-        // 🔹 Convertir balance y cantidad a vender a unidades mínimas
-        const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
-        let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
-
-        console.log(`🔹 Balance en unidades mínimas: ${balanceInUnits}`);
-        console.log(`🔹 Cantidad a vender en unidades mínimas: ${amountInUnits}`);
-
-        // 🔹 Ajustar cantidad a vender si es mayor al balance disponible
-        if (amountInUnits > balanceInUnits) {
-            console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-            amountInUnits = balanceInUnits;
-        }
-
-        // 🔹 Validación adicional para evitar fallos
-        if (!balanceInUnits || balanceInUnits < amountInUnits || amountInUnits <= 0) {
-            console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-            return null;
-        }
-
-        console.log("🔹 Fetching Jupiter sell quote...");
-
-        // 🔹 Obtener cotización de venta en Jupiter con optimización de slippage
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: amountInUnits,
-                dynamicSlippage: true, // 🔹 Activar optimización de slippage dinámico
-                swapMode: "ExactIn" // 🔹 Se garantiza que la cantidad vendida sea exacta
+                amount: amountUnits,
+                slippageBps: 2000, // 20% slippage manual
+                swapMode: "ExactIn"
             }
         });
 
-        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-            console.error("❌ No valid quote retrieved from Jupiter.");
-            return null;
-        }
+        if (!quoteResponse.data?.routePlan) return null;
 
-        console.log("✅ Successfully obtained sell quote.", quoteResponse.data);
-
-        // 🔹 Solicitar transacción de swap a Jupiter con optimización de prioridad
         const swapResponse = await axios.post(JUPITER_API_URL, {
             quoteResponse: quoteResponse.data,
             userPublicKey: wallet.publicKey.toBase58(),
             wrapAndUnwrapSol: true,
-            prioritizationFeeLamports: 5000 // 🔹 Asegura ejecución más rápida
+            prioritizationFeeLamports: 5000
         });
 
-        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-            console.error("❌ Failed to construct swap transaction.");
-            return null;
-        }
+        if (!swapResponse.data?.swapTransaction) return null;
 
-        console.log("✅ Swap transaction received from Jupiter.");
-
-        // 🔹 Decodificar y firmar la transacción
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
         const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
         versionedTransaction.sign([wallet]);
 
-        console.log("✅ Transaction successfully signed.");
-        console.log("🚀 Sending transaction to Solana network...");
-
-        // 🔹 Enviar transacción a Solana
         const txSignature = await connection.sendTransaction(versionedTransaction, {
             skipPreflight: false,
             preflightCommitment: "confirmed"
         });
 
-        console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
         return txSignature;
 
     } catch (error) {
-        console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
-
-        // 🔄 Reintentar la venta si hay un error, hasta 3 intentos
         if (attempt < 3) {
-            console.log(`🔄 Retrying sale (Attempt ${attempt + 1})...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
             return await executeJupiterSell(chatId, mint, amount, attempt + 1);
-        } else {
-            console.error("❌ Maximum retries reached. Sale failed.");
-            return null;
         }
+        return null;
     }
 }
 
