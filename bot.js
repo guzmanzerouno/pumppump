@@ -13,7 +13,7 @@ const TELEGRAM_BOT_TOKEN = "8167837961:AAFipBvWbQtFWHV_uZt1lmG4CVVnc_z8qJU";
 const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const USERS_FILE = "users.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
-const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
 
 const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
 const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
@@ -263,8 +263,8 @@ async function getMintAddressFromTransaction(signature) {
         .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
       const status = transaction.meta.err ? "Failed ❌" : "Confirmed ✅";
   
-      // Buscar en postTokenBalances el mint que termine en "pump"
       let mintAddress = null;
+      // Primero se busca en postTokenBalances tokens que terminen en "pump"
       if (transaction.meta.postTokenBalances && transaction.meta.postTokenBalances.length > 0) {
         for (const tokenBalance of transaction.meta.postTokenBalances) {
           if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
@@ -272,8 +272,13 @@ async function getMintAddressFromTransaction(signature) {
             break;
           }
         }
+        // Si no se encontró ninguno que termine en "pump", se toma el primero disponible
+        if (!mintAddress) {
+          mintAddress = transaction.meta.postTokenBalances[0].mint;
+        }
       }
-      // Si no se encontró en postTokenBalances, buscar en preTokenBalances
+  
+      // Si aún no se encontró mintAddress, se repite el proceso en preTokenBalances
       if (!mintAddress && transaction.meta.preTokenBalances && transaction.meta.preTokenBalances.length > 0) {
         for (const tokenBalance of transaction.meta.preTokenBalances) {
           if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
@@ -281,10 +286,13 @@ async function getMintAddressFromTransaction(signature) {
             break;
           }
         }
+        if (!mintAddress) {
+          mintAddress = transaction.meta.preTokenBalances[0].mint;
+        }
       }
   
       if (!mintAddress) {
-        console.warn("⚠️ No se encontró un mint que termine en 'pump'.");
+        console.warn("⚠️ No se encontró ningún mint en la transacción.");
         return null;
       }
   
@@ -530,7 +538,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         if (!user || !user.privateKey) return null;
 
         const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
 
         const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
         if (!ata) {
@@ -621,64 +629,119 @@ async function getTokenBalance(chatId, mint) {
 
 async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
     try {
+        console.log(`🔄 Attempt ${attempt}: Preparing sale of ${amount} tokens for mint: ${mint}`);
+
         const user = users[chatId];
-        if (!user?.privateKey) return null;
-
-        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-
-        const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
-        if (!ata) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            return await executeJupiterSell(chatId, mint, amount, attempt + 1);
+        if (!user || !user.privateKey) {
+            console.error(`⚠ Private key not found for user: ${JSON.stringify(user || {})}`);
+            return null;
         }
 
-        const decimals = await getTokenDecimals(mint);
-        const balance = await getTokenBalance(chatId, mint);
-        const balanceUnits = Math.floor(balance * Math.pow(10, decimals));
-        let amountUnits = Math.floor(amount * Math.pow(10, decimals));
+        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
 
-        if (amountUnits > balanceUnits) amountUnits = balanceUnits;
-        if (!balanceUnits || amountUnits <= 0 || balanceUnits < amountUnits) return null;
+        console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
 
+        // 🔹 Asegurar que la ATA existe antes de vender
+        const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
+        if (!ata) {
+            console.log(`⚠️ ATA not found, waiting for creation... Retrying sale.`);
+            return await executeJupiterSell(chatId, mint, amount, attempt + 1); // Reintentar después de crear la ATA
+        }
+
+        console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
+
+        // 🔹 Obtener decimales del token
+        const tokenDecimals = await getTokenDecimals(mint);
+        console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
+
+        // 🔹 Obtener balance actual en UI units
+        let balance = await getTokenBalance(chatId, mint);
+        console.log(`✅ Balance found: ${balance} tokens`);
+
+        // 🔹 Convertir balance y cantidad a vender a unidades mínimas
+        const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
+        let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
+
+        console.log(`🔹 Balance en unidades mínimas: ${balanceInUnits}`);
+        console.log(`🔹 Cantidad a vender en unidades mínimas: ${amountInUnits}`);
+
+        // 🔹 Ajustar cantidad a vender si es mayor al balance disponible
+        if (amountInUnits > balanceInUnits) {
+            console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
+            amountInUnits = balanceInUnits;
+        }
+
+        // 🔹 Validación adicional para evitar fallos
+        if (!balanceInUnits || balanceInUnits < amountInUnits || amountInUnits <= 0) {
+            console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
+            return null;
+        }
+
+        console.log("🔹 Fetching Jupiter sell quote...");
+
+        // 🔹 Obtener cotización de venta en Jupiter con optimización de slippage
         const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
             params: {
                 inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
-                amount: amountUnits,
-                slippageBps: 2000, // 20% slippage manual
-                swapMode: "ExactIn"
+                amount: amountInUnits,
+                // dynamicSlippage: true,               // 🔄 Usa slippage dinámico
+                slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
+                swapMode: "ExactIn" // 🔹 Se garantiza que la cantidad vendida sea exacta
             }
         });
 
-        if (!quoteResponse.data?.routePlan) return null;
+        if (!quoteResponse.data || !quoteResponse.data.routePlan) {
+            console.error("❌ No valid quote retrieved from Jupiter.");
+            return null;
+        }
 
+        console.log("✅ Successfully obtained sell quote.", quoteResponse.data);
+
+        // 🔹 Solicitar transacción de swap a Jupiter con optimización de prioridad
         const swapResponse = await axios.post(JUPITER_API_URL, {
             quoteResponse: quoteResponse.data,
             userPublicKey: wallet.publicKey.toBase58(),
             wrapAndUnwrapSol: true,
-            prioritizationFeeLamports: 5000
+            prioritizationFeeLamports: 5000 // 🔹 Asegura ejecución más rápida
         });
 
-        if (!swapResponse.data?.swapTransaction) return null;
+        if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+            console.error("❌ Failed to construct swap transaction.");
+            return null;
+        }
 
+        console.log("✅ Swap transaction received from Jupiter.");
+
+        // 🔹 Decodificar y firmar la transacción
         const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
         const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
         versionedTransaction.sign([wallet]);
 
+        console.log("✅ Transaction successfully signed.");
+        console.log("🚀 Sending transaction to Solana network...");
+
+        // 🔹 Enviar transacción a Solana
         const txSignature = await connection.sendTransaction(versionedTransaction, {
             skipPreflight: false,
             preflightCommitment: "confirmed"
         });
 
+        console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
         return txSignature;
 
     } catch (error) {
+        console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
+
+        // 🔄 Reintentar la venta si hay un error, hasta 3 intentos
         if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            console.log(`🔄 Retrying sale (Attempt ${attempt + 1})...`);
             return await executeJupiterSell(chatId, mint, amount, attempt + 1);
+        } else {
+            console.error("❌ Maximum retries reached. Sale failed.");
+            return null;
         }
-        return null;
     }
 }
 
@@ -1284,7 +1347,7 @@ bot.on("callback_query", async (query) => {
 
         try {
             const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-            const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+            const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
 
             const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
             if (!ata) throw new Error(`❌ Failed to create or retrieve the ATA for ${mint}`);
