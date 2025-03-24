@@ -20,6 +20,7 @@ const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
+const buyReferenceMap = {};
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
@@ -1468,7 +1469,7 @@ bot.on("callback_query", async (query) => {
             }
 
             // Confirmación final en el mismo cuadro
-            await confirmSell(chatId, sellDetails, soldAmount, messageId);
+            await confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature);
 
         } catch (error) {
             console.error("❌ Error in sell process:", error);
@@ -1482,11 +1483,25 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmSell(chatId, sellDetails, soldAmount, messageId) {
+async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature) {
     const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
     const tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
     const gotSol = parseFloat(sellDetails.receivedAmount) || (parseFloat(sellDetails.solAfter) - parseFloat(sellDetails.solBefore)).toFixed(6);
     const receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
+
+    // Calcular win/loss desde referencia de compra (solBeforeBuy vs solAfterSell)
+    let winLossDisplay = "N/A";
+    if (
+        buyReferenceMap[chatId] &&
+        buyReferenceMap[chatId][receivedTokenMint] &&
+        buyReferenceMap[chatId][receivedTokenMint].solBeforeBuy
+    ) {
+        const beforeBuy = parseFloat(buyReferenceMap[chatId][receivedTokenMint].solBeforeBuy);
+        const afterSell = parseFloat(sellDetails.solAfter);
+        const diff = afterSell - beforeBuy;
+        const emoji = diff >= 0 ? "⬆️" : "⬇️";
+        winLossDisplay = `${emoji}${Math.abs(diff).toFixed(3)} SOL`;
+    }
 
     const sellMessage = `✅ *Sell completed successfully*\n` +
         `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
@@ -1495,9 +1510,11 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId) {
         `💰 *Got:* ${gotSol} SOL\n` +
         `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
         `📌 *Sold Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-        `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n\n` +
+        `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n` +
+        `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
         `💰 *SOL before sell:* ${sellDetails.solBefore} SOL\n` +
-        `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n`;
+        `💰 *SOL after sell:* ${sellDetails.solAfter} SOL\n` +
+        `💰 *SOL win/lost:* ${winLossDisplay}`;
 
     await bot.editMessageText(sellMessage, {
         chat_id: chatId,
@@ -1505,6 +1522,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId) {
         parse_mode: "Markdown"
     });
 
+    // Guardar en JSON
     saveSwap(chatId, "Sell", {
         "Sell completed successfully": true,
         "Pair": `${tokenSymbol}/SOL`,
@@ -1514,8 +1532,10 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId) {
         "Sold Token": tokenSymbol,
         "Sold Token Address": receivedTokenMint,
         "Wallet": sellDetails.walletAddress,
+        "Transaction": `https://solscan.io/tx/${txSignature}`,
         "SOL before sell": `${sellDetails.solBefore} SOL`,
-        "SOL after sell": `${sellDetails.solAfter} SOL`
+        "SOL after sell": `${sellDetails.solAfter} SOL`,
+        "SOL win/lost": winLossDisplay
     });
 
     console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
@@ -1589,7 +1609,7 @@ bot.on("callback_query", async (query) => {
             }
 
             // Paso 3: Confirmación final con info y botones (en la misma burbuja)
-            await confirmBuy(chatId, swapDetails, messageId);
+            await confirmBuy(chatId, swapDetails, messageId, txSignature);
 
         } catch (error) {
             console.error("❌ Error in purchase process:", error);
@@ -1603,29 +1623,39 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails, messageId) {
-    let receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
-    let receivedTokenMint = swapDetails.receivedTokenMint;
+// Este objeto guardará el "before" de cada compra por chat y token
+global.buyReferenceMap = global.buyReferenceMap || {};
+
+async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
+    console.log("🔍 Validando swapDetails:", swapDetails);
+
+    const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
+    const receivedTokenMint = swapDetails.receivedTokenMint;
 
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
-        console.error("❌ Invalid token.");
-        bot.sendMessage(chatId, "⚠️ Could not identify the received token.");
+        console.error("❌ Error: No se pudo determinar un token recibido válido.");
+        await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
+            chat_id: chatId,
+            message_id: messageId
+        });
         return;
     }
 
     const swapTokenData = getTokenInfo(receivedTokenMint);
     const tokenDecimals = await getTokenDecimals(receivedTokenMint);
+    const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
-        `*SOL/${escapeMarkdown(swapTokenData.symbol || "Unknown")}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
+        `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
         `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +
         `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
-        `📌 *Received Token ${escapeMarkdown(swapTokenData.symbol || "Unknown")}:* \`${receivedTokenMint}\`\n` +
-        `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n\n` +
+        `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+        `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
+        `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
         `💰 *SOL before swap:* ${swapDetails.solBefore} SOL\n` +
-        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL\n`;
+        `💰 *SOL after swap:* ${swapDetails.solAfter} SOL`;
 
     await bot.editMessageText(confirmationMessage, {
         chat_id: chatId,
@@ -1644,21 +1674,29 @@ async function confirmBuy(chatId, swapDetails, messageId) {
         }
     });
 
-    // Guardar en swaps.json
+    // ✅ Guardar referencia para calcular "win/loss" en venta
+    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+    buyReferenceMap[chatId][receivedTokenMint] = {
+        solBeforeBuy: parseFloat(swapDetails.solBefore),
+        time: Date.now()
+    };
+
+    // 🔥 Guardar en swaps.json
     saveSwap(chatId, "Buy", {
         "Swap completed successfully": true,
-        "Pair": `SOL/${swapTokenData.symbol || "Unknown"}`,
+        "Pair": `SOL/${tokenSymbol}`,
         "Spent": `${swapDetails.inputAmount} SOL`,
         "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,
         "Swap Fee": `${swapDetails.swapFee} SOL`,
-        "Received Token": swapTokenData.symbol || "Unknown",
+        "Received Token": tokenSymbol,
         "Received Token Address": receivedTokenMint,
         "Wallet": swapDetails.walletAddress,
+        "Transaction": `https://solscan.io/tx/${txSignature}`,
         "SOL before swap": `${swapDetails.solBefore} SOL`,
         "SOL after swap": `${swapDetails.solAfter} SOL`
     });
 
-    console.log("✅ Swap confirmado correctamente. Datos guardados.");
+    console.log("✅ Swap confirmado correctamente y referencia registrada.");
 }
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
