@@ -1646,6 +1646,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const receivedTokenMint = swapDetails.receivedTokenMint;
 
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
+        console.error("❌ Error: No se pudo determinar un token recibido válido.");
         await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
             chat_id: chatId,
             message_id: messageId
@@ -1657,23 +1658,26 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const tokenDecimals = await getTokenDecimals(receivedTokenMint);
     const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
 
+    const inputAmount = parseFloat(swapDetails.inputAmount);
+    const swapFee = parseFloat(swapDetails.swapFee);
+    const spentTotal = (inputAmount + swapFee).toFixed(6);
+
     const solBefore = parseFloat(swapDetails.solBefore);
     const solAfter = parseFloat(swapDetails.solAfter);
-
     const usdBefore = solPrice ? `USD $${(solBefore * solPrice).toFixed(2)}` : "N/A";
     const usdAfter = solPrice ? `USD $${(solAfter * solPrice).toFixed(2)}` : "N/A";
 
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
         `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-        `💰 *Spent:* ${swapDetails.inputAmount} SOL\n` +
+        `💰 *Spent:* ${spentTotal} SOL\n` +
         `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +
-        `🔄 *Swap Fee:* ${swapDetails.swapFee} SOL\n` +
+        `🔄 *Swap Fee:* ${swapFee} SOL\n` +
         `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
         `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
-        `💰 *SOL before swap:* ${solBefore} (${usdBefore})\n` +
-        `💰 *SOL after swap:* ${solAfter} (${usdAfter})`;
+        `💰 *SOL before swap:* ${solBefore.toFixed(3)} (${usdBefore})\n` +
+        `💰 *SOL after swap:* ${solAfter.toFixed(3)} (${usdAfter})`;
 
     await bot.editMessageText(confirmationMessage, {
         chat_id: chatId,
@@ -1693,27 +1697,29 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
         }
     });
 
+    // Guardar referencia para mostrar win/loss al vender
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][receivedTokenMint] = {
         solBeforeBuy: solBefore,
         time: Date.now()
     };
 
+    // Guardar en swaps.json
     saveSwap(chatId, "Buy", {
         "Swap completed successfully": true,
         "Pair": `SOL/${tokenSymbol}`,
-        "Spent": `${swapDetails.inputAmount} SOL`,
+        "Spent": `${spentTotal} SOL`,
         "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,
-        "Swap Fee": `${swapDetails.swapFee} SOL`,
+        "Swap Fee": `${swapFee} SOL`,
         "Received Token": tokenSymbol,
         "Received Token Address": receivedTokenMint,
         "Wallet": swapDetails.walletAddress,
         "Transaction": `https://solscan.io/tx/${txSignature}`,
-        "SOL before swap": `${solBefore} (${usdBefore})`,
-        "SOL after swap": `${solAfter} (${usdAfter})`
+        "SOL before swap": `${solBefore.toFixed(3)} (${usdBefore})`,
+        "SOL after swap": `${solAfter.toFixed(3)} (${usdAfter})`
     });
 
-    console.log("✅ Swap confirmado correctamente y referencia registrada.");
+    console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
 }
 
 async function getSolPriceUSD() {
