@@ -1498,7 +1498,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
 
     const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
     const tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
-    const gotSol = parseFloat(sellDetails.receivedAmount) || (parseFloat(sellDetails.solAfter) - parseFloat(sellDetails.solBefore)).toFixed(6);
+    const gotSol = parseFloat(sellDetails.receivedAmount) || (parseFloat(sellDetails.solAfter) - parseFloat(sellDetails.solBefore)).toFixed(3);
     const receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
 
     const solBefore = parseFloat(sellDetails.solBefore);
@@ -1660,7 +1660,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
 
     const inputAmount = parseFloat(swapDetails.inputAmount);
     const swapFee = parseFloat(swapDetails.swapFee);
-    const spentTotal = (inputAmount + swapFee).toFixed(6);
+    const spentTotal = (inputAmount + swapFee).toFixed(3);
 
     const solBefore = parseFloat(swapDetails.solBefore);
     const solAfter = parseFloat(swapDetails.solAfter);
