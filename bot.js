@@ -1408,7 +1408,7 @@ bot.on("callback_query", async (query) => {
 
             let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
             let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
-            let soldAmount = sellType === "50" ? (balance / 2).toFixed(9) : balance.toFixed(9);
+            let soldAmount = sellType === "50" ? (balance / 2).toFixed(9) : balance.toFixed(3);
             console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
 
             if (amountToSell < 1) {
@@ -1671,7 +1671,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
         `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
         `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
         `💰 *Spent:* ${spentTotal} SOL\n` +
-        `🔄 *Got:* ${receivedAmount.toFixed(tokenDecimals)} Tokens\n` +
+        `🔄 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
         `🔄 *Swap Fee:* ${swapFee} SOL\n` +
         `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
         `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
@@ -1709,7 +1709,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
         "Swap completed successfully": true,
         "Pair": `SOL/${tokenSymbol}`,
         "Spent": `${spentTotal} SOL`,
-        "Got": `${receivedAmount.toFixed(tokenDecimals)} Tokens`,
+        "Got": `${receivedAmount.toFixed(3)} Tokens`,
         "Swap Fee": `${swapFee} SOL`,
         "Received Token": tokenSymbol,
         "Received Token Address": receivedTokenMint,
