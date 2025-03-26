@@ -1079,74 +1079,81 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     if (data.startsWith("refresh_")) {
       const mint = data.split("_")[1];
-      console.log(`🔄 Refrescando datos (Moralis) para el token: ${mint}`);
+      console.log(`🔄 Refresh solicitado por el usuario ${chatId} para el token: ${mint}`);
   
-      // Leer el token original desde tokens.json
+      // Leer desde tokens.json
       const originalTokenData = getTokenInfo(mint);
       if (!originalTokenData) {
+        console.log(`❌ Token ${mint} no encontrado en tokens.json`);
         await bot.answerCallbackQuery(query.id, { text: "Token no encontrado." });
         return;
       }
   
-      // Obtener el nuevo par desde los datos previos
-      const pairAddress = originalTokenData.pairAddress;
+      console.log(`✅ Token encontrado en tokens.json:`);
+      console.log(originalTokenData);
+  
+      const pairAddress = originalTokenData.pair || originalTokenData.pairAddress;
       if (!pairAddress) {
+        console.log(`❌ No se encontró el par para el token ${mint}`);
         await bot.answerCallbackQuery(query.id, { text: "Par no disponible." });
         return;
       }
   
-      // Hacer la solicitud al endpoint de Moralis
-      let updatedDexData;
+      console.log(`📡 Haciendo solicitud a Moralis con el par: ${pairAddress}`);
+  
+      // Hacer la solicitud a Moralis
+      let moralisData;
       try {
-            const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
-                headers: {
-                    'accept': 'application/json',
-                    'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
-                }
+        const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+          headers: {
+            'accept': 'application/json',
+            'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (tu API Key)'
+          }
         });
-        updatedDexData = await response.json();
+        moralisData = await response.json();
+  
+        console.log("📥 Respuesta de Moralis:");
+        console.log(moralisData);
       } catch (err) {
         console.error("❌ Error al obtener datos de Moralis:", err);
         await bot.answerCallbackQuery(query.id, { text: "Error al actualizar datos." });
         return;
       }
   
-      // Calcular edad y cambio en precio
-      const newAge = calculateAge(originalTokenData.creationTimestamp) || "N/A";
-      const priceChange24h = updatedDexData?.pricePercentChange?.["24h"];
-      const newPriceChange24h = priceChange24h !== undefined
+      // Construcción del mensaje actualizado
+      const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
+      const priceChange24h = moralisData.pricePercentChange?.["24h"];
+      const formattedChange = priceChange24h !== undefined
         ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
         : "N/A";
   
-      // Construir mensaje actualizado
-      let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(String(originalTokenData.symbol))}\n`;
-      updatedMessage += `💎 **Name:** ${escapeMarkdown(String(originalTokenData.name))}\n`;
-      updatedMessage += `⏳ **Age:** ${escapeMarkdown(newAge)} 📊 **24H:** ${escapeMarkdown(newPriceChange24h)}\n\n`;
-      updatedMessage += `💲 **USD:** ${escapeMarkdown(String(updatedDexData.currentUsdPrice))}\n`;
-      updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(updatedDexData.currentNativePrice))}\n`;
-      updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(String(updatedDexData.totalLiquidityUsd))}\n`;
+      let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
+      updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
+      updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n\n`;
+      updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
+      updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(6))}\n`;
+      updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
   
-      // Nuevos valores agregados:
-      updatedMessage += `📈 **Liquidity 24H:** ${escapeMarkdown(updatedDexData.liquidityPercentChange?.["24h"]?.toFixed(2))}%\n`;
-      updatedMessage += `🟢 **Buys:** ${escapeMarkdown(updatedDexData.buys?.["24h"])} 💵 ${escapeMarkdown(updatedDexData.buyVolume?.["24h"]?.toFixed(2))}\n`;
-      updatedMessage += `🔴 **Sells:** ${escapeMarkdown(updatedDexData.sells?.["24h"])} 💸 ${escapeMarkdown(updatedDexData.sellVolume?.["24h"]?.toFixed(2))}\n`;
-      updatedMessage += `👤 **Buyers:** ${escapeMarkdown(updatedDexData.buyers?.["24h"])} 👥 **Sellers:** ${escapeMarkdown(updatedDexData.sellers?.["24h"])}\n\n`;
+      // Nuevos valores de Moralis
+      updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
+      updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
+      updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
   
-      // Se mantienen los datos originales de RugCheck:
-      updatedMessage += `**${escapeMarkdown(String(originalTokenData.riskLevel))}:** ${escapeMarkdown(String(originalTokenData.warning))}\n`;
+      // Se mantienen los datos de RugCheck
+      updatedMessage += `**${escapeMarkdown(originalTokenData.riskLevel)}:** ${escapeMarkdown(originalTokenData.warning)}\n`;
       updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
   
-      // Otros datos
-      updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(String(originalTokenData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(originalTokenData.dex))}\n`;
-      updatedMessage += `📆 **Created:** ${escapeMarkdown(String(originalTokenData.migrationDate))}\n\n`;
-      updatedMessage += `🔗 **Token:** \`${escapeMarkdown(String(mint))}\`\n`;
+      updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
+      updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
+      updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
       if (originalTokenData.signature) {
-        updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(String(originalTokenData.signature))}\`\n`;
+        updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
       }
   
       try {
-        // Editar el mensaje (foto o texto)
-        const replyMarkup = {
+        const reply_markup = {
           inline_keyboard: [
             [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
             [
@@ -1172,19 +1179,19 @@ async function analyzeTransaction(signature, forceCheck = false) {
             chat_id: chatId,
             message_id: messageId,
             parse_mode: "Markdown",
-            reply_markup: replyMarkup
+            reply_markup
           });
         } else {
           await bot.editMessageText(updatedMessage, {
             chat_id: chatId,
             message_id: messageId,
             parse_mode: "Markdown",
-            reply_markup: replyMarkup
+            reply_markup
           });
         }
   
         await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
-        console.log(`✅ Datos actualizados para ${mint}`);
+        console.log(`✅ Datos actualizados correctamente para ${mint}`);
       } catch (editError) {
         console.error("❌ Error actualizando el mensaje:", editError);
         await bot.answerCallbackQuery(query.id, { text: "Error al actualizar." });
