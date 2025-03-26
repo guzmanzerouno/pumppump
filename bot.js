@@ -1241,47 +1241,47 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
   
         const fee = tx.fee / 1e9;
         const walletAddress = tx.feePayer;
+        const tokenTransfers = tx.tokenTransfers;
   
-        // 💡 DETECTAR TOKEN RECIBIDO
-        let received = tx.tokenTransfers.find(t =>
+        if (!tokenTransfers || tokenTransfers.length === 0) {
+          throw new Error("❌ No token transfers found in transaction.");
+        }
+  
+        // Detectar si es COMPRA o VENTA según el expectedMint
+        const isBuy = tokenTransfers.some(t => 
           t.toUserAccount === walletAddress && t.mint === expectedMint
         );
   
-        if (!received) {
-          received = tx.tokenTransfers.find(t =>
-            t.mint === expectedMint && t.toUserAccount === walletAddress
+        let received, sold;
+  
+        if (isBuy) {
+          // Estamos comprando expectedMint
+          received = tokenTransfers.find(t =>
+            t.toUserAccount === walletAddress && t.mint === expectedMint
+          );
+          sold = tokenTransfers.find(t =>
+            t.fromUserAccount === walletAddress && t.mint !== expectedMint
+          );
+        } else {
+          // Estamos vendiendo expectedMint
+          sold = tokenTransfers.find(t =>
+            t.fromUserAccount === walletAddress && t.mint === expectedMint
+          );
+          received = tokenTransfers.find(t =>
+            t.toUserAccount === walletAddress && t.mint !== expectedMint
           );
         }
   
-        if (!received) {
-          received = tx.tokenTransfers.find(t =>
-            t.toUserAccount === walletAddress &&
-            t.mint !== "So11111111111111111111111111111111111111112"
-          );
+        if (!received || !sold) {
+          throw new Error("❌ Could not determine sold/received tokens.");
         }
-  
-        if (!received) {
-          received = tx.tokenTransfers.find(t =>
-            t.mint !== "So11111111111111111111111111111111111111112"
-          );
-        }
-  
-        if (!received) {
-          throw new Error("❌ No valid received token found.");
-        }
-  
-        // 💡 DETECTAR TOKEN VENDIDO
-        const sold = tx.tokenTransfers.find(t =>
-          t.fromUserAccount === walletAddress &&
-          t.mint !== received.mint
-        );
   
         const inputAmount = tx.nativeTransfers
           .filter(t => t.fromUserAccount === walletAddress)
           .reduce((sum, t) => sum + t.amount, 0) / 1e9;
   
-        const soldTokenMint = sold ? sold.mint : "Unknown";
-        const soldAmount = sold ? sold.tokenAmount : "N/A";
+        const soldTokenMint = sold.mint;
+        const soldAmount = sold.tokenAmount;
         const receivedAmount = received.tokenAmount;
   
         const soldTokenInfo = getTokenInfo(soldTokenMint);
@@ -1294,7 +1294,6 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
   
         const dexPlatform = detectDexPlatform(tx.instructions.map(i => i.programId));
   
-        // 🕒 TIMESTAMP (EST)
         const timestamp = tx.timestamp;
         const date = new Date(timestamp * 1000);
         const options = { timeZone: "America/New_York", hour12: false };
@@ -1313,19 +1312,13 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
           receivedTokenSymbol: receivedTokenSymbol,
           dexPlatform: dexPlatform,
           walletAddress: walletAddress,
-          timeStamp: estTime // ✅ Hora EST de la operación
+          timeStamp: estTime
         };
   
       } catch (err) {
         console.error(`❌ Error retrieving v0 transaction (Attempt ${retryAttempts + 1}):`, err.message);
-  
-        if (err.response && err.response.status === 429) {
-          console.log("⚠️ Rate limit hit. Waiting longer before retry...");
-          delay *= 1.5;
-        } else {
-          delay *= 1.2;
-        }
-  
+        if (err.response && err.response.status === 429) delay *= 1.5;
+        else delay *= 1.2;
         await new Promise(resolve => setTimeout(resolve, delay));
         retryAttempts++;
       }
