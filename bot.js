@@ -1079,29 +1079,20 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     if (data.startsWith("refresh_")) {
       const mint = data.split("_")[1];
-      console.log(`🔄 Refresh solicitado por el usuario ${chatId} para el token: ${mint}`);
   
-      // Leer desde tokens.json
       const originalTokenData = getTokenInfo(mint);
       if (!originalTokenData) {
-        console.log(`❌ Token ${mint} no encontrado en tokens.json`);
         await bot.answerCallbackQuery(query.id, { text: "Token no encontrado." });
         return;
       }
   
-      console.log(`✅ Token encontrado en tokens.json:`);
-      console.log(originalTokenData);
-  
       const pairAddress = originalTokenData.pair || originalTokenData.pairAddress;
       if (!pairAddress) {
-        console.log(`❌ No se encontró el par para el token ${mint}`);
         await bot.answerCallbackQuery(query.id, { text: "Par no disponible." });
         return;
       }
   
-      console.log(`📡 Haciendo solicitud a Moralis con el par: ${pairAddress}`);
-  
-      // Hacer la solicitud a Moralis
+      // Obtener datos de Moralis
       let moralisData;
       try {
         const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
@@ -1111,16 +1102,17 @@ async function analyzeTransaction(signature, forceCheck = false) {
         }
         });
         moralisData = await response.json();
-  
-        console.log("📥 Respuesta de Moralis:");
-        console.log(moralisData);
       } catch (err) {
-        console.error("❌ Error al obtener datos de Moralis:", err);
         await bot.answerCallbackQuery(query.id, { text: "Error al actualizar datos." });
         return;
       }
   
-      // Construcción del mensaje actualizado
+      // Si no tiene timestamp, lo guardamos para futuros cálculos
+      if (!originalTokenData.creationTimestamp) {
+        originalTokenData.creationTimestamp = Date.now();
+        updateTokenCreationTimestamp(mint, originalTokenData.creationTimestamp);
+      }
+  
       const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
       const priceChange24h = moralisData.pricePercentChange?.["24h"];
       const formattedChange = priceChange24h !== undefined
@@ -1134,14 +1126,12 @@ async function analyzeTransaction(signature, forceCheck = false) {
       updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(6))}\n`;
       updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
   
-      // Nuevos valores de Moralis
       updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
       updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
       updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
       updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
       updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
   
-      // Se mantienen los datos de RugCheck
       updatedMessage += `**${escapeMarkdown(originalTokenData.riskLevel)}:** ${escapeMarkdown(originalTokenData.warning)}\n`;
       updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
   
@@ -1152,28 +1142,28 @@ async function analyzeTransaction(signature, forceCheck = false) {
         updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
       }
   
-      try {
-        const reply_markup = {
-          inline_keyboard: [
-            [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
-            [
-              { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-              { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-              { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-            ],
-            [
-              { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-              { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-              { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-            ],
-            [
-              { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-              { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-            ],
-            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` }]
-          ]
-        };
+      const reply_markup = {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
+          [
+            { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+            { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+            { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+          ],
+          [
+            { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+            { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+            { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+          ],
+          [
+            { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+            { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+          ],
+          [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` }]
+        ]
+      };
   
+      try {
         if (query.message.photo) {
           await bot.editMessageCaption(updatedMessage, {
             chat_id: chatId,
@@ -1191,9 +1181,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
         }
   
         await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
-        console.log(`✅ Datos actualizados correctamente para ${mint}`);
       } catch (editError) {
-        console.error("❌ Error actualizando el mensaje:", editError);
         await bot.answerCallbackQuery(query.id, { text: "Error al actualizar." });
       }
     } else {
