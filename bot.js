@@ -1496,11 +1496,11 @@ if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
       `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
       `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💰 *Sold:* ${soldAmount} Tokens\n` +
+      `💲 *Sold:* ${soldAmount} Tokens\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
       `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-      `📌 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
-      `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n` +
+      `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${sellDetails.walletAddress}\`\n` +
       `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
       `💰 *SOL PNL:* ${winLossDisplay}`;
   
@@ -1640,11 +1640,11 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
       `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💰 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `🔄 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
+      `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
+      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
       `🔄 *Swap Fee:* ${swapFee} SOL\n` +
-      `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-      `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
+      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
       `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`;
   
     await bot.editMessageText(confirmationMessage, {
