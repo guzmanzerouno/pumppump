@@ -1248,14 +1248,14 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         }
   
         // Detectar si es COMPRA o VENTA según el expectedMint
-        const isBuy = tokenTransfers.some(t => 
+        const isBuy = tokenTransfers.some(t =>
           t.toUserAccount === walletAddress && t.mint === expectedMint
         );
   
         let received, sold;
   
         if (isBuy) {
-          // Estamos comprando expectedMint
+          // COMPRA: recibimos expectedMint
           received = tokenTransfers.find(t =>
             t.toUserAccount === walletAddress && t.mint === expectedMint
           );
@@ -1263,7 +1263,7 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
             t.fromUserAccount === walletAddress && t.mint !== expectedMint
           );
         } else {
-          // Estamos vendiendo expectedMint
+          // VENTA: vendemos expectedMint
           sold = tokenTransfers.find(t =>
             t.fromUserAccount === walletAddress && t.mint === expectedMint
           );
@@ -1282,10 +1282,11 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
   
         const soldTokenMint = sold.mint;
         const soldAmount = sold.tokenAmount;
+        const receivedTokenMint = received.mint;
         const receivedAmount = received.tokenAmount;
   
         const soldTokenInfo = getTokenInfo(soldTokenMint);
-        const receivedTokenInfo = getTokenInfo(received.mint);
+        const receivedTokenInfo = getTokenInfo(receivedTokenMint);
   
         const soldTokenName = soldTokenInfo?.name || "Unknown";
         const soldTokenSymbol = soldTokenInfo?.symbol || "N/A";
@@ -1305,7 +1306,7 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
           receivedAmount: receivedAmount.toString(),
           swapFee: fee.toFixed(5),
           soldTokenMint: soldTokenMint,
-          receivedTokenMint: received.mint,
+          receivedTokenMint: receivedTokenMint,
           soldTokenName: soldTokenName,
           soldTokenSymbol: soldTokenSymbol,
           receivedTokenName: receivedTokenName,
@@ -1481,14 +1482,14 @@ bot.on("callback_query", async (query) => {
 async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature) {
     const solPrice = await getSolPriceUSD();
   
-    const sellTokenData = getTokenInfo(sellDetails.receivedTokenMint) || {};
-    const tokenSymbol = typeof sellTokenData.symbol === "string" ? escapeMarkdown(sellTokenData.symbol) : "Unknown";
-    const gotSol = parseFloat(sellDetails.receivedAmount);
-    const receivedTokenMint = sellDetails.receivedTokenMint || "Unknown";
+    const soldTokenMint = sellDetails.soldTokenMint || "Unknown";
+    const soldTokenData = getTokenInfo(soldTokenMint) || {};
+    const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
+    const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido
   
     let winLossDisplay = "N/A";
-    if (buyReferenceMap[chatId]?.[receivedTokenMint]?.solBeforeBuy) {
-      const beforeBuy = parseFloat(buyReferenceMap[chatId][receivedTokenMint].solBeforeBuy);
+    if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
+      const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
       const pnlSol = gotSol - beforeBuy;
       const pnlUsd = solPrice ? (pnlSol * solPrice).toFixed(2) : "N/A";
       const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
@@ -1504,7 +1505,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       `💰 *Sold:* ${soldAmount} Tokens\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
       `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n` +
-      `📌 *Sold Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+      `📌 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `📌 *Wallet:* \`${sellDetails.walletAddress}\`\n` +
       `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
       `💰 *SOL PNL:* ${winLossDisplay}`;
@@ -1523,7 +1524,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       "Got": `${gotSol} SOL`,
       "Sell Fee": `${sellDetails.swapFee} SOL`,
       "Sold Token": tokenSymbol,
-      "Sold Token Address": receivedTokenMint,
+      "Sold Token Address": soldTokenMint,
       "Wallet": sellDetails.walletAddress,
       "Time": sellDetails.timeStamp,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
@@ -1646,7 +1647,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
       `💰 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
+      `🔄 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
       `🔄 *Swap Fee:* ${swapFee} SOL\n` +
       `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
