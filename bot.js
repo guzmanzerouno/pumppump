@@ -460,7 +460,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
       liquidity: dexData.liquidity || "N/A",
       marketCap: dexData.marketCap || "N/A",
       FDV: dexData.fdv || "N/A",
-      age: age || "N/A",
+      creationTimestamp: dexData.creationTimestamp || null, // 🆕 Agregado aquí
       "24H": priceChange24h || "N/A",
       riskLevel: rugCheckData.riskLevel || "N/A",         // Nuevo campo para el nivel de riesgo
       warning: rugCheckData.riskDescription || "No risks detected",  // Nuevo campo para la descripción del riesgo
@@ -1106,7 +1106,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
         return;
       }
   
-      const age = calculateAge(originalTokenData.creationTimestamp);
+      const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
       const priceChange24h = moralisData.pricePercentChange?.["24h"];
       const formattedChange = priceChange24h !== undefined
         ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
