@@ -1431,7 +1431,7 @@ bot.on("callback_query", async (query) => {
             while (attempt < 5 && !sellDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
-                sellDetails = await getSwapDetailsFromHeliusV0(txSignature);
+                sellDetails = await getSwapDetailsFromHeliusV0(txSignature, mint, chatId);
                 if (!sellDetails) {
                     await new Promise(res => setTimeout(res, delayBetweenAttempts));
                     delayBetweenAttempts *= 1.2;
