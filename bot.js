@@ -1242,10 +1242,16 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         const fee = tx.fee / 1e9;
         const walletAddress = tx.feePayer;
   
+        // 💡 DETECTAR TOKEN RECIBIDO
         let received = tx.tokenTransfers.find(t =>
-          t.toUserAccount === walletAddress &&
-          t.mint === expectedMint
+          t.toUserAccount === walletAddress && t.mint === expectedMint
         );
+  
+        if (!received) {
+          received = tx.tokenTransfers.find(t =>
+            t.mint === expectedMint && t.toUserAccount === walletAddress
+          );
+        }
   
         if (!received) {
           received = tx.tokenTransfers.find(t =>
@@ -1255,9 +1261,16 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         }
   
         if (!received) {
+          received = tx.tokenTransfers.find(t =>
+            t.mint !== "So11111111111111111111111111111111111111112"
+          );
+        }
+  
+        if (!received) {
           throw new Error("❌ No valid received token found.");
         }
   
+        // 💡 DETECTAR TOKEN VENDIDO
         const sold = tx.tokenTransfers.find(t =>
           t.fromUserAccount === walletAddress &&
           t.mint !== received.mint
@@ -1269,7 +1282,6 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
   
         const soldTokenMint = sold ? sold.mint : "Unknown";
         const soldAmount = sold ? sold.tokenAmount : "N/A";
-  
         const receivedAmount = received.tokenAmount;
   
         const soldTokenInfo = getTokenInfo(soldTokenMint);
@@ -1281,6 +1293,12 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         const receivedTokenSymbol = receivedTokenInfo?.symbol || "N/A";
   
         const dexPlatform = detectDexPlatform(tx.instructions.map(i => i.programId));
+  
+        // 🕒 TIMESTAMP (EST)
+        const timestamp = tx.timestamp;
+        const date = new Date(timestamp * 1000);
+        const options = { timeZone: "America/New_York", hour12: false };
+        const estTime = date.toLocaleString("en-US", options);
   
         return {
           inputAmount: inputAmount.toFixed(3),
@@ -1294,7 +1312,8 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
           receivedTokenName: receivedTokenName,
           receivedTokenSymbol: receivedTokenSymbol,
           dexPlatform: dexPlatform,
-          walletAddress: walletAddress
+          walletAddress: walletAddress,
+          timeStamp: estTime // ✅ Hora EST de la operación
         };
   
       } catch (err) {
@@ -1315,27 +1334,6 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
     await bot.sendMessage(chatId, `❌ Failed to retrieve swap details for transaction ${signature} after multiple attempts.`);
     return null;
   }
-
-function detectDexPlatform(accountKeys) {
-    const dexIdentifiers = {
-        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter Aggregator v6",
-        "mete1GCG6pESFVkMyfrgXW1UV3pR7xyF6LT1r6dTC4y": "Meteora",
-        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium Liquidity Pool V4",
-        "9Wq5m2K2JhE7G7q8jK8HgyR7Atsj6qGkTRS8UnToV2pj": "Orca"
-    };
-
-    for (const key of accountKeys) {
-        if (dexIdentifiers[key]) {
-            return dexIdentifiers[key];
-        }
-    }
-    return "Unknown DEX";
-}
-
-// 🔹 Obtener timestamp en EST
-function getTimestampEST() {
-    return DateTime.now().setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
-}
 
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
@@ -1431,7 +1429,7 @@ bot.on("callback_query", async (query) => {
             while (attempt < 5 && !sellDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
-                sellDetails = await getSwapDetailsFromHeliusV0(txSignature, mint, chatId);
+                sellDetails = await getSwapDetailsFromHeliusV0(txSignature);
                 if (!sellDetails) {
                     await new Promise(res => setTimeout(res, delayBetweenAttempts));
                     delayBetweenAttempts *= 1.2;
@@ -1486,7 +1484,8 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
     const sellMessage = `✅ *Sell completed successfully*\n` +
-      `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n\n` +
+      `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
+      `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
       `💰 *Sold:* ${soldAmount} Tokens\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
@@ -1512,6 +1511,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       "Sold Token": tokenSymbol,
       "Sold Token Address": receivedTokenMint,
       "Wallet": sellDetails.walletAddress,
+      "Time": sellDetails.timeStamp,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
       "SOL PNL": winLossDisplay
     });
@@ -1628,7 +1628,8 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
   
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
-      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n\n` +
+      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
+      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
       `💰 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
       `🔄 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
@@ -1662,6 +1663,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       time: Date.now()
     };
   
+    // 🧠 Guardar swap con timestamp
     saveSwap(chatId, "Buy", {
       "Swap completed successfully": true,
       "Pair": `SOL/${tokenSymbol}`,
@@ -1671,6 +1673,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       "Received Token": tokenSymbol,
       "Received Token Address": receivedTokenMint,
       "Wallet": swapDetails.walletAddress,
+      "Time": swapDetails.timeStamp,
       "Transaction": `https://solscan.io/tx/${txSignature}`
     });
   
