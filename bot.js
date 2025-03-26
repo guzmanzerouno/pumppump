@@ -1335,6 +1335,27 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
     return null;
   }
 
+  function detectDexPlatform(accountKeys) {
+    const dexIdentifiers = {
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": "Jupiter Aggregator v6",
+        "mete1GCG6pESFVkMyfrgXW1UV3pR7xyF6LT1r6dTC4y": "Meteora",
+        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium Liquidity Pool V4",
+        "9Wq5m2K2JhE7G7q8jK8HgyR7Atsj6qGkTRS8UnToV2pj": "Orca"
+    };
+
+    for (const key of accountKeys) {
+        if (dexIdentifiers[key]) {
+            return dexIdentifiers[key];
+        }
+    }
+    return "Unknown DEX";
+}
+
+// 🔹 Obtener timestamp en EST
+function getTimestampEST() {
+    return DateTime.now().setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
+}
+
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data = query.data;
