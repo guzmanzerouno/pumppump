@@ -1322,12 +1322,11 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         else delay *= 1.2;
         await new Promise(resolve => setTimeout(resolve, delay));
         retryAttempts++;
-      }
     }
-  
-    await bot.sendMessage(chatId, `❌ Failed to retrieve swap details for transaction ${signature} after multiple attempts.`);
-    return null;
-  }
+}
+
+return null;
+}
 
   function detectDexPlatform(accountKeys) {
     const dexIdentifiers = {
@@ -1488,13 +1487,14 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido
   
     let winLossDisplay = "N/A";
-    if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
-      const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
-      const pnlSol = gotSol - beforeBuy;
-      const pnlUsd = solPrice ? (pnlSol * solPrice).toFixed(2) : "N/A";
-      const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
-      winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL (USD $${Math.abs(pnlUsd)})`;
-    }
+if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
+  const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
+  const pnlSol = gotSol - beforeBuy;
+  const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
+  const pnlUsd = solPrice ? (pnlSol * solPrice) : null;
+  winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL ` +
+                   `(USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
+}
   
     const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
