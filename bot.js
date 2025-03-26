@@ -1116,7 +1116,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
       updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n\n`;
       updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
-      updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(6))}\n`;
+      updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
       updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
   
       updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
