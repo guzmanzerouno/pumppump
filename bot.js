@@ -1646,7 +1646,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
       `💰 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `🔄 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
+      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
       `🔄 *Swap Fee:* ${swapFee} SOL\n` +
       `📌 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `📌 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
