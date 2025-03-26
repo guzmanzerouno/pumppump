@@ -392,7 +392,7 @@ async function getDexScreenerData(mintAddress) {
         pairAddress: dexData.pairAddress || "N/A",
         dex: dexData.dexId || "N/A",
         chain: dexData.chainId || "solana",
-        creationTimestamp: dexData.pairCreatedAt || null,
+        creationTimestamp: Number(dexData.pairCreatedAt),
         priceChange24h: dexData.priceChange?.h24 || "N/A",
         volume24h: dexData.volume?.h24 || "N/A",
         buys24h: dexData.txns?.h24?.buys || "N/A",
@@ -986,7 +986,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const priceChange24h = dexData.priceChange24h !== "N/A"
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
       : "N/A";
-    const age = calculateAge(dexData.creationTimestamp) || "N/A";
+      const age = calculateAge(dexData.creationTimestamp) || "N/A";
   
     console.log("💾 Guardando datos en tokens.json...");
     // Guarda toda la información en tokens.json (asegúrate de que saveTokenData guarde todas las claves originales)
@@ -1092,7 +1092,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
         return;
       }
   
-      // Obtener datos de Moralis
       let moralisData;
       try {
         const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
@@ -1102,18 +1101,12 @@ async function analyzeTransaction(signature, forceCheck = false) {
         }
         });
         moralisData = await response.json();
-      } catch (err) {
+      } catch {
         await bot.answerCallbackQuery(query.id, { text: "Error al actualizar datos." });
         return;
       }
   
-      // Si no tiene timestamp, lo guardamos para futuros cálculos
-      if (!originalTokenData.creationTimestamp) {
-        originalTokenData.creationTimestamp = Date.now();
-        updateTokenCreationTimestamp(mint, originalTokenData.creationTimestamp);
-      }
-  
-      const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
+      const age = calculateAge(originalTokenData.creationTimestamp);
       const priceChange24h = moralisData.pricePercentChange?.["24h"];
       const formattedChange = priceChange24h !== undefined
         ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
