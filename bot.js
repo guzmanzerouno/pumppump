@@ -1743,17 +1743,21 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const changeText = `${emojiPrice} ${changeTokenPrice > 0 ? "+" : "-"}${Math.abs(changeTokenPrice)}%`;
   
     const totalNow = parseFloat(gotIfSellNow);
-    const spent = parseFloat(spentTotal);
-    const pnlSol = totalNow - spent;
-    const emojiPNL =
-      pnlSol >= 1 ? "🚀" :
-      pnlSol >= 0 ? "🟢" : "🔻";
-    const pnlText = `${emojiPNL} ${pnlSol >= 0 ? "+" : "-"}${Math.abs(pnlSol).toFixed(3)} SOL`;
+const spent = parseFloat(spentTotal);
+
+let pnlText = "N/A";
+if (!isNaN(totalNow) && !isNaN(spent)) {
+  const pnlSol = totalNow - spent;
+  const emojiPNL =
+    pnlSol >= 1 ? "🚀" :
+    pnlSol >= 0 ? "🟢" : "🔻";
+  pnlText = `${emojiPNL} ${pnlSol >= 0 ? "+" : "-"}${Math.abs(pnlSol).toFixed(3)} SOL`;
+}
   
     // 🔄 Solo reemplazamos las 2 líneas clave
     const updatedMessage = messageText
-    .replace(/💲 \*Price Actual:\* .*?\n/, `💲 *Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
-    .replace(/💲 \*You Get:\* .*?\n/, `💲 *You Get:* ${gotIfSellNow} SOL (${pnlText})\n`);
+    .replace(/💲 Price Actual: .*?\n/, `💲 Price Actual: ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+    .replace(/💲 You Get: .*?\n/, `💲 You Get: ${gotIfSellNow} SOL (${pnlText})\n`);
   
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
