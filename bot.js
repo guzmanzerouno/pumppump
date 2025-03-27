@@ -1657,7 +1657,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
-            { text: "💰 Sell Auto", callback_data: `refresh_${receivedTokenMint}` }
+            { text: "💰 Sell Auto", callback_data: `refresh_${receivedTokenMint}` },
             { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
           ]
         ]
