@@ -1460,85 +1460,66 @@ bot.on("callback_query", async (query) => {
     bot.answerCallbackQuery(query.id);
 });
 
-async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
+async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature) {
     const solPrice = await getSolPriceUSD();
   
-    const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
-    const receivedTokenMint = swapDetails.receivedTokenMint;
+    const soldTokenMint = sellDetails.soldTokenMint || "Unknown";
+    const soldTokenData = getTokenInfo(soldTokenMint) || {};
+    const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
+    const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido
+    const soldAmountFloat = parseFloat(soldAmount); // Asegurarse de que sea número
   
-    if (!receivedTokenMint || receivedTokenMint.length < 32) {
-      console.error("❌ Error: No se pudo determinar un token recibido válido.");
-      await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
-        chat_id: chatId,
-        message_id: messageId
-      });
-      return;
+    let winLossDisplay = "N/A";
+    if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
+      const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
+      const pnlSol = gotSol - beforeBuy;
+      const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
+      const pnlUsd = solPrice ? (pnlSol * solPrice) : null;
+      winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL ` +
+                       `(USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
     }
   
-    const swapTokenData = getTokenInfo(receivedTokenMint);
-    const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
+    const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
-    const inputAmount = parseFloat(swapDetails.inputAmount);
-    const swapFee = parseFloat(swapDetails.swapFee);
-    const spentTotal = (inputAmount + swapFee).toFixed(3);
-    const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
+    // 🔥 Nuevo: Calcular el precio por token
+    const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
   
-    // 🔥 Calcular el precio por token
-    const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount).toFixed(9) : "N/A";
-  
-    const confirmationMessage = `✅ *Swap completed successfully*\n` +
-      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
+    const sellMessage = `✅ *Sell completed successfully*\n` +
+      `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
+      `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n` +
       `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💰 *Token Price:* ${tokenPrice} SOL\n\n` +
-      `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-      `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
+      `💲 *Token Price:* ${tokenPrice} SOL\n` +
+      `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
+      `💲 *Sold:* ${soldAmount} Tokens\n` +
+      `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
+      `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
+      `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    await bot.editMessageText(confirmationMessage, {
+    await bot.editMessageText(sellMessage, {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "💸 Sell 50%", callback_data: `sell_${receivedTokenMint}_50` },
-            { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
-          ],
-          [
-            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
-          ]
-        ]
-      }
+      disable_web_page_preview: true
     });
   
-    // Guardar referencia para mostrar win/loss al vender
-    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
-    buyReferenceMap[chatId][receivedTokenMint] = {
-      solBeforeBuy: parseFloat(spentTotal),
-      time: Date.now()
-    };
-  
-    // 🧠 Guardar swap con timestamp
-    saveSwap(chatId, "Buy", {
-      "Swap completed successfully": true,
-      "Pair": `SOL/${tokenSymbol}`,
-      "Spent": `${spentTotal} SOL`,
-      "Got": `${receivedAmount.toFixed(3)} Tokens`,
-      "Swap Fee": `${swapFee} SOL`,
+    saveSwap(chatId, "Sell", {
+      "Sell completed successfully": true,
+      "Pair": `${tokenSymbol}/SOL`,
+      "Sold": `${soldAmount} Tokens`,
+      "Got": `${gotSol} SOL`,
+      "Sell Fee": `${sellDetails.swapFee} SOL`,
       "Token Price": `${tokenPrice} SOL`,
-      "Received Token": tokenSymbol,
-      "Received Token Address": receivedTokenMint,
-      "Wallet": swapDetails.walletAddress,
-      "Time": swapDetails.timeStamp,
-      "Transaction": `https://solscan.io/tx/${txSignature}`
+      "Sold Token": tokenSymbol,
+      "Sold Token Address": soldTokenMint,
+      "Wallet": sellDetails.walletAddress,
+      "Time": `${sellDetails.timeStamp}`,
+      "Transaction": `https://solscan.io/tx/${txSignature}`,
+      "SOL PNL": winLossDisplay
     });
   
-    console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
+    console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
   }
 
 bot.on("callback_query", async (query) => {
@@ -1649,16 +1630,20 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const spentTotal = (inputAmount + swapFee).toFixed(3);
     const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
   
+    // 🔥 Calcular el precio por token
+    const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount).toFixed(9) : "N/A";
+  
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
+      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
+      `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n\n` +
       `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
       `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-      `🔄 *Swap Fee:* ${swapFee} SOL\n` +
+      `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${swapDetails.walletAddress}\`\n` +
-      `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`;
+      `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
@@ -1692,6 +1677,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       "Spent": `${spentTotal} SOL`,
       "Got": `${receivedAmount.toFixed(3)} Tokens`,
       "Swap Fee": `${swapFee} SOL`,
+      "Token Price": `${tokenPrice} SOL`,
       "Received Token": tokenSymbol,
       "Received Token Address": receivedTokenMint,
       "Wallet": swapDetails.walletAddress,
