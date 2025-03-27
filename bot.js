@@ -1756,8 +1756,8 @@ if (!isNaN(totalNow) && !isNaN(spent)) {
   
     // 🔄 Solo reemplazamos las 2 líneas clave
     const updatedMessage = messageText
-    .replace(/💲 Price Actual: .*?\n/, `💲 Price Actual: ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
-    .replace(/💲 You Get: .*?\n/, `💲 You Get: ${gotIfSellNow} SOL (${pnlText})\n`);
+    .replace(/💲 \*Price Actual:\* .*?\n/, `💲 *Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+    .replace(/💲 \*You Get:\* .*?\n/, `💲 *You Get:* ${gotIfSellNow} SOL (${pnlText})\n`);
   
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
