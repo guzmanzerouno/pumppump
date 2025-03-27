@@ -1646,20 +1646,24 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount).toFixed(9) : "N/A";
   
     const confirmationMessage =
-  `✅ *Swap completed successfully*\n` +
-  `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-  `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
-  `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
-  `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-  `💲 *Token Price:* ${tokenPrice} SOL\n` +
-  `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-  ` VS\n` +
-  `💲 *Price Actual:* Updating...\n` +
-  `💲 *You Get:* Updating...\n\n` +
-  `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-  `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
-  `🔗  *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-  `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
+  `✅ *Swap completed successfully*
+  *SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})
+  🕒 *Time:* ${swapDetails.timeStamp} (EST)
+  🔗 [View in Solscan](https://solscan.io/tx/${txSignature})
+  
+  ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️
+  
+  💲 *Token Price:* ${tokenPrice} SOL
+  💲 *Spent:* ${spentTotal} SOL (${usdBefore})
+   VS
+  💲 *Price Actual:* Updating...
+  💲 *You Get:* Updating...
+  
+  💰 *Got:* ${receivedAmount.toFixed(3)} Tokens
+  🔄 *Swap Fee:* ${swapFee} SOL
+  
+  🔗  *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`
+  🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
@@ -1689,6 +1693,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       messageId,
       txSignature,
       swapDetails,
+      spentTotal,
       messageText: confirmationMessage
     };
   
@@ -1709,77 +1714,75 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
 
-  async function refreshBuyConfirmation(chatId, messageId, tokenMint) {
-    const ref = buyReferenceMap[chatId]?.[tokenMint];
-    if (!ref) return;
-  
-    const { gotTokens, tokenPriceBuy, spentTotal, messageText } = ref;
-  
-    const originalTokenData = getTokenInfo(tokenMint);
-    const pairAddress = originalTokenData?.pair || originalTokenData?.pairAddress;
-    if (!pairAddress) return;
-  
-    let moralisData;
-    try {
-      const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
-        headers: {
-          'accept': 'application/json',
-          'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
-        }
-      });
-      moralisData = await response.json();
-    } catch (err) {
-      console.error("❌ Error al obtener datos de Moralis:", err.message);
-      return;
-    }
-  
-    const actualPrice = parseFloat(moralisData.currentNativePrice);
-    const gotIfSellNow = (gotTokens * actualPrice).toFixed(4);
-  
-    const changeTokenPrice = (((actualPrice - tokenPriceBuy) / tokenPriceBuy) * 100).toFixed(2);
-    const emojiPrice =
-      changeTokenPrice >= 100 ? "🚀" :
-      changeTokenPrice >= 0 ? "🟢" : "🔻";
-    const changeText = `${emojiPrice} ${changeTokenPrice > 0 ? "+" : "-"}${Math.abs(changeTokenPrice)}%`;
-  
-    const totalNow = parseFloat(gotIfSellNow);
-const spent = parseFloat(spentTotal);
-
-let pnlText = "N/A";
-if (!isNaN(totalNow) && !isNaN(spent)) {
-  const pnlSol = totalNow - spent;
-  const emojiPNL =
-    pnlSol >= 1 ? "🚀" :
-    pnlSol >= 0 ? "🟢" : "🔻";
-  pnlText = `${emojiPNL} ${pnlSol >= 0 ? "+" : "-"}${Math.abs(pnlSol).toFixed(3)} SOL`;
-}
-  
-    // 🔄 Solo reemplazamos las 2 líneas clave
-    const updatedMessage = messageText
-    .replace(/💲 \*Price Actual:\* .*?\n/, `💲 *Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
-    .replace(/💲 \*You Get:\* .*?\n/, `💲 *You Get:* ${gotIfSellNow} SOL (${pnlText})\n`);
-  
-    await bot.editMessageText(updatedMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_${tokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-          ],
-          [
-            { text: "💰 Sell Auto", callback_data: `refresh_${tokenMint}` },
-            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${tokenMint}` }
-          ]
-        ]
-      }
-    });
-  
-    console.log("✅ Mensaje de confirmación de compra actualizado (con estilo 🔥).");
-  }
+     async function refreshBuyConfirmation(chatId, messageId, tokenMint) {
+            const ref = buyReferenceMap[chatId]?.[tokenMint];
+            if (!ref) {
+              console.log("❌ No buy reference found for:", tokenMint);
+              return;
+            }
+          
+            const { gotTokens, tokenPriceBuy, spentTotal, messageText } = ref;
+          
+            const originalTokenData = getTokenInfo(tokenMint);
+            const pairAddress = originalTokenData?.pair || originalTokenData?.pairAddress;
+            if (!pairAddress) return;
+          
+            let moralisData;
+            try {
+                const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+                    headers: {
+                      'accept': 'application/json',
+                      'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
+                    }
+              });
+              moralisData = await response.json();
+            } catch (err) {
+              console.error("❌ Error al obtener datos de Moralis:", err.message);
+              return;
+            }
+          
+            const actualPrice = parseFloat(moralisData.currentNativePrice);
+            const gotIfSellNow = gotTokens * actualPrice;
+          
+            const changeTokenPrice = ((actualPrice - tokenPriceBuy) / tokenPriceBuy) * 100;
+            const emojiPrice = changeTokenPrice >= 100 ? "🚀" : changeTokenPrice >= 0 ? "🟢" : "🔻";
+            const changeText = `${emojiPrice} ${changeTokenPrice >= 0 ? "+" : "-"}${Math.abs(changeTokenPrice).toFixed(2)}%`;
+          
+            const totalNow = parseFloat(gotIfSellNow);
+            const spent = parseFloat(spentTotal);
+          
+            let pnlText = "N/A";
+            if (!isNaN(totalNow) && !isNaN(spent)) {
+              const pnlSol = totalNow - spent;
+              const emojiPNL = pnlSol >= 1 ? "🚀" : pnlSol >= 0 ? "🟢" : "🔻";
+              pnlText = `${emojiPNL} ${pnlSol >= 0 ? "+" : "-"}${Math.abs(pnlSol).toFixed(3)} SOL`;
+            }
+          
+            const updatedMessage = messageText
+              .replace(/💲 \*Price Actual:\* .*?\n/, `💲 *Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+              .replace(/💲 \*You Get:\* .*?\n/, `💲 *You Get:* ${gotIfSellNow.toFixed(4)} SOL (${pnlText})\n`);
+          
+            await bot.editMessageText(updatedMessage, {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "🔄 Refresh", callback_data: `refresh_${tokenMint}` },
+                    { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+                  ],
+                  [
+                    { text: "💰 Sell Auto", callback_data: `refresh_${tokenMint}` },
+                    { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${tokenMint}` }
+                  ]
+                ]
+              }
+            });
+          
+            console.log("✅ Mensaje de confirmación de compra actualizado (🔁 con estilo).");
+          }
 
 async function getSolPriceUSD() {
     try {
