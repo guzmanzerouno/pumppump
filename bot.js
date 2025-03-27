@@ -1646,19 +1646,20 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount).toFixed(9) : "N/A";
   
     const confirmationMessage =
-      `✅ *Swap completed successfully*\n` +
-      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
-      `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
-      `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💲 *Token Price:* ${tokenPrice} SOL\n` +
-      `💲 *Token Price Actual:* Updating...\n` +
-      `💲 *Got if Sell Now:* Updating...\n\n` +
-      `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-      `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
+  `✅ *Swap completed successfully*\n` +
+  `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
+  `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
+  `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
+  `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+  `💲 *Token Price:* ${tokenPrice} SOL\n` +
+  `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
+  ` VS\n` +
+  `💲 *Price Actual:* Updating...\n` +
+  `💲 *You Get:* Updating...\n\n` +
+  `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
+  `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
+  `🔗  *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+  `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
@@ -1720,11 +1721,11 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
   
     let moralisData;
     try {
-        const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
-            headers: {
-              'accept': 'application/json',
-              'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
-            }
+      const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+        headers: {
+          'accept': 'application/json',
+          'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
+        }
       });
       moralisData = await response.json();
     } catch (err) {
@@ -1736,18 +1737,23 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const gotIfSellNow = (gotTokens * actualPrice).toFixed(4);
   
     const changeTokenPrice = (((actualPrice - tokenPriceBuy) / tokenPriceBuy) * 100).toFixed(2);
-    const emoji = changeTokenPrice >= 0 ? "📈" : "📉";
-    const changeText = `${emoji} ${Math.abs(changeTokenPrice)}%`;
+    const emojiPrice =
+      changeTokenPrice >= 100 ? "🚀" :
+      changeTokenPrice >= 0 ? "🟢" : "🔻";
+    const changeText = `${emojiPrice} ${changeTokenPrice > 0 ? "+" : "-"}${Math.abs(changeTokenPrice)}%`;
   
     const totalNow = parseFloat(gotIfSellNow);
     const spent = parseFloat(spentTotal);
-    const totalChange = (((totalNow - spent) / spent) * 100).toFixed(2);
-    const emoji2 = totalChange >= 0 ? "🟢" : "🔴";
-    const totalChangeText = `${emoji2} ${Math.abs(totalChange)}%`;
+    const pnlSol = totalNow - spent;
+    const emojiPNL =
+      pnlSol >= 1 ? "🚀" :
+      pnlSol >= 0 ? "🟢" : "🔻";
+    const pnlText = `${emojiPNL} ${pnlSol >= 0 ? "+" : "-"}${Math.abs(pnlSol).toFixed(3)} SOL`;
   
+    // 🔄 Solo reemplazamos las 2 líneas clave
     const updatedMessage = messageText
-      .replace(/💲 \*Token Price Actual:\* .*?\n/, `💲 *Token Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
-      .replace(/💲 \*Got if Sell Now:\* .*?\n/, `💲 *Got if Sell Now:* ${gotIfSellNow} SOL (${totalChangeText})\n`);
+      .replace(/💲 Token Price Actual: .*?\n/, `💲 Price Actual: ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+      .replace(/💲 Got if Sell Now: .*?\n/, `💲 You Get: ${gotIfSellNow} SOL (${pnlText})\n`);
   
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
@@ -1768,7 +1774,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       }
     });
   
-    console.log("✅ Mensaje de confirmación de compra actualizado.");
+    console.log("✅ Mensaje de confirmación de compra actualizado (con estilo 🔥).");
   }
 
 async function getSolPriceUSD() {
