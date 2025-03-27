@@ -1629,8 +1629,6 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const swapFee = parseFloat(swapDetails.swapFee);
     const spentTotal = (inputAmount + swapFee).toFixed(3);
     const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
-  
-    // 🔥 Calcular el precio por token
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount).toFixed(9) : "N/A";
   
     const confirmationMessage = `✅ *Swap completed successfully*\n` +
@@ -1638,7 +1636,9 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n` +
       `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
       `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💲 *Token Price:* ${tokenPrice} SOL\n\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n` +
+      `💲 *Token Price Actual:* Updating...\n` +
+      `💲 *Got if Sell Now:* Updating...\n\n` +
       `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
       `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
       `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
@@ -1653,24 +1653,28 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "💸 Sell 50%", callback_data: `sell_${receivedTokenMint}_50` },
+            { text: "🔄 Refresh", callback_data: `refresh_${receivedTokenMint}` },
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
+            { text: "💰 Sell Auto", callback_data: `refresh_${receivedTokenMint}` }
             { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
           ]
         ]
       }
     });
   
-    // Guardar referencia para mostrar win/loss al vender
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][receivedTokenMint] = {
       solBeforeBuy: parseFloat(spentTotal),
-      time: Date.now()
+      gotTokens: receivedAmount,
+      tokenPriceBuy: tokenPrice,
+      time: Date.now(),
+      messageId: messageId,
+      txSignature: txSignature,
+      swapDetails
     };
   
-    // 🧠 Guardar swap con timestamp
     saveSwap(chatId, "Buy", {
       "Swap completed successfully": true,
       "Pair": `SOL/${tokenSymbol}`,
@@ -1686,6 +1690,35 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     });
   
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
+  }
+
+  async function refreshBuyMessage(chatId, tokenMint) {
+    const ref = buyReferenceMap[chatId]?.[tokenMint];
+    if (!ref) return;
+  
+    const { gotTokens, messageId, tokenPriceBuy, solBeforeBuy, swapDetails } = ref;
+  
+    const actualPrice = await getTokenPriceSOL(tokenMint); // tu propia función
+    if (!actualPrice) return;
+  
+    const gotIfSellNow = (gotTokens * actualPrice).toFixed(4);
+    const change = (((actualPrice - tokenPriceBuy) / tokenPriceBuy) * 100).toFixed(2);
+    const sign = change >= 0 ? "📈" : "📉";
+    const changeText = `${sign} ${change}%`;
+  
+    const oldMessage = await bot.getMessageText(chatId, messageId); // o usa tu propio almacenamiento
+    if (!oldMessage) return;
+  
+    const updatedMessage = oldMessage
+      .replace(/💲 \*Token Price Actual:\* .*?\n/, `💲 *Token Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+      .replace(/💲 \*Got if Sell Now:\* .*?\n/, `💲 *Got if Sell Now:* ${gotIfSellNow} SOL\n`);
+  
+    await bot.editMessageText(updatedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
   }
 
 async function getSolPriceUSD() {
