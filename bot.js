@@ -1752,8 +1752,8 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
   
     // 🔄 Solo reemplazamos las 2 líneas clave
     const updatedMessage = messageText
-      .replace(/💲 Token Price Actual: .*?\n/, `💲 Price Actual: ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
-      .replace(/💲 Got if Sell Now: .*?\n/, `💲 You Get: ${gotIfSellNow} SOL (${pnlText})\n`);
+    .replace(/💲 \*Price Actual:\* .*?\n/, `💲 *Price Actual:* ${actualPrice.toFixed(9)} SOL (${changeText})\n`)
+    .replace(/💲 \*You Get:\* .*?\n/, `💲 *You Get:* ${gotIfSellNow} SOL (${pnlText})\n`);
   
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
