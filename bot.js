@@ -1203,10 +1203,50 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
+async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
+  const FAST_RPC = "https://ros-5f117e-fast-mainnet.helius-rpc.com";
+  const V0_API = "https://api.helius.xyz/v0/transactions/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+
+  // Paso 1: Confirmar existencia rápida con getTransaction
+  let fastConfirmed = false;
+  let attempt = 0;
+  let delay = 2500;
+
+  while (attempt < 5 && !fastConfirmed) {
+    attempt++;
+    try {
+      console.log(`⚡ Fast RPC check for tx: ${signature} (Attempt ${attempt})`);
+      const result = await axios.post(FAST_RPC, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getTransaction",
+        params: [signature, { encoding: "json", maxSupportedTransactionVersion: 0 }]
+      });
+
+      if (result.data && result.data.result) {
+        fastConfirmed = true;
+        break;
+      }
+    } catch (e) {
+      console.warn(`⏳ Retry getTransaction (${attempt})...`);
+    }
+    await new Promise(res => setTimeout(res, delay));
+    delay *= 1.2;
+  }
+
+  if (!fastConfirmed) {
+    console.error("❌ Fast confirmation failed. Skipping to fallback.");
+    return null;
+  }
+
+  // Paso 2: Obtener detalles desde el endpoint V0 con lógica actual
+  return await getSwapDetailsFromHeliusV0(signature, expectedMint, chatId);
+}
+
 async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
     const HELIUS_V0_URL = "https://api.helius.xyz/v0/transactions/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
     let retryAttempts = 0;
-    let delay = 3000;
+    let delay = 10000;
   
     while (retryAttempts < 6) {
       try {
@@ -1408,24 +1448,24 @@ bot.on("callback_query", async (query) => {
             }
 
             await bot.editMessageText(
-                `✅ *Sell order executed!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
-                {
-                    chat_id: chatId,
-                    message_id: messageId,
-                    parse_mode: "Markdown",
-                    disable_web_page_preview: true
-                }
+              `✅ *Sell order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "Markdown",
+                disable_web_page_preview: true
+              }
             );
-
+            
             console.log("⏳ Waiting for Solana to confirm the transaction...");
             let sellDetails = null;
             let attempt = 0;
             delayBetweenAttempts = 5000;
-
+            
             while (attempt < 5 && !sellDetails) {
                 attempt++;
                 console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempt})`);
-                sellDetails = await getSwapDetailsFromHeliusV0(txSignature, mint, chatId);
+                sellDetails = await getSwapDetailsHybrid(txSignature, mint, chatId); // <<--- NUEVA FUNCION
                 if (!sellDetails) {
                     await new Promise(res => setTimeout(res, delayBetweenAttempts));
                     delayBetweenAttempts *= 1.2;
@@ -1554,13 +1594,13 @@ bot.on("callback_query", async (query) => {
 
             // Paso 2: Editar con el mensaje de confirmación y solscan
             await bot.editMessageText(
-                `✅ *Purchase order executed!*\n🔗 *Transaction:* [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching swap details...*`,
-                {
-                    chat_id: chatId,
-                    message_id: messageId,
-                    parse_mode: "Markdown",
-                    disable_web_page_preview: true
-                }
+              `✅ *Purchase order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "Markdown",
+                disable_web_page_preview: true
+              }
             );
 
             let swapDetails = null;
@@ -1570,7 +1610,7 @@ bot.on("callback_query", async (query) => {
 
             while (attempt < maxAttempts && !swapDetails) {
                 attempt++;
-                swapDetails = await getSwapDetailsFromHeliusV0(txSignature, mint, chatId);
+                swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
                 if (!swapDetails) {
                     await new Promise(res => setTimeout(res, delay));
                     delay *= 1.5;
