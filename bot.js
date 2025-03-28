@@ -610,22 +610,33 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         const txId = await connection.sendTransaction(versionedTransaction, {
           skipPreflight: false,
           preflightCommitment: "confirmed"
-      });
-      
-      // 🔍 Confirmar transacción explícitamente con 'finalized'
-      const confirmation = await connection.confirmTransaction({
-          signature: txId,
-          abortSignal: null
-      }, "finalized");
-      
-      if (confirmation.value.err) {
-          console.error("❌ Transacción fallida tras confirmación:", confirmation.value.err);
+        });
+        
+        console.log(`🚀 Transaction sent. Signature: ${txId}`);
+        console.log("⏳ Waiting for confirmation...");
+        
+        let confirmation = null;
+        const maxRetries = 10;
+        
+        for (let i = 0; i < maxRetries; i++) {
+          confirmation = await connection.getSignatureStatus(txId);
+        
+          if (confirmation && confirmation.value && confirmation.value.confirmationStatus === "finalized") {
+            console.log("✅ Transacción confirmada en la red.");
+            break;
+          }
+        
+          console.log(`🔄 Esperando confirmación (${i + 1}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Espera 2s entre intentos
+        }
+        
+        if (!confirmation || !confirmation.value || confirmation.value.err) {
+          console.error("❌ Transacción fallida o no confirmada tras múltiples intentos.");
           return null;
-      }
-      
-      console.log("✅ Transacción confirmada en la red.");
-      console.log(`✅ Purchase completed successfully: ${txId}`);
-      return txId;
+        }
+        
+        console.log(`✅ Swap completado: ${txId}`);
+        return txId;
 
     } catch (error) {
         console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
@@ -774,25 +785,36 @@ async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
         console.log("🚀 Sending transaction to Solana network...");
 
         // 🔹 Enviar transacción a Solana
-        const txSignature = await connection.sendTransaction(versionedTransaction, {
+        const txId = await connection.sendTransaction(versionedTransaction, {
           skipPreflight: false,
           preflightCommitment: "confirmed"
-      });
-      
-      // 🔍 Confirmar transacción explícitamente con 'finalized'
-      const confirmation = await connection.confirmTransaction({
-          signature: txSignature,
-          abortSignal: null
-      }, "finalized");
-      
-      if (confirmation.value.err) {
-          console.error("❌ Transacción de venta fallida tras confirmación:", confirmation.value.err);
+        });
+        
+        console.log(`🚀 Transaction sent. Signature: ${txId}`);
+        console.log("⏳ Waiting for confirmation...");
+        
+        let confirmation = null;
+        const maxRetries = 10;
+        
+        for (let i = 0; i < maxRetries; i++) {
+          confirmation = await connection.getSignatureStatus(txId);
+        
+          if (confirmation && confirmation.value && confirmation.value.confirmationStatus === "finalized") {
+            console.log("✅ Transacción confirmada en la red.");
+            break;
+          }
+        
+          console.log(`🔄 Esperando confirmación (${i + 1}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Espera 2s entre intentos
+        }
+        
+        if (!confirmation || !confirmation.value || confirmation.value.err) {
+          console.error("❌ Transacción fallida o no confirmada tras múltiples intentos.");
           return null;
-      }
-      
-      console.log("✅ Transacción confirmada en la red.");
-      console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-      return txSignature;
+        }
+        
+        console.log(`✅ Swap completado: ${txId}`);
+        return txId;
 
     } catch (error) {
         console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
