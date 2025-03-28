@@ -1484,25 +1484,25 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     // 🔥 Nuevo: Calcular el precio por token
     const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
   
-    const sellMessage = `✅ *Sell completed successfully*\n` +
-      `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n` +
-      `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
-      `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
-      `💲 *Token Price:* ${tokenPrice} SOL\n` +
-      `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
-      `💲 *Sold:* ${soldAmount} Tokens\n` +
-      `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
-      `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
-      `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-  
-    await bot.editMessageText(sellMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true
-    });
+    const confirmationMessage = `✅ *Sell completed successfully*\n` +
+  `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
+  `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n` +
+  `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n\n` +
+  `⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n\n` +
+  `💲 *Token Price:* ${tokenPrice} SOL\n` +
+  `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
+  `💲 *Sold:* ${soldAmount} Tokens\n` +
+  `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
+  `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
+  `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
+  `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
+
+await bot.editMessageText(confirmationMessage, {
+  chat_id: chatId,
+  message_id: messageId,
+  parse_mode: "Markdown",
+  disable_web_page_preview: true
+});
   
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
