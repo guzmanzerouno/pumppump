@@ -1210,7 +1210,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
   // Paso 1: Confirmar existencia rápida con getTransaction
   let fastConfirmed = false;
   let attempt = 0;
-  let delay = 2500;
+  let delay = 3000;
 
   while (attempt < 5 && !fastConfirmed) {
     attempt++;
