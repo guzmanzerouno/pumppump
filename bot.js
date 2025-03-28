@@ -1683,7 +1683,8 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       "Received Token Address": receivedTokenMint,
       "Wallet": swapDetails.walletAddress,
       "Time": swapDetails.timeStamp,
-      "Transaction": `https://solscan.io/tx/${txSignature}`
+      "Transaction": `https://solscan.io/tx/${txSignature}`,
+      "messageText": confirmationMessage  // 🔥 agregar esto
     });
   
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
