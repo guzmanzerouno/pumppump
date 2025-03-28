@@ -1504,20 +1504,21 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       disable_web_page_preview: true
     });
   
-    saveSwap(chatId, "Sell", {
-      "Sell completed successfully": true,
-      "Pair": `${tokenSymbol}/SOL`,
-      "Sold": `${soldAmount} Tokens`,
-      "Got": `${gotSol} SOL`,
-      "Sell Fee": `${sellDetails.swapFee} SOL`,
-      "Token Price": `${tokenPrice} SOL`,
-      "Sold Token": tokenSymbol,
-      "Sold Token Address": soldTokenMint,
-      "Wallet": sellDetails.walletAddress,
-      "Time": `${sellDetails.timeStamp}`,
-      "Transaction": `https://solscan.io/tx/${txSignature}`,
-      "SOL PNL": winLossDisplay
-    });
+      // Guardar en swaps.json
+  saveSwap(chatId, "Buy", {
+    "Swap completed successfully": true,
+    "Pair": `SOL/${tokenSymbol}`,
+    "Spent": `${spentTotal} SOL`,
+    "Got": `${receivedAmount.toFixed(3)} Tokens`,
+    "Swap Fee": `${swapFee} SOL`,
+    "Token Price": `${tokenPrice} SOL`,
+    "Received Token": tokenSymbol,
+    "Received Token Address": receivedTokenMint,
+    "Wallet": swapDetails.walletAddress,
+    "Time": swapDetails.timeStamp,
+    "Transaction": `https://solscan.io/tx/${txSignature}`,
+    "messageText": confirmationMessage  // 🔥 agregar esto
+  });
   
     console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
   }
