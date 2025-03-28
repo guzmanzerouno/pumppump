@@ -608,12 +608,24 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
 
         // 🔹 Enviar y confirmar la transacción
         const txId = await connection.sendTransaction(versionedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed"
-        });
-
-        console.log(`✅ Purchase completed successfully: ${txId}`);
-        return txId;
+          skipPreflight: false,
+          preflightCommitment: "confirmed"
+      });
+      
+      // 🔍 Confirmar transacción explícitamente con 'finalized'
+      const confirmation = await connection.confirmTransaction({
+          signature: txId,
+          abortSignal: null
+      }, "finalized");
+      
+      if (confirmation.value.err) {
+          console.error("❌ Transacción fallida tras confirmación:", confirmation.value.err);
+          return null;
+      }
+      
+      console.log("✅ Transacción confirmada en la red.");
+      console.log(`✅ Purchase completed successfully: ${txId}`);
+      return txId;
 
     } catch (error) {
         console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
@@ -763,12 +775,24 @@ async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
 
         // 🔹 Enviar transacción a Solana
         const txSignature = await connection.sendTransaction(versionedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: "confirmed"
-        });
-
-        console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
-        return txSignature;
+          skipPreflight: false,
+          preflightCommitment: "confirmed"
+      });
+      
+      // 🔍 Confirmar transacción explícitamente con 'finalized'
+      const confirmation = await connection.confirmTransaction({
+          signature: txSignature,
+          abortSignal: null
+      }, "finalized");
+      
+      if (confirmation.value.err) {
+          console.error("❌ Transacción de venta fallida tras confirmación:", confirmation.value.err);
+          return null;
+      }
+      
+      console.log("✅ Transacción confirmada en la red.");
+      console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
+      return txSignature;
 
     } catch (error) {
         console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
