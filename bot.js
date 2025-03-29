@@ -1746,94 +1746,102 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
 
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   try {
-    const original = buyReferenceMap[tokenMint];
-    if (!original) return;
+    const tokenInfo = getTokenInfo(tokenMint);
+    const original = buyReferenceMap[chatId]?.[tokenMint];
 
-    const { txSignature, solBefore, tokenSymbol, tokenInfo, swapDetails } = original;
-    const pairAddress = tokenInfo.pairAddress;
-
-    // Obtener los nuevos datos
-    const statsUrl = `https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`;
-    const response = await axios.get(statsUrl, {
-      headers: {
-        "X-API-Key": MORALIS_API_KEY
-      }
-    });
-
-    const {
-      currentNativePrice: priceSolNow,
-      currentUsdPrice: priceUsdNow,
-      totalLiquidityUsd: liquidityNow,
-      pricePercentChange
-    } = response.data;
-
-    // Calcular % cambio de precio vs el original
-    const priceSolBefore = original.priceSol || tokenInfo.priceSol;
-    const changePercent = ((priceSolNow - priceSolBefore) / priceSolBefore * 100).toFixed(2);
-    const currentValue = (priceSolNow * original.tokenAmount).toFixed(4);
-
-    // Emojis
-    const emojiPrice = changePercent >= 100 ? "🚀" : changePercent >= 0 ? "🟢" : "🔻";
-    const emojiPNL = currentValue > solBefore ? "🟢" : currentValue < solBefore ? "🔻" : "➖";
-
-    // Nuevo texto actualizado
-    const updatedMessage = `
-✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})
-*SOL/${tokenSymbol}* (${tokenInfo.dex || "Unknown DEX"})
-🕒 *Time:* ${original.time} (EST)
-
-💲 *USD:* $${priceUsdNow}
-💧 *Liquidity:* $${liquidityNow.toLocaleString()}
-📉 *24h:* ${pricePercentChange}%
-
-⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️
-💲 *Token Price:* ${priceSolBefore} SOL
-💲 *Spent:* ${solBefore} SOL
-
-⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️
-📊 *Price Actual:* ${emojiPrice} ${priceSolNow} SOL (${changePercent}%)
-💰 *You Get:* ${emojiPNL} ${currentValue} SOL
-
-🔗 *Received Token ${tokenSymbol}:* \`${swapDetails.receivedTokenMint}\`
-🔗 *Wallet:* \`${swapDetails.walletAddress}\`
-`.trim();
-
-    // Obtener el mensaje original actual
-    const originalText = original.lastMessage || ""; // puedes guardar esto en el primer envío
-
-    if (updatedMessage === originalText) {
-      console.log("⏸ Nada cambió, no actualizo el mensaje.");
+    if (!original || !original.solBeforeBuy) {
+      console.warn(`⚠️ No se encontró referencia de compra para ${tokenMint}`);
+      await bot.sendMessage(chatId, "⚠️ No se encontró información previa de compra para este token.");
       return;
     }
 
-    // Guardamos el nuevo mensaje
-    buyReferenceMap[tokenMint].lastMessage = updatedMessage;
+    const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
+    if (!pairAddress || pairAddress === "N/A") {
+      console.warn(`⚠️ Token ${tokenMint} no tiene pairAddress válido.`);
+      await bot.sendMessage(chatId, "❌ Este token no tiene información de par disponible para refrescar.");
+      return;
+    }
 
-    // Editar el mensaje
-    await bot.telegram.editMessageText(chatId, messageId, null, updatedMessage, {
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${swapDetails.receivedTokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${swapDetails.receivedTokenMint}_100` }
-          ],
-          [
-            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${swapDetails.receivedTokenMint}` }
-          ]
-        ]
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+      headers: {
+        accept: "application/json",
+        "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
       }
     });
 
-    console.log(`🟢 Confirmación actualizada correctamente para ${tokenSymbol}`);
+    if (!response.ok) {
+      throw new Error(`Error al obtener datos de Moralis: ${response.statusText}`);
+    }
 
-  } catch (err) {
-    console.error("❌ Error en refreshBuyConfirmationV2:", err.message);
-    await bot.telegram.sendMessage(chatId, `❌ Error al actualizar la información del token.`, {
-      parse_mode: "Markdown"
-    });
-  }
+    const data = await response.json();
+
+    const priceSolNow = parseFloat(data.currentNativePrice);
+    const priceUsdNow = parseFloat(data.currentUsdPrice);
+    const liquidityNow = parseFloat(data.totalLiquidityUsd);
+    const priceChange24h = parseFloat(data.pricePercentChange?.["24h"] || 0);
+
+    const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
+    const changePercent = (((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100).toFixed(2);
+
+    const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
+    const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
+    const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
+
+    const tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
+    const receivedTokenMint = escapeMarkdown(tokenMint);
+    const timeFormatted = original.time
+      ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
+      : "Unknown";
+
+    const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
+      `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
+      `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
+  
+      `💲 *USD:* $${priceUsdNow.toFixed(6)}\n` +
+      `💧 *Liquidity:* $${liquidityNow.toLocaleString()}\n` +
+      `📉 *24h:* ${priceChange24h.toFixed(2)}%\n\n` +
+  
+      `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `💲 *Token Price:* ${original.tokenPrice.toFixed(9)} SOL\n` +
+      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
+  
+      `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `📊 *Price Actual:* ${emojiPrice} ${priceSolNow.toFixed(9)} SOL (${changePercent}%)\n` +
+      `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
+  
+      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${original.walletAddress}\``;
+
+      await bot.editMessageText(updatedMessage, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
+              { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+            ],
+            [
+              { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+            ]
+          ]
+        }
+      });
+
+      console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
+    } catch (error) {
+      const errorMessage = error?.response?.body?.description || error.message;
+    
+      if (errorMessage.includes("message is not modified")) {
+        console.log(`⏸ Nada cambió en el mensaje de ${tokenSymbol}, no se actualiza.`);
+        return;
+      }
+    
+      console.error("❌ Error en refreshBuyConfirmationV2:", errorMessage);
+      await bot.sendMessage(chatId, "❌ Error al actualizar la información del token.");
+    }
 }
 
 async function getSolPriceUSD() {
