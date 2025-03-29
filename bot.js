@@ -1116,82 +1116,86 @@ async function analyzeTransaction(signature, forceCheck = false) {
           return;
         }
   
-      const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
-      const priceChange24h = moralisData.pricePercentChange?.["24h"];
-      const formattedChange = priceChange24h !== undefined
-        ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
-        : "N/A";
+        const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
+        const priceChange24h = moralisData.pricePercentChange?.["24h"];
+        const formattedChange = priceChange24h !== undefined
+          ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
+          : "N/A";
   
-      let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
-      updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
-      updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n\n`;
-      updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
-      updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
-      updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
+        let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
+        updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
+        updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n\n`;
+        updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
+        updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
+        updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
   
-      updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
-      updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-      updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-      updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
-      updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
+        updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
+        updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+        updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+        updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
+        updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
   
-      updatedMessage += `**${escapeMarkdown(originalTokenData.riskLevel)}:** ${escapeMarkdown(originalTokenData.warning)}\n`;
-      updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
+        updatedMessage += `**${escapeMarkdown(originalTokenData.riskLevel)}:** ${escapeMarkdown(originalTokenData.warning)}\n`;
+        updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n\n`;
   
-      updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
-      updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
-      updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
-      if (originalTokenData.signature) {
-        updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
-      }
-  
-      const reply_markup = {
-        inline_keyboard: [
-          [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
-          [
-            { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-            { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-            { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
-          ],
-          [
-            { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-            { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-            { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-          ],
-          [
-            { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
-            { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-          ],
-          [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` }]
-        ]
-      };
-  
-      try {
-        if (query.message.photo) {
-          await bot.editMessageCaption(updatedMessage, {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            reply_markup
-          });
-        } else {
-          await bot.editMessageText(updatedMessage, {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            reply_markup
-          });
+        updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
+        updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
+        updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
+        if (originalTokenData.signature) {
+          updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
         }
   
-        await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
-      } catch (editError) {
-        await bot.answerCallbackQuery(query.id, { text: "Error al actualizar." });
+        const reply_markup = {
+          inline_keyboard: [
+            [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
+            [
+              { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+              { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+              { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+            ],
+            [
+              { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+              { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+              { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+            ],
+            [
+              { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+              { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+            ],
+            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` }]
+          ]
+        };
+  
+        try {
+          if (query.message.photo) {
+            await bot.editMessageCaption(updatedMessage, {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              reply_markup
+            });
+          } else {
+            await bot.editMessageText(updatedMessage, {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              reply_markup
+            });
+          }
+  
+          await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
+        } catch (editError) {
+          await bot.answerCallbackQuery(query.id, { text: "Error al actualizar." });
+        }
+      } else {
+        await bot.answerCallbackQuery(query.id);
       }
-    } else {
-      await bot.answerCallbackQuery(query.id);
+    } catch (err) {
+      console.error("❌ Error en callback_query:", err);
+      await bot.answerCallbackQuery(query.id, { text: "Ocurrió un error." });
     }
   });
-
+  
 async function getTokenNameFromSolana(mintAddress) {
     try {
         const tokenInfo = await connection.getParsedAccountInfo(new PublicKey(mintAddress));
@@ -1355,8 +1359,7 @@ async function getSwapDetailsFromHeliusV0(signature, expectedMint, chatId) {
         await new Promise(resolve => setTimeout(resolve, delay));
         retryAttempts++;
     }
-}
-
+} // 👈 AQUÍ FALTABA ESTA LLAVE
 return null;
 }
 
