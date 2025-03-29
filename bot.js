@@ -1745,8 +1745,12 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
 }
 
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
+  let tokenSymbol = "Unknown"; // <-- agregado aquí arriba para que esté disponible en el catch
+
   try {
     const tokenInfo = getTokenInfo(tokenMint);
+    tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A"); // <-- aseguramos definirlo
+
     const original = buyReferenceMap[chatId]?.[tokenMint];
 
     if (!original || !original.solBeforeBuy) {
@@ -1787,7 +1791,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
-    const tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
     const receivedTokenMint = escapeMarkdown(tokenMint);
     const timeFormatted = original.time
       ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
@@ -1796,52 +1799,52 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
       `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
-  
+
       `💲 *USD:* $${priceUsdNow.toFixed(6)}\n` +
       `💧 *Liquidity:* $${liquidityNow.toLocaleString()}\n` +
       `📉 *24h:* ${priceChange24h.toFixed(2)}%\n\n` +
-  
+
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${original.tokenPrice.toFixed(9)} SOL\n` +
       `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
-  
+
       `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `📊 *Price Actual:* ${emojiPrice} ${priceSolNow.toFixed(9)} SOL (${changePercent}%)\n` +
       `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
-  
+
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-      await bot.editMessageText(updatedMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
-            ],
-            [
-              { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
-            ]
+    await bot.editMessageText(updatedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
+            { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+          ],
+          [
+            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
           ]
-        }
-      });
-
-      console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
-    } catch (error) {
-      const errorMessage = error?.response?.body?.description || error.message;
-    
-      if (errorMessage.includes("message is not modified")) {
-        console.log(`⏸ Nada cambió en el mensaje de ${tokenSymbol}, no se actualiza.`);
-        return;
+        ]
       }
-    
-      console.error("❌ Error en refreshBuyConfirmationV2:", errorMessage);
-      await bot.sendMessage(chatId, "❌ Error al actualizar la información del token.");
+    });
+
+    console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
+  } catch (error) {
+    const errorMessage = error?.response?.body?.description || error.message;
+
+    if (errorMessage.includes("message is not modified")) {
+      console.log(`⏸ Nada cambió en el mensaje de ${tokenSymbol}, no se actualiza.`);
+      return;
     }
+
+    console.error("❌ Error en refreshBuyConfirmationV2:", errorMessage);
+    await bot.sendMessage(chatId, "❌ Error al actualizar la información del token.");
+  }
 }
 
 async function getSolPriceUSD() {
