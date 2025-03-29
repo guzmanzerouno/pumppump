@@ -1812,12 +1812,23 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    await bot.editMessageText(updatedMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true
-    });
+      await bot.editMessageText(updatedMessage, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
+              { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+            ],
+            [
+              { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+            ]
+          ]
+        }
+      });
 
     console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
   } catch (error) {
