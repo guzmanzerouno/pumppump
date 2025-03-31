@@ -571,8 +571,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
                 inputMint: "So11111111111111111111111111111111111111112", // SOL
                 outputMint: mint,
                 amount: Math.floor(amountSOL * 1e9), // Convertir SOL a lamports
-                dynamicSlippage: true,               // 🔄 Usa slippage dinámico
-                // slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
+                // dynamicSlippage: true,               // 🔄 Usa slippage dinámico
+                slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
                 swapMode: "ExactIn" // 🔹 Se garantiza que la cantidad vendida sea exacta
             }
         });
@@ -725,8 +725,8 @@ async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
                 inputMint: mint,
                 outputMint: "So11111111111111111111111111111111111111112", // SOL
                 amount: amountInUnits,
-                dynamicSlippage: true,               // 🔄 Usa slippage dinámico
-                //slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
+                // dynamicSlippage: true,               // 🔄 Usa slippage dinámico
+                slippageBps: 2000,                // Alternativa: 2000 = 20% slippage manual
                 swapMode: "ExactIn" // 🔹 Se garantiza que la cantidad vendida sea exacta
             }
         });
