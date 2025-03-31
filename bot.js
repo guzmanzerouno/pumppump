@@ -1765,7 +1765,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return;
     }
 
-    // 1️⃣ Obtener datos desde Moralis
+    // 1️⃣ Moralis data
     const moralisRes = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
       headers: {
           accept: "application/json",
@@ -1780,7 +1780,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const liquidityNow = parseFloat(moralisData.totalLiquidityUsd);
     const priceChange24h = parseFloat(moralisData.pricePercentChange?.["24h"] || 0);
 
-    // 2️⃣ Obtener precio actual desde Jupiter simulando venta de 1 token
+    // 2️⃣ Cotización desde Jupiter: simulando venta de 1 token (con 9 decimales)
     const quoteRes = await fetch(
       `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}&outputMint=So11111111111111111111111111111111111111112&amount=1000000000&slippageBps=500&priorityFeeBps=20`
     );
@@ -1789,13 +1789,24 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const quoteData = await quoteRes.json();
 
     const outAmount = parseFloat(quoteData.outAmount);
-    const priceSolNow = outAmount / 1e9; // Valor actual del token en SOL
+    const priceSolNow = outAmount / 1e9;
 
-    // 3️⃣ Calcular PNL y otros valores
+    // 🔍 Formatear a 3 cifras significativas después del primer número distinto de 0
+    function formatPrecise(val) {
+      const num = Number(val);
+      if (num === 0) return "0";
+      const parts = num.toExponential(3).split("e");
+      const decimal = parseFloat(parts[0]);
+      const exponent = parseInt(parts[1]);
+      return (decimal * Math.pow(10, exponent)).toPrecision(3);
+    }
+
+    const formattedPriceSolNow = formatPrecise(priceSolNow);
+
+    // 3️⃣ Cálculos PNL
     const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
     const changePercent = (((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100).toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-
     const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
@@ -1804,7 +1815,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown";
 
-    // 4️⃣ Armar mensaje
+    // 4️⃣ Mensaje
     const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
       `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
@@ -1815,17 +1826,17 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${original.tokenPrice.toFixed(9)} SOL\n` +
-      `💲 *Spent:* ${original.solBeforeBuy} SOL\n` +
-      `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n\n` +
+      `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n` +
+      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
 
       `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `📊 *Price Actual:* ${emojiPrice} ${priceSolNow.toFixed(9)} SOL (${changePercent}%)\n` +
+      `💲 *Price Actual:* ${emojiPrice} ${formattedPriceSolNow} SOL (${changePercent}%)\n` +
       `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
 
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    // 5️⃣ Editar el mensaje en Telegram
+    // 5️⃣ Editar mensaje en Telegram
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -1847,12 +1858,10 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
   } catch (error) {
     const errorMessage = error?.response?.body?.description || error.message;
-
     if (errorMessage.includes("message is not modified")) {
       console.log(`⏸ Nada cambió en el mensaje de ${tokenSymbol}, no se actualiza.`);
       return;
     }
-
     console.error("❌ Error en refreshBuyConfirmationV2:", errorMessage);
     await bot.sendMessage(chatId, "❌ Error al actualizar la información del token.");
   }
