@@ -1806,7 +1806,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${original.tokenPrice.toFixed(9)} SOL\n` +
-      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
+      `💲 *Spent:* ${original.solBeforeBuy} SOL\n` +
+      `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n\n` +
 
       `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `📊 *Price Actual:* ${emojiPrice} ${priceSolNow.toFixed(9)} SOL (${changePercent}%)\n` +
@@ -1848,28 +1849,46 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 }
 
 async function getSolPriceUSD() {
-    try {
-        const response = await axios.get('https://api.dexscreener.com/latest/dex/pairs/osmosis/1960');
-        const data = response.data;
-        if (data && data.pair && data.pair.priceUsd) {
-            return parseFloat(data.pair.priceUsd);
-        } else {
-            console.error('Price information not found in the response.');
-            return null;
-        }
-    } catch (error) {
-        console.error('Error fetching SOL price:', error.message);
-        return null;
+  try {
+    const response = await axios.get("https://quote-api.jup.ag/v6/quote", {
+      params: {
+        inputMint: "So11111111111111111111111111111111111111112", // SOL
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+        amount: 100000000, // 0.1 SOL (100M lamports)
+        slippageBps: 50
+      }
+    });
+
+    const data = response.data;
+
+    if (!data || !data.outAmount) {
+      console.error("❌ No se encontró 'outAmount' en la respuesta.");
+      return null;
     }
+
+    const solInLamports = 100000000; // 0.1 SOL
+    const usdcDecimals = 6;
+
+    // Convertimos el outAmount (USDC con 6 decimales) a USD
+    const usdcAmount = parseFloat(data.outAmount) / Math.pow(10, usdcDecimals);
+    const solAmount = solInLamports / 1e9; // Convertimos lamports a SOL
+
+    const solPrice = usdcAmount / solAmount; // Precio de 1 SOL en USD
+
+    return solPrice;
+
+  } catch (error) {
+    console.error("❌ Error al obtener el precio de SOL desde Jupiter:", error.message);
+    return null;
+  }
 }
 
-// Usage example
 getSolPriceUSD().then(price => {
-    if (price !== null) {
-        console.log(`The current price of SOL is $${price}`);
-    } else {
-        console.log('Unable to retrieve the price of SOL.');
-    }
+  if (price !== null) {
+    console.log(`💰 Precio actual de SOL: $${price.toFixed(2)}`);
+  } else {
+    console.log('⚠️ No se pudo obtener el precio de SOL.');
+  }
 });
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
