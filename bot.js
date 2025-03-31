@@ -1043,7 +1043,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ],
       [
         // Botón para ver el token en Dexscreener 
-        { text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` },
+        { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` },
       ]
     ];
   
@@ -1162,7 +1162,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
               { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
               { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
             ],
-            [{ text: "📊 Dexscreener", url: `https://dexscreener.com/solana/${mint}` }]
+            [{ text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }]
           ]
         };
   
@@ -1708,7 +1708,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
           { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
         ],
         [
-          { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+          { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
         ]
       ]
     }
@@ -1827,7 +1827,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
-            { text: "📈 Dexscreener", url: `https://dexscreener.com/solana/${receivedTokenMint}` }
+            { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
           ]
         ]
       }
