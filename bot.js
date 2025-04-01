@@ -1808,7 +1808,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
-    const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
+    const currentPriceShown = parseFloat(formattedCurrentPrice);
+    const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
 
 // Formateamos priceSolNow con los tres ceros y lo convertimos a número real para cálculo
 const visualPriceSolNow = parseFloat(formatWithZeros(priceSolNow));
