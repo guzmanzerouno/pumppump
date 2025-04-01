@@ -1790,15 +1790,24 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const outAmount = parseFloat(jupData.outAmount); // in lamports
     const priceSolNow = outAmount / 1e9; // convert to SOL
 
-    // 🔢 Format price with 3 significant digits (after first non-zero)
-    const formatPrice = (val) => {
-      if (val >= 1) return val.toFixed(6);
-      const str = val.toFixed(12);
-      const match = str.match(/0*([1-9]\d{0,2})/);
-      if (!match) return val.toFixed(6);
-      const index = str.indexOf(match[1]);
-      return str.slice(0, index + match[1].length + 1);
-    };
+    // 🔢 Format price with 3 leading zeros after decimal before extracting significant digits
+  const formatPrice = (val) => {
+  if (val >= 1) return val.toFixed(6);
+
+  // Convertimos a string con muchos decimales
+  let str = val.toFixed(12);
+
+  // Forzamos tres ceros luego del punto decimal
+  if (str.startsWith("0.")) {
+    str = "0.000" + str.slice(2); // agrega tres ceros después de "0."
+  }
+
+  // Buscamos los primeros 3 dígitos significativos
+  const match = str.match(/0*([1-9]\d{0,2})/);
+  if (!match) return val.toFixed(6);
+  const index = str.indexOf(match[1]);
+  return str.slice(0, index + match[1].length + 1); // +1 para incluir un decimal más si hay
+  };
 
     const formattedOriginalPrice = formatPrice(original.tokenPrice);
     const formattedCurrentPrice = formatPrice(priceSolNow);
