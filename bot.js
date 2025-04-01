@@ -1809,7 +1809,14 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
     const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
-    const changePercent = (((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100).toFixed(2);
+
+    let changePercent = 0;
+    if (original.tokenPrice > 0) {
+      changePercent = ((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
+      if (!isFinite(changePercent)) changePercent = 0;
+    }
+    changePercent = changePercent.toFixed(2);
+    
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
 
     const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
