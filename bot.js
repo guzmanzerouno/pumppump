@@ -1758,6 +1758,13 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return;
     }
 
+    const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
+    if (!pairAddress || pairAddress === "N/A") {
+      console.warn(`⚠️ Token ${tokenMint} has no valid pairAddress.`);
+      await bot.sendMessage(chatId, "❌ This token has no valid pair info for refresh.");
+      return;
+    }
+
     // 1️⃣ Moralis stats
     const moralisRes = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
       headers: {
