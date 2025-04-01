@@ -1808,21 +1808,20 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
-    const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
+    // ✅ Calcular valor actual correctamente
+    const rawCurrentValue = original.receivedAmount * priceSolNow;
+    const currentValue = rawCurrentValue.toFixed(6);
 
-// Formateamos priceSolNow con los tres ceros y lo convertimos a número real para cálculo
-const visualPriceSolNow = parseFloat(formatWithZeros(priceSolNow));
+    // 📊 Calcular cambio porcentual
+    let changePercent = 0;
+    if (original.tokenPrice > 0) {
+      changePercent = ((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
+      if (!isFinite(changePercent)) changePercent = 0;
+    }
+    changePercent = changePercent.toFixed(2);
 
-let changePercent = 0;
-if (original.tokenPrice > 0) {
-  changePercent = ((visualPriceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
-  if (!isFinite(changePercent)) changePercent = 0;
-}
-changePercent = changePercent.toFixed(2);
-    
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-
-    const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
+    const pnlSol = rawCurrentValue - parseFloat(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
     const receivedTokenMint = escapeMarkdown(tokenMint);
