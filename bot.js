@@ -1760,8 +1760,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
     if (!pairAddress || pairAddress === "N/A") {
-      console.warn(`⚠️ Token ${tokenMint} has no valid pairAddress.`);
-      await bot.sendMessage(chatId, "❌ This token has no valid pair info for refresh.");
+      console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
+      await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
       return;
     }
 
@@ -1772,7 +1772,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
       }
     });
-
     if (!moralisRes.ok) throw new Error(`Error fetching Moralis data: ${moralisRes.statusText}`);
     const moralisData = await moralisRes.json();
 
@@ -1780,37 +1779,34 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const liquidityNow = parseFloat(moralisData.totalLiquidityUsd);
     const priceChange24h = parseFloat(moralisData.pricePercentChange?.["24h"] || 0);
 
-    // 2️⃣ Jupiter quote for 1B tokens
+    // 2️⃣ Jupiter quote
     const jupRes = await fetch(
       `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}&outputMint=So11111111111111111111111111111111111111112&amount=1000000000&slippageBps=500&priorityFeeBps=20`
     );
     if (!jupRes.ok) throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
     const jupData = await jupRes.json();
 
-    const outAmount = parseFloat(jupData.outAmount); // in lamports
-    const priceSolNow = outAmount / 1e9; // convert to SOL
+    const outAmount = parseFloat(jupData.outAmount);
+    const priceSolNow = outAmount / 1e9;
 
-    // 🔢 Format price with 3 leading zeros after decimal before extracting significant digits
-  const formatPrice = (val) => {
-  if (val >= 1) return val.toFixed(6);
+    // 🧮 Formateadores
+    const formatDefault = (val) => {
+      if (val >= 1) return val.toFixed(6);
+      return val.toFixed(9).replace(/0+$/, "");
+    };
 
-  // Convertimos a string con muchos decimales
-  let str = val.toFixed(12);
+    const formatWithZeros = (val) => {
+      if (val >= 1) return val.toFixed(6);
+      const str = val.toFixed(12);
+      const forced = "0.000" + str.slice(2);
+      const match = forced.match(/0*([1-9]\d{0,2})/);
+      if (!match) return forced;
+      const idx = forced.indexOf(match[1]);
+      return forced.slice(0, idx + match[1].length + 1);
+    };
 
-  // Forzamos tres ceros luego del punto decimal
-  if (str.startsWith("0.")) {
-    str = "0.000" + str.slice(2); // agrega tres ceros después de "0."
-  }
-
-  // Buscamos los primeros 3 dígitos significativos
-  const match = str.match(/0*([1-9]\d{0,2})/);
-  if (!match) return val.toFixed(6);
-  const index = str.indexOf(match[1]);
-  return str.slice(0, index + match[1].length + 1); // +1 para incluir un decimal más si hay
-  };
-
-    const formattedOriginalPrice = formatPrice(original.tokenPrice);
-    const formattedCurrentPrice = formatPrice(priceSolNow);
+    const formattedOriginalPrice = formatDefault(original.tokenPrice);
+    const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
     const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
     const changePercent = (((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100).toFixed(2);
@@ -1824,7 +1820,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown";
 
-    // 🧾 Final message
+    // 📬 Mensaje final
     const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
       `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
@@ -1845,7 +1841,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    // ✉️ Send update
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
       message_id: messageId,
