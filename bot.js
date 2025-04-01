@@ -1795,34 +1795,34 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return val.toFixed(9).replace(/0+$/, "");
     };
 
-    // ✅ SOLO 3 DÍGITOS SIGNIFICATIVOS DESPUÉS DEL PRIMER NO-CERO
-    const formatThreeSigDigits = (val) => {
+    const formatWithZeros = (val) => {
       if (val >= 1) return val.toFixed(6);
       const str = val.toFixed(12);
-      const match = str.match(/0*([1-9]\d{0,2})/);
-      if (!match) return str;
-      const idx = str.indexOf(match[1]);
-      return str.slice(0, idx + 4); // 3 dígitos significativos
+      const forced = "0.000" + str.slice(2);
+      const match = forced.match(/0*([1-9]\d{0,2})/);
+      if (!match) return forced;
+      const idx = forced.indexOf(match[1]);
+      return forced.slice(0, idx + match[1].length + 1);
     };
 
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
-    const formattedCurrentPrice = formatThreeSigDigits(priceSolNow);
+    const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
-    // ✅ You Get bien calculado
-    const rawCurrentValue = original.receivedAmount * priceSolNow;
-    const currentValue = rawCurrentValue.toFixed(6);
+    const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
 
-    // ✅ porcentaje se mantiene bien
-    const visualPriceSolNow = priceSolNow;
-    let changePercent = 0;
-    if (original.tokenPrice > 0) {
-      changePercent = ((visualPriceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
-      if (!isFinite(changePercent)) changePercent = 0;
-    }
-    changePercent = changePercent.toFixed(2);
+// Formateamos priceSolNow con los tres ceros y lo convertimos a número real para cálculo
+const visualPriceSolNow = parseFloat(formatWithZeros(priceSolNow));
 
+let changePercent = 0;
+if (original.tokenPrice > 0) {
+  changePercent = ((visualPriceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
+  if (!isFinite(changePercent)) changePercent = 0;
+}
+changePercent = changePercent.toFixed(2);
+    
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-    const pnlSol = rawCurrentValue - parseFloat(original.solBeforeBuy);
+
+    const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
     const receivedTokenMint = escapeMarkdown(tokenMint);
@@ -1830,6 +1830,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown";
 
+    // 📬 Mensaje final
     const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
       `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
