@@ -966,8 +966,20 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
-  
-    // Obtener datos actualizados de DexScreener y RugCheck
+    
+    // 🔔 Notificación previa al análisis
+    for (const userId in users) {
+      const user = users[userId];
+      if (user && user.subscribed && user.privateKey) {
+        try {
+          await bot.sendMessage(userId, "🚨 *Token incoming, prepare to buy‼️* 🚨", { parse_mode: "Markdown" });
+        } catch (err) {
+          console.error(`❌ Error enviando alerta a ${userId}:`, err.message);
+        }
+      }
+    }
+    
+    // Obtener datos actualizados de DexScreener
     const dexData = await getDexScreenerData(mintData.mintAddress);
     if (!dexData) {
       console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
