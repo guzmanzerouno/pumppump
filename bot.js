@@ -940,90 +940,99 @@ const processedSignatures = new Set();
 
 // Función principal que ejecuta todo el proceso de análisis
 async function analyzeTransaction(signature, forceCheck = false) {
-    console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
-  
-    // Evitar procesar firmas duplicadas
-    if (!forceCheck && processedSignatures.has(signature)) {
-      console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
-      return;
-    }
-    if (!forceCheck) {
-      processedSignatures.add(signature);
-    }
-  
-    // Extraer el mint que termina en "pump" de la transacción
-    let mintData = await getMintAddressFromTransaction(signature);
-    if (!mintData || !mintData.mintAddress) {
-      console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
-      return;
-    }
-    console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
-  
-    // Evitar procesar el mismo token nuevamente (usando mint.json)
-    if (processedMints[mintData.mintAddress]) {
-      console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
-      return;
-    }
-    processedMints[mintData.mintAddress] = true;
-    saveProcessedMints();
-    
-    // 🔔 Notificación previa al análisis
-    for (const userId in users) {
-      const user = users[userId];
-      if (user && user.subscribed && user.privateKey) {
-        try {
-          await bot.sendMessage(userId, "🚨 *Token incoming, prepare to buy‼️* 🚨", { parse_mode: "Markdown" });
-        } catch (err) {
-          console.error(`❌ Error enviando alerta a ${userId}:`, err.message);
-        }
+  console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
+
+  if (!forceCheck && processedSignatures.has(signature)) {
+    console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
+    return;
+  }
+  if (!forceCheck) {
+    processedSignatures.add(signature);
+  }
+
+  let mintData = await getMintAddressFromTransaction(signature);
+  if (!mintData || !mintData.mintAddress) {
+    console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
+    return;
+  }
+  console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
+
+  if (processedMints[mintData.mintAddress]) {
+    console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado. Se omite.`);
+    return;
+  }
+  processedMints[mintData.mintAddress] = true;
+  saveProcessedMints();
+
+  // Notificación previa
+  for (const userId in users) {
+    const user = users[userId];
+    if (user && user.subscribed && user.privateKey) {
+      try {
+        await bot.sendMessage(userId, "🚨 *Token incoming, prepare to buy‼️* 🚨", { parse_mode: "Markdown" });
+      } catch (err) {
+        console.error(`❌ Error enviando alerta a ${userId}:`, err.message);
       }
     }
-    
-    // Obtener datos actualizados de DexScreener
-    const dexData = await getDexScreenerData(mintData.mintAddress);
-    if (!dexData) {
-      console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
-      return;
-    }
-    console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
-  
-    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-    if (!rugCheckData) {
-      console.log(`⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress}`);
-      return;
-    }
-    console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
-  
-    // Calcular valores derivados
-    const priceChange24h = dexData.priceChange24h !== "N/A"
-      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
-      : "N/A";
-      const age = calculateAge(dexData.creationTimestamp) || "N/A";
-  
-    console.log("💾 Guardando datos en tokens.json...");
-    // Guarda toda la información en tokens.json (asegúrate de que saveTokenData guarde todas las claves originales)
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
-  
-    // Construir el mensaje que se enviará a Telegram (se usan todos los datos, incluido la firma)
-    let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
-    message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
-    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
-    message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
-    message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
-    message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
-    message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
-    message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
-    message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
-    message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
-    message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-    message += `📆 **Created:** ${escapeMarkdown(String(mintData.date))}\n\n`;
-    //message += `🔄 **Status:** ${escapeMarkdown(String(mintData.status))}\n\n`;
-    //message += `🔗 **Pair:** \`${escapeMarkdown(String(dexData.pairAddress))}\`\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
-  
-    // Se envía el mensaje a los usuarios, usando el mint para los botones
-    await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
   }
+
+  const dexData = await getDexScreenerData(mintData.mintAddress);
+  if (!dexData) {
+    console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
+    return;
+  }
+  console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
+
+  // 🧠 RugCheck: seguimos aunque falle
+  let rugCheckData = {
+    riskLevel: "N/A",
+    riskDescription: "N/A",
+    lpLocked: "N/A",
+    imageUrl: null
+  };
+
+  try {
+    const fetchedData = await fetchRugCheckData(mintData.mintAddress);
+    if (fetchedData) {
+      rugCheckData = {
+        riskLevel: fetchedData.riskLevel || "N/A",
+        riskDescription: fetchedData.riskDescription || "N/A",
+        lpLocked: fetchedData.lpLocked || "N/A",
+        imageUrl: fetchedData.imageUrl || null
+      };
+      console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
+    } else {
+      console.log(`⚠️ RugCheck sin datos, se continúa igual.`);
+    }
+  } catch (err) {
+    console.log(`❌ Error al obtener RugCheck: ${err.message}`);
+    // Continuamos con valores "N/A"
+  }
+
+  const priceChange24h = dexData.priceChange24h !== "N/A"
+    ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+    : "N/A";
+  const age = calculateAge(dexData.creationTimestamp) || "N/A";
+
+  console.log("💾 Guardando datos en tokens.json...");
+  saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+
+  let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
+  message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
+  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
+  message += `💲 **USD:** ${escapeMarkdown(String(dexData.priceUsd))}\n`;
+  message += `💰 **SOL:** ${escapeMarkdown(String(dexData.priceSol))}\n`;
+  message += `💧 **Liquidity:** $${escapeMarkdown(String(dexData.liquidity))}\n`;
+  message += `📈 **Market Cap:** $${escapeMarkdown(String(dexData.marketCap))}\n`;
+  message += `💹 **FDV:** $${escapeMarkdown(String(dexData.fdv))}\n\n`;
+  message += `**${escapeMarkdown(String(rugCheckData.riskLevel))}:** ${escapeMarkdown(String(rugCheckData.riskDescription))}\n`;
+  message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n\n`;
+  message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
+  message += `📆 **Created:** ${escapeMarkdown(String(mintData.date))}\n\n`;
+  message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
+
+  await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
+}
   
   // Función para notificar a los usuarios (manteniendo la información original de tokens.json)
   // Se usan botones que incluyen la URL a Dexscreener y un botón "Refresh" que enviará el mint en el callback.
