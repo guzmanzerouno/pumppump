@@ -1806,12 +1806,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     };
 
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
-    let formattedCurrentPrice;
-    if (priceSolNow < 0.001) {
-    formattedCurrentPrice = formatWithZeros(priceSolNow);
-    } else {
-    formattedCurrentPrice = priceSolNow.toFixed(6);
-    }
+    const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
     const currentPriceShown = parseFloat(formattedCurrentPrice);
     const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
