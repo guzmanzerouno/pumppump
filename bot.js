@@ -1753,60 +1753,53 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     const original = buyReferenceMap[chatId]?.[tokenMint];
     if (!original || !original.solBeforeBuy) {
-      console.warn(`⚠️ No se encontró referencia de compra para ${tokenMint}`);
-      await bot.sendMessage(chatId, "⚠️ No se encontró información previa de compra para este token.");
+      console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
+      await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
       return;
     }
 
-    const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
-    if (!pairAddress || pairAddress === "N/A") {
-      console.warn(`⚠️ Token ${tokenMint} no tiene pairAddress válido.`);
-      await bot.sendMessage(chatId, "❌ Este token no tiene información de par disponible para refrescar.");
-      return;
-    }
-
-    // 1️⃣ Moralis data
-    const moralisRes = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+    // 1️⃣ Moralis stats
+    const moralisRes = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${tokenMint}/stats`, {
       headers: {
-          accept: "application/json",
-          "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
-        }
+        accept: "application/json",
+        "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
+      }
     });
 
-    if (!moralisRes.ok) throw new Error(`Error al obtener datos de Moralis: ${moralisRes.statusText}`);
+    if (!moralisRes.ok) throw new Error(`Error fetching Moralis data: ${moralisRes.statusText}`);
     const moralisData = await moralisRes.json();
 
     const priceUsdNow = parseFloat(moralisData.currentUsdPrice);
     const liquidityNow = parseFloat(moralisData.totalLiquidityUsd);
     const priceChange24h = parseFloat(moralisData.pricePercentChange?.["24h"] || 0);
 
-    // 2️⃣ Cotización desde Jupiter: simulando venta de 1 token (con 9 decimales)
-    const quoteRes = await fetch(
+    // 2️⃣ Jupiter quote for 1B tokens
+    const jupRes = await fetch(
       `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}&outputMint=So11111111111111111111111111111111111111112&amount=1000000000&slippageBps=500&priorityFeeBps=20`
     );
+    if (!jupRes.ok) throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+    const jupData = await jupRes.json();
 
-    if (!quoteRes.ok) throw new Error(`Error al obtener precio desde Jupiter: ${quoteRes.statusText}`);
-    const quoteData = await quoteRes.json();
+    const outAmount = parseFloat(jupData.outAmount); // in lamports
+    const priceSolNow = outAmount / 1e9; // convert to SOL
 
-    const outAmount = parseFloat(quoteData.outAmount);
-    const priceSolNow = outAmount / 1e9;
+    // 🔢 Format price with 3 significant digits (after first non-zero)
+    const formatPrice = (val) => {
+      if (val >= 1) return val.toFixed(6);
+      const str = val.toFixed(12);
+      const match = str.match(/0*([1-9]\d{0,2})/);
+      if (!match) return val.toFixed(6);
+      const index = str.indexOf(match[1]);
+      return str.slice(0, index + match[1].length + 1);
+    };
 
-    // 🔍 Formatear a 3 cifras significativas después del primer número distinto de 0
-    function formatPrecise(val) {
-      const num = Number(val);
-      if (num === 0) return "0";
-      const parts = num.toExponential(3).split("e");
-      const decimal = parseFloat(parts[0]);
-      const exponent = parseInt(parts[1]);
-      return (decimal * Math.pow(10, exponent)).toPrecision(3);
-    }
+    const formattedOriginalPrice = formatPrice(original.tokenPrice);
+    const formattedCurrentPrice = formatPrice(priceSolNow);
 
-    const formattedPriceSolNow = formatPrecise(priceSolNow);
-
-    // 3️⃣ Cálculos PNL
     const currentValue = (original.receivedAmount * priceSolNow).toFixed(4);
     const changePercent = (((priceSolNow - original.tokenPrice) / original.tokenPrice) * 100).toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
+
     const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
@@ -1815,7 +1808,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown";
 
-    // 4️⃣ Mensaje
+    // 🧾 Final message
     const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
       `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
@@ -1825,18 +1818,18 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `📉 *24h:* ${priceChange24h.toFixed(2)}%\n\n` +
 
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${original.tokenPrice.toFixed(9)} SOL\n` +
+      `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
       `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n` +
       `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
 
       `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Price Actual:* ${emojiPrice} ${formattedPriceSolNow} SOL (${changePercent}%)\n` +
+      `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercent}%)\n` +
       `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
 
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    // 5️⃣ Editar mensaje en Telegram
+    // ✉️ Send update
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -1855,15 +1848,17 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       }
     });
 
-    console.log(`🔄 Confirmación actualizada correctamente para ${tokenSymbol}`);
+    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
     const errorMessage = error?.response?.body?.description || error.message;
+
     if (errorMessage.includes("message is not modified")) {
-      console.log(`⏸ Nada cambió en el mensaje de ${tokenSymbol}, no se actualiza.`);
+      console.log(`⏸ Message not modified for ${tokenSymbol}, skipping.`);
       return;
     }
-    console.error("❌ Error en refreshBuyConfirmationV2:", errorMessage);
-    await bot.sendMessage(chatId, "❌ Error al actualizar la información del token.");
+
+    console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
+    await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
   }
 }
 
