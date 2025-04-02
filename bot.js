@@ -422,19 +422,35 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
       const data = response.data;
       const pool = data.pools?.[0];
 
+      // ✅ Score categorizado
+      const score = data.risk?.score || 0;
+      let riskLevel = "🟢 GOOD";
+      if (score >= 5) {
+        riskLevel = "🔴 DANGER";
+      } else if (score >= 3) {
+        riskLevel = "🔴 WARNING";
+      }
+
+      // ✅ Revisar descripción
+      const risks = data.risk?.risks || [];
+      let riskDescription = "No risks detected";
+      if (risks.length > 1) {
+        riskDescription = risks.map(r => r.description).join(", ");
+      }
+
       return {
         name: data.fileMeta?.name || data.token?.name || "N/A",
         symbol: data.fileMeta?.symbol || data.token?.symbol || "N/A",
         imageUrl: data.fileMeta?.image || data.token?.image || "",
-        riskLevel: (data.risk?.score || 0) <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
-        riskDescription: data.risk?.risks?.map(r => r.description).join(", ") || "No risks detected",
+        riskLevel,
+        riskDescription,
         lpLocked: pool?.lpBurn ?? "N/A",
         freezeAuthority: pool?.security?.freezeAuthority === null
           ? "🔓 Disabled"
           : "🔒 Enabled",
         mintAuthority: pool?.security?.mintAuthority === null
-          ? "🔒 Revoked (Good)"
-          : "⚠️ Exists (Risky)"
+          ? "✅ Revoked"
+          : "⚠️ Exists"
       };
 
     } catch (error) {
