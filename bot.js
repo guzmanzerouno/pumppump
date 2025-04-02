@@ -1069,11 +1069,10 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
-        [
-        // botón para refrescar los datos de DexScreener
-            { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }
-            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
-        ],
+      [
+        { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+        { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+      ],
       [
         { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
         { text: "💰 0.05 Sol", callback_data: `buy_${mint}_0.05` },
@@ -1192,22 +1191,24 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
         const reply_markup = {
           inline_keyboard: [
-            [{ text: "🔄 Refresh Info", callback_data: `refresh_${mint}` }],
+            [
+              { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+            ],
             [
               { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-              { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-              { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` }
+              { text: "💰 0.05 Sol", callback_data: `buy_${mint}_0.05` },
+              { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` }
             ],
             [
+              { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
               { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-              { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-              { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+              { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
             ],
             [
-              { text: "💵 Sell 50%", callback_data: `sell_${mint}_50` },
+              { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` },
               { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-            ],
-            [{ text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }]
+            ]
           ]
         };
   
