@@ -446,7 +446,7 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
         riskDescription,
         lpLocked: pool?.lpBurn ?? "N/A",
         freezeAuthority: pool?.security?.freezeAuthority === null
-          ? "🔓 Disabled"
+          ? "✅ Disabled"
           : "🔒 Enabled",
         mintAuthority: pool?.security?.mintAuthority === null
           ? "✅ Revoked"
