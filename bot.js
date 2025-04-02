@@ -431,11 +431,13 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
         riskLevel = "🔴 WARNING";
       }
 
-      // ✅ Revisar descripción
+      // ✅ Revisar descripción, ignorando solo "No social media"
       const risks = data.risk?.risks || [];
+      const filteredRisks = risks.filter(r => r.name !== "No social media");
+
       let riskDescription = "No risks detected";
-      if (risks.length > 1) {
-        riskDescription = risks.map(r => r.description).join(", ");
+      if (filteredRisks.length > 0) {
+        riskDescription = filteredRisks.map(r => r.description).join(", ");
       }
 
       return {
