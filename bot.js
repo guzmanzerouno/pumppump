@@ -203,15 +203,14 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 10 * 1000; // 10 segundos por defecto
+let DELAY_BEFORE_ANALYSIS = 0; // 0 segundos por defecto
 
-// 🔹 Comando `/delay X` para cambiar el tiempo de espera dinámicamente
 bot.onText(/\/delay (\d+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const newDelay = parseInt(match[1]);
 
-    if (isNaN(newDelay) || newDelay < 10 || newDelay > 300) {
-        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 10 y 300 segundos.", { parse_mode: "Markdown" });
+    if (isNaN(newDelay) || newDelay < 0 || newDelay > 300) {
+        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 0 y 300 segundos.", { parse_mode: "Markdown" });
         return;
     }
 
