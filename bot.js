@@ -21,6 +21,7 @@ const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
+const ADMIN_CHAT_ID = 472101348;
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
@@ -53,15 +54,149 @@ function isUserActive(user) {
 }
 
 function showPaymentButtons(chatId) {
-  bot.sendMessage(chatId, "💳 Please select a subscription plan:", {
+  bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+    caption: "💳 Please select a subscription plan:",
     reply_markup: {
       inline_keyboard: [
-        [{ text: "Pay 1 Month $125", callback_data: "pay_month" }],
-        [{ text: "Pay 1 Year $1199", callback_data: "pay_year" }]
+        [{ text: "1 Day - 0.05 SOL", callback_data: "pay_1d" }],
+        [{ text: "15 Days - 0.60 SOL", callback_data: "pay_15d" }],
+        [{ text: "1 Month - 1.10 SOL", callback_data: "pay_month" }],
+        [{ text: "6 Months - 6.00 SOL", callback_data: "pay_6m" }],
+        [{ text: "1 Year - 11.00 SOL", callback_data: "pay_year" }]
       ]
     }
   });
 }
+
+async function activateMembership(chatId, days, solAmount) {
+  const user = users[chatId];
+  const now = Date.now();
+  const expiration = now + days * 24 * 60 * 60 * 1000;
+
+  const sender = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+  const receiver = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
+
+  const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+
+  // ✅ Verificamos fondos suficientes
+  const balance = await connection.getBalance(sender.publicKey);
+  if (balance < solAmount * 1e9) {
+    return bot.sendMessage(chatId, `❌ *Insufficient funds.*\nYour wallet has ${(balance / 1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`, {
+      parse_mode: "Markdown"
+    });
+  }
+
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: sender.publicKey,
+      toPubkey: receiver,
+      lamports: solAmount * 1e9
+    })
+  );
+
+  try {
+    const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
+    
+    user.expired = expiration;
+    user.subscribed = true;
+    saveUsers();
+    savePaymentRecord(chatId, sig, days, solAmount); // 👈 Guardamos pago
+    notifyAdminOfPayment(user, sig, days, solAmount, expiration);
+
+    const expirationDate = new Date(expiration).toLocaleDateString();
+
+    bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+      caption: `✅ *Payment received successfully!*
+💳 Your membership is now active until *${expirationDate}*
+
+🔗 [View Transaction](https://solscan.io/tx/${sig})`,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
+
+  } catch (err) {
+    bot.sendMessage(chatId, `❌ Transaction failed: ${err.message}`);
+  }
+}
+
+function savePaymentRecord(chatId, txId, days, solAmount) {
+  const paymentsFile = "payments.json";
+  let records = [];
+
+  if (fs.existsSync(paymentsFile)) {
+    records = JSON.parse(fs.readFileSync(paymentsFile));
+  }
+
+  records.push({
+    chatId,
+    wallet: users[chatId].walletPublicKey,
+    tx: txId,
+    amountSol: solAmount,
+    days,
+    timestamp: Date.now()
+  });
+
+  fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
+}
+
+bot.on("callback_query", async (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (!users[chatId] || !users[chatId].walletPublicKey || !users[chatId].privateKey) {
+    return bot.sendMessage(chatId, "❌ You must complete registration before paying.");
+  }
+
+  switch (data) {
+    case "pay_15d":
+      await activateMembership(chatId, 15, 0.60);
+      break;
+    case "pay_month":
+      await activateMembership(chatId, 30, 1.10);
+      break;
+    case "pay_6m":
+      await activateMembership(chatId, 180, 6.00);
+      break;
+    case "pay_year":
+      await activateMembership(chatId, 365, 11.00);
+      break;
+    case "pay_menu":
+      showPaymentButtons(chatId);
+      break;
+  }
+});
+
+bot.onText(/\/payments/, (msg) => {
+  const chatId = msg.chat.id;
+
+  if (!users[chatId] || !users[chatId].walletPublicKey) {
+    return bot.sendMessage(chatId, "❌ You must be registered to view your payment history.");
+  }
+
+  const paymentsFile = "payments.json";
+  if (!fs.existsSync(paymentsFile)) {
+    return bot.sendMessage(chatId, "📭 No payment records found.");
+  }
+
+  const records = JSON.parse(fs.readFileSync(paymentsFile));
+  const userPayments = records.filter(p => p.chatId === chatId);
+
+  if (userPayments.length === 0) {
+    return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+  }
+
+  let message = `📜 *Your Payment History:*\n\n`;
+
+  for (let p of userPayments.reverse()) {
+    const date = new Date(p.timestamp).toLocaleDateString();
+    message += `🗓️ *${date}*\n`;
+    message += `💼 Wallet: \`${p.wallet}\`\n`;
+    message += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+    message += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+  }
+
+  bot.sendMessage(chatId, message, { parse_mode: "Markdown", disable_web_page_preview: true });
+});
 
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -274,11 +409,55 @@ setInterval(() => {
   const now = Date.now();
   for (const [chatId, user] of Object.entries(users)) {
     if (user.expired !== "never" && now > user.expired) {
-      bot.sendMessage(chatId, "🔔 Your access has expired. Please renew your subscription:");
-      showPaymentButtons(chatId);
+      if (user.subscribed !== false) {
+        user.subscribed = false;
+        saveUsers(); // 👈 Guardamos el cambio
+        bot.sendMessage(chatId, "🔔 Your access has expired. Please renew your subscription:");
+        showPaymentButtons(chatId);
+      }
     }
   }
-}, 60 * 60 * 1000); // Cada 1 hora
+}, 60 * 60 * 1000);
+
+function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
+  const expirationDate = new Date(expiration).toLocaleDateString();
+
+  const msg = `🟢 *New Membership Payment*
+
+👤 *User:* ${user.name || "Unknown"}
+💼 *Wallet:* \`${user.walletPublicKey}\`
+💳 *Paid:* ${solAmount} SOL for ${days} days
+🗓️ *Expires:* ${expirationDate}
+🔗 [View Tx](https://solscan.io/tx/${sig})`;
+
+  bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
+}
+
+bot.onText(/\/status/, (msg) => {
+  const chatId = msg.chat.id;
+  const user = users[chatId];
+
+  if (!user || !user.walletPublicKey) {
+    return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
+  }
+
+  const now = Date.now();
+  let message = `👤 *Account Status*\n\n`;
+  message += `💼 Wallet: \`${user.walletPublicKey}\`\n`;
+
+  if (user.expired === "never") {
+    message += `✅ *Status:* Unlimited Membership`;
+  } else if (user.expired && now < user.expired) {
+    const expirationDate = new Date(user.expired).toLocaleDateString();
+    const remainingDays = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
+    message += `✅ *Status:* Active\n📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)`;
+  } else {
+    const expiredDate = user.expired ? new Date(user.expired).toLocaleDateString() : "N/A";
+    message += `❌ *Status:* Expired\n📅 *Expired On:* ${expiredDate}`;
+  }
+
+  bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
+});
 
 
 
