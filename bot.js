@@ -114,11 +114,7 @@ const statusLine = expiration === "never"
   : `✅ Active for ${Math.round((expiration - now) / (1000 * 60 * 60 * 24))} day(s)`;
 
 // ✅ Texto final unificado para el caption del mensaje con imagen
-const fullConfirmation = `✅ *Payment received successfully!*
-💳 Membership active until *${expirationDate}*
-🔗 [Transaction](https://solscan.io/tx/${sig})
-
-✅ *User Registered!*
+const fullConfirmation = `✅ *User Registered!*
 👤 *Name:* ${user.name}
 📱 *Phone:* ${user.phone}
 📧 *Email:* ${user.email}
@@ -147,7 +143,7 @@ await bot.editMessageMedia(
 );
 
 // ✅ Notificación al admin
-const adminMsg = `🟢 *New Membership Payment*
+const adminMsg = `✅ *Payment received successfully!*
 👤 *User:* ${user.name || "Unknown"}
 💼 *Wallet:* \`${user.walletPublicKey}\`
 💳 *Paid:* ${solAmount} SOL for ${days} days
@@ -386,13 +382,13 @@ bot.on("message", async (msg) => {
             ? "✅ Unlimited"
             : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
       
-          const confirmation = `✅ *User Registered!*
-      👤 *Name:* ${user.name}
-      📱 *Phone:* ${user.phone}
-      📧 *Email:* ${user.email}
-      💼 *Wallet:* \`${user.walletPublicKey}\`
-      🔐 *Referral:* ${result.code} (${user.referrer})
-      ⏳ *Status:* ${activeStatus}`;
+            const confirmation = `✅ *User Registered!*
+            👤 *Name:* ${user.name}
+            📱 *Phone:* ${user.phone}
+            📧 *Email:* ${user.email}
+            💼 *Wallet:* \`${user.walletPublicKey}\`
+            🔐 *Referral:* ${result.code} (${user.referrer})
+            ⏳ *Status:* ${activeStatus}`;
       
           await bot.deleteMessage(chatId, msgId).catch(() => {});
       
