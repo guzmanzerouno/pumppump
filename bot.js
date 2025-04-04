@@ -21,7 +21,7 @@ const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
-const ADMIN_CHAT_ID = 472101348;
+global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
