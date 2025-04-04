@@ -24,7 +24,6 @@ const buyReferenceMap = {};
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-let users = {};
 
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
@@ -39,97 +38,207 @@ function loadUsers() {
     }
 }
 
-// 📝 Guardar usuarios en el archivo JSON
+// 📁 Cargar usuarios y referidos
+let users = JSON.parse(fs.readFileSync("users.json"));
+
 function saveUsers() {
-    try {
-        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-        console.log("📂 Usuarios actualizados.");
-    } catch (error) {
-        console.error("❌ Error guardando usuarios:", error);
-    }
+  fs.writeFileSync("users.json", JSON.stringify(users, null, 2));
 }
 
-// 🔥 Cargar usuarios antes de iniciar el WebSocket
-loadUsers();
+function isUserActive(user) {
+  return user.expired === "never" || Date.now() < user.expired;
+}
 
-/* 🔹 USER REGISTRATION PROCESS */
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-
-    if (users[chatId]) {
-        bot.sendMessage(chatId, "✅ You are already registered.");
-    } else {
-        users[chatId] = { step: 1, subscribed: true };
-        saveUsers();
-        bot.sendMessage(chatId, "👋 Welcome! Please enter your *full name*:");
+function showPaymentButtons(chatId) {
+  bot.sendMessage(chatId, "💳 Please select a subscription plan:", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Pay 1 Month $125", callback_data: "pay_month" }],
+        [{ text: "Pay 1 Year $1199", callback_data: "pay_year" }]
+      ]
     }
+  });
+}
+
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  users[chatId] = { step: 1 };
+  saveUsers();
+
+  const startMessage = await bot.sendMessage(chatId, "👋 Welcome to *PUMPUltra.fun Bot*! Let's start the registration process.\n\n📧 Please enter your *email address*:", {
+    parse_mode: "Markdown"
+  });
+
+  users[chatId].registrationMessageId = startMessage.message_id;
 });
 
 bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text.trim();
+  const chatId = msg.chat.id;
+  const text = msg.text.trim();
+  const userInfo = msg.from;
 
-    if (!users[chatId] || !users[chatId].step) return; // Ignore if not in registration process
+  if (!users[chatId] || !users[chatId].step) return;
 
-    switch (users[chatId].step) {
-        case 1:
-            users[chatId].name = text;
-            users[chatId].step = 2;
-            saveUsers();
-            bot.sendMessage(chatId, "📞 Please enter your *phone number*:");
-            break;
+  if (msg.message_id) {
+    bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+  }
 
-        case 2:
-            users[chatId].phone = text;
-            users[chatId].step = 3;
-            saveUsers();
-            bot.sendMessage(chatId, "📧 Please enter your *email address*:");
-            break;
+  switch (users[chatId].step) {
+    case 1:
+      users[chatId].email = text;
+      users[chatId].step = 2;
+      saveUsers();
+      bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
+        chat_id: chatId,
+        message_id: users[chatId].registrationMessageId,
+        parse_mode: "Markdown"
+      });
+      break;
 
-        case 3:
-            users[chatId].email = text;
-            users[chatId].step = 4;
-            saveUsers();
-            bot.sendMessage(chatId, "🔑 Please enter your *Solana private key* (⚠️ Do not share this key with anyone):");
-            break;
-
-        case 4:
-            try {
-                const userPrivateKey = text;
-
-                // 🔹 Decode the private key and generate the public key
-                const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(userPrivateKey)));
-                const walletPublicKey = keypair.publicKey.toBase58();
-
-                // 🔹 Update user data without overwriting previous fields
-                users[chatId] = Object.assign({}, users[chatId], {
-                    privateKey: userPrivateKey,
-                    walletPublicKey: walletPublicKey,
-                    step: 0 // Registration complete
-                });
-
-                saveUsers();
-                bot.sendMessage(chatId, "✅ Registration complete! You can now trade on Solana using the bot.");
-
-            } catch (error) {
-                console.error("❌ Error decoding private key:", error);
-                bot.sendMessage(chatId, "⚠️ Invalid private key. Please try again.");
-            }
-            break;
-    }
-});
-
-bot.onText(/\/stop/, (msg) => {
-    const chatId = msg.chat.id;
-
-    if (users[chatId] && users[chatId].subscribed) {
-        users[chatId].subscribed = false;
+    case 2:
+      try {
+        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+        users[chatId].privateKey = text;
+        users[chatId].walletPublicKey = keypair.publicKey.toBase58();
+        users[chatId].name = userInfo.first_name || "Unknown";
+        users[chatId].phone = userInfo.phone_number || "Not provided";
+        users[chatId].step = 3;
         saveUsers();
-        bot.sendMessage(chatId, "🛑 Has sido eliminado de las notificaciones.");
-    } else {
-        bot.sendMessage(chatId, "⚠️ No estabas suscrito.");
-    }
+
+        bot.editMessageText("🎟️ Do you have a *referral code*? Reply with Yes or No.", {
+          chat_id: chatId,
+          message_id: users[chatId].registrationMessageId,
+          parse_mode: "Markdown"
+        });
+      } catch (err) {
+        bot.sendMessage(chatId, "❌ Invalid private key. Try again:");
+        return;
+      }
+      break;
+
+    case 3:
+      if (/^yes$/i.test(text)) {
+        users[chatId].step = 4;
+        saveUsers();
+        bot.editMessageText("🔠 Please enter your *referral code*:", {
+          chat_id: chatId,
+          message_id: users[chatId].registrationMessageId,
+          parse_mode: "Markdown"
+        });
+      } else {
+        users[chatId].expired = null;
+        users[chatId].step = 0;
+        saveUsers();
+
+        bot.editMessageText("⚠️ No code entered. You need to *purchase a subscription* to activate your account.", {
+          chat_id: chatId,
+          message_id: users[chatId].registrationMessageId,
+          parse_mode: "Markdown"
+        });
+        showPaymentButtons(chatId);
+      }
+      break;
+
+    case 4:
+      const result = validateReferralCode(text);
+
+      if (result.valid) {
+        users[chatId].referrer = result.referrer || "Unknown";
+        users[chatId].rcode = result.code;
+        users[chatId].expired = result.expiration;
+        users[chatId].step = 0;
+        saveUsers();
+
+        const activeStatus = result.expiration === "never"
+          ? "✅ Unlimited"
+          : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
+
+        const confirmation = `✅ *User Registered!*
+👤 *Name:* ${users[chatId].name}
+📱 *Phone:* ${users[chatId].phone}
+📧 *Email:* ${users[chatId].email}
+💼 *Wallet:* \`${users[chatId].walletPublicKey}\`
+🔐 *Referral:* ${result.code} (${users[chatId].referrer})
+⏳ *Status:* ${activeStatus}`;
+
+        bot.editMessageText(confirmation, {
+          chat_id: chatId,
+          message_id: users[chatId].registrationMessageId,
+          parse_mode: "Markdown"
+        });
+
+      } else {
+        users[chatId].expired = null;
+        users[chatId].step = 0;
+        saveUsers();
+
+        bot.editMessageText("⚠️ Invalid or expired code. You need to *purchase a subscription* to activate your account.", {
+          chat_id: chatId,
+          message_id: users[chatId].registrationMessageId,
+          parse_mode: "Markdown"
+        });
+        showPaymentButtons(chatId);
+      }
+      break;
+  }
 });
+
+// ✅ Funciones para manejo de códigos
+function loadRcodes() {
+  return JSON.parse(fs.readFileSync("rcodes.json"));
+}
+
+function saveRcodes(rcodes) {
+  fs.writeFileSync("rcodes.json", JSON.stringify(rcodes, null, 2));
+}
+
+function validateReferralCode(code) {
+  const rcodes = loadRcodes();
+  const entry = rcodes.find(c => c.code === code);
+
+  if (entry && (entry.uses === null || entry.used < entry.uses)) {
+    entry.used += 1;
+    saveRcodes(rcodes);
+
+    const expiration = entry.days === null ? "never" : Date.now() + entry.days * 24 * 60 * 60 * 1000;
+
+    return {
+      valid: true,
+      referrer: entry.name,
+      code: entry.code,
+      expiration
+    };
+  }
+
+  return { valid: false };
+}
+
+// ✅ Bloquear funciones si el usuario no está activo
+function ensureActiveUser(msg, callback) {
+  const chatId = msg.chat.id;
+  const user = users[chatId];
+
+  if (!user || !isUserActive(user)) {
+    bot.sendMessage(chatId, "🔒 *Access Denied.* Please activate your account to use this feature.", { parse_mode: "Markdown" });
+    showPaymentButtons(chatId);
+    return;
+  }
+
+  callback();
+}
+
+// ✅ Revisión periódica de expiración (puede ejecutarse cada X minutos)
+setInterval(() => {
+  const now = Date.now();
+  for (const [chatId, user] of Object.entries(users)) {
+    if (user.expired !== "never" && now > user.expired) {
+      bot.sendMessage(chatId, "🔔 Your access has expired. Please renew your subscription:");
+      showPaymentButtons(chatId);
+    }
+  }
+}, 60 * 60 * 1000); // Cada 1 hora
+
+
 
 // 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
@@ -203,7 +312,7 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 0; // 0 segundos por defecto
+let DELAY_BEFORE_ANALYSIS = 5 * 1000; // 5 segundos por defecto
 
 bot.onText(/\/delay (\d+)/, (msg, match) => {
     const chatId = msg.chat.id;
