@@ -367,55 +367,55 @@ bot.on("message", async (msg) => {
       }
       break;
 
-      case 5:
-        const result = validateReferralCode(text);
-        if (result.valid) {
-          user.referrer = result.referrer || "Unknown";
-          user.rcode = result.code;
-          user.expired = result.expiration;
-          user.step = 0;
-          user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
-      
-          saveUsers();
-      
-          const activeStatus = result.expiration === "never"
-            ? "✅ Unlimited"
-            : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
-      
-            const confirmation = `✅ *User Registered!*
-            👤 *Name:* ${user.name}
-            📱 *Phone:* ${user.phone}
-            📧 *Email:* ${user.email}
-            💼 *Wallet:* \`${user.walletPublicKey}\`
-            🔐 *Referral:* ${result.code} (${user.referrer})
-            ⏳ *Status:* ${activeStatus}`;
-      
-          await bot.deleteMessage(chatId, msgId).catch(() => {});
-      
-          bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-            caption: confirmation,
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-                [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
-              ]
-            }
-          });
-      
-        } else {
-          user.expired = null;
-          user.step = 0;
-          user.subscribed = false;
-          saveUsers();
-      
-          bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
-            chat_id: chatId,
-            message_id: msgId,
-            parse_mode: "Markdown"
-          }).then(() => showPaymentButtons(chatId));
-        }
-        break;
+      ase 5:
+  const result = validateReferralCode(text);
+  if (result.valid) {
+    user.referrer = result.referrer || "Unknown";
+    user.rcode = result.code;
+    user.expired = result.expiration;
+    user.step = 0;
+    user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
+
+    saveUsers();
+
+    const activeStatus = result.expiration === "never"
+      ? "✅ Unlimited"
+      : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
+
+    const confirmation = `✅ *User Registered!*
+👤 *Name:* ${user.name}
+📱 *Phone:* ${user.phone}
+📧 *Email:* ${user.email}
+💼 *Wallet:* \`${user.walletPublicKey}\`
+🔐 *Referral:* ${result.code} (${user.referrer})
+⏳ *Status:* ${activeStatus}`;
+
+    await bot.deleteMessage(chatId, msgId).catch(() => {});
+
+    bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+      caption: confirmation,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
+          [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+        ]
+      }
+    });
+
+  } else {
+    user.expired = null;
+    user.step = 0;
+    user.subscribed = false;
+    saveUsers();
+
+    bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown"
+    }).then(() => showPaymentButtons(chatId));
+  }
+  break;
   }
 });
 
