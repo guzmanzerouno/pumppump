@@ -148,6 +148,9 @@ bot.on("callback_query", async (query) => {
   }
 
   switch (data) {
+    case "pay_1d":
+      await activateMembership(chatId, 1, 0.05);
+      break;
     case "pay_15d":
       await activateMembership(chatId, 15, 0.60);
       break;
