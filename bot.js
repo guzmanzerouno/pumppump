@@ -127,22 +127,24 @@ const fullConfirmation = `✅ *Payment received successfully!*
 ⏳ *Status:* ${statusLine}`;
 
 // ✅ Editamos el mensaje anterior con una imagen + caption
-await bot.editMessageMedia({
-  chat_id: chatId,
-  message_id: processingMsg.message_id,
-  media: {
+await bot.editMessageMedia(
+  {
     type: "photo",
     media: "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
     caption: fullConfirmation,
     parse_mode: "Markdown"
   },
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-      [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
-    ]
+  {
+    chat_id: chatId,
+    message_id: processingMsg.message_id,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
+        [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+      ]
+    }
   }
-});
+);
 
 // ✅ Notificación al admin
 const adminMsg = `🟢 *New Membership Payment*
