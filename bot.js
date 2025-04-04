@@ -46,7 +46,10 @@ function saveUsers() {
 }
 
 function isUserActive(user) {
-  return user.expired === "never" || Date.now() < user.expired;
+  const active = user.expired === "never" || Date.now() < user.expired;
+  user.subscribed = active;
+  saveUsers();
+  return active;
 }
 
 function showPaymentButtons(chatId) {
@@ -68,13 +71,15 @@ bot.onText(/\/start/, async (msg) => {
     const expired = users[chatId].expired;
     const stillActive = expired === "never" || (expired && Date.now() < expired);
 
+    users[chatId].subscribed = stillActive; // Actualizar el campo subscribed
+    saveUsers();
+
     if (stillActive) {
       return bot.sendMessage(chatId, `✅ You are already registered, *${firstName}*!`, {
         parse_mode: "Markdown"
       });
     }
 
-    // Usuario registrado pero expirado
     return bot.sendMessage(chatId, `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`, {
       parse_mode: "Markdown"
     }).then(() => showPaymentButtons(chatId));
@@ -98,7 +103,6 @@ bot.on("message", async (msg) => {
 
   if (!users[chatId] || !users[chatId].step) return;
 
-  // Eliminar respuesta del usuario por seguridad
   bot.deleteMessage(chatId, messageId).catch(() => {});
 
   const user = users[chatId];
@@ -160,6 +164,7 @@ bot.on("message", async (msg) => {
       } else {
         user.expired = null;
         user.step = 0;
+        user.subscribed = false; // 👈 Agregado: sin código, no está suscrito
         saveUsers();
 
         bot.editMessageText("⚠️ No referral code provided. Please *purchase a subscription* to activate your account.", {
@@ -177,6 +182,8 @@ bot.on("message", async (msg) => {
         user.rcode = result.code;
         user.expired = result.expiration;
         user.step = 0;
+        user.subscribed = result.expiration === "never" || Date.now() < result.expiration; // 👈 Agregado
+
         saveUsers();
 
         const activeStatus = result.expiration === "never"
@@ -205,6 +212,7 @@ bot.on("message", async (msg) => {
       } else {
         user.expired = null;
         user.step = 0;
+        user.subscribed = false; // 👈 Agregado
         saveUsers();
 
         bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
