@@ -367,7 +367,7 @@ bot.on("message", async (msg) => {
       }
       break;
 
-      ase 5:
+      case 5:
   const result = validateReferralCode(text);
   if (result.valid) {
     user.referrer = result.referrer || "Unknown";
