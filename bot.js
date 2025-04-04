@@ -49,10 +49,8 @@ function isUserActive(user) {
   return user.expired === "never" || Date.now() < user.expired;
 }
 
-function showPaymentButtons(chatId, msgId) {
-  bot.editMessageText("💳 Please select a subscription plan:", {
-    chat_id: chatId,
-    message_id: msgId,
+function showPaymentButtons(chatId) {
+  bot.sendMessage(chatId, "💳 Please select a subscription plan:", {
     reply_markup: {
       inline_keyboard: [
         [{ text: "Pay 1 Month $125", callback_data: "pay_month" }],
@@ -66,10 +64,27 @@ bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const firstName = msg.from.first_name || "there";
 
+  if (users[chatId]) {
+    const user = users[chatId];
+
+    if (isUserActive(user)) {
+      return bot.sendMessage(chatId, `✅ You are already registered, *${user.name}*!`, {
+        parse_mode: "Markdown"
+      });
+    } else {
+      bot.sendMessage(chatId, `⚠️ Your access has expired, *${user.name}*.
+\n💳 Please renew your subscription to continue using the bot.`, {
+        parse_mode: "Markdown"
+      });
+      return showPaymentButtons(chatId);
+    }
+  }
+
   users[chatId] = { step: 1, name: firstName };
   saveUsers();
 
-  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *PUMPUltra.fun Bot*.\n\n📱 Please enter your *phone number*:`, {
+  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *PUMPUltra.fun Bot*.
+\n📱 Please enter your *phone number*:`, {
     parse_mode: "Markdown"
   });
 
@@ -80,40 +95,30 @@ bot.onText(/\/start/, async (msg) => {
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
-
-  if (!users[chatId] || !users[chatId].step || msg.text?.startsWith("/")) return;
+  if (!users[chatId] || !users[chatId].step) return;
 
   const msgId = users[chatId].msgId;
-
-  // Borrar mensaje del usuario
-  if (msg.message_id) {
-    try {
-      await bot.deleteMessage(chatId, msg.message_id);
-    } catch (e) {}
-  }
 
   switch (users[chatId].step) {
     case 1:
       users[chatId].phone = text;
       users[chatId].step = 2;
       saveUsers();
-      await bot.editMessageText("📧 Please enter your *email address*:", {
+      return bot.editMessageText("📧 Please enter your *email address*:", {
         chat_id: chatId,
         message_id: msgId,
         parse_mode: "Markdown"
       });
-      break;
 
     case 2:
       users[chatId].email = text;
       users[chatId].step = 3;
       saveUsers();
-      await bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
+      return bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
         chat_id: chatId,
         message_id: msgId,
         parse_mode: "Markdown"
       });
-      break;
 
     case 3:
       try {
@@ -123,24 +128,20 @@ bot.on("message", async (msg) => {
         users[chatId].step = 4;
         saveUsers();
 
-        await bot.editMessageText("🎟️ Do you have a *referral code*? Reply with Yes or No.", {
+        return bot.editMessageText("🎟️ Do you have a *referral code*? Reply with Yes or No.", {
           chat_id: chatId,
           message_id: msgId,
           parse_mode: "Markdown"
         });
       } catch (err) {
-        await bot.editMessageText("❌ Invalid private key. Try again:", {
-          chat_id: chatId,
-          message_id: msgId
-        });
+        return bot.sendMessage(chatId, "❌ Invalid private key. Try again:");
       }
-      break;
 
     case 4:
       if (/^yes$/i.test(text)) {
         users[chatId].step = 5;
         saveUsers();
-        await bot.editMessageText("🔠 Please enter your *referral code*:", {
+        return bot.editMessageText("🔠 Please enter your *referral code*:", {
           chat_id: chatId,
           message_id: msgId,
           parse_mode: "Markdown"
@@ -150,9 +151,13 @@ bot.on("message", async (msg) => {
         users[chatId].step = 0;
         saveUsers();
 
-        showPaymentButtons(chatId, msgId);
+        await bot.editMessageText("⚠️ No code entered. You need to *purchase a subscription* to activate your account.", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        return showPaymentButtons(chatId);
       }
-      break;
 
     case 5:
       const result = validateReferralCode(text);
@@ -176,18 +181,30 @@ bot.on("message", async (msg) => {
 🔐 *Referral:* ${result.code} (${users[chatId].referrer})
 ⏳ *Status:* ${activeStatus}`;
 
-        await bot.editMessageText(confirmation, {
+        return bot.editMessageText(confirmation, {
           chat_id: chatId,
           message_id: msgId,
-          parse_mode: "Markdown"
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "💳 Pay Membership", callback_data: "pay_menu" }],
+              [{ text: "📘 How to Use the Bot", callback_data: "how_to" }]
+            ]
+          }
         });
+
       } else {
         users[chatId].expired = null;
         users[chatId].step = 0;
         saveUsers();
-        showPaymentButtons(chatId, msgId);
+
+        await bot.editMessageText("⚠️ Invalid or expired code. You need to *purchase a subscription* to activate your account.", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        return showPaymentButtons(chatId);
       }
-      break;
   }
 });
 
