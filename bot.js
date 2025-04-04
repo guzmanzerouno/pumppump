@@ -86,36 +86,83 @@ async function activateMembership(chatId, days, solAmount) {
     });
   }
 
-  const tx = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: sender.publicKey,
-      toPubkey: receiver,
-      lamports: solAmount * 1e9
-    })
-  );
+  // ✅ Mostramos "Processing Payment..."
+  const processingMsg = await bot.sendMessage(chatId, "🕐 *Processing your payment...*", {
+    parse_mode: "Markdown"
+  });
 
   try {
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: sender.publicKey,
+        toPubkey: receiver,
+        lamports: solAmount * 1e9
+      })
+    );
+
     const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
-    
+
     user.expired = expiration;
     user.subscribed = true;
     saveUsers();
-    savePaymentRecord(chatId, sig, days, solAmount); // 👈 Guardamos pago
-    notifyAdminOfPayment(user, sig, days, solAmount, expiration);
+    savePaymentRecord(chatId, sig, days, solAmount);
 
     const expirationDate = new Date(expiration).toLocaleDateString();
 
-    bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-      caption: `✅ *Payment received successfully!*
-💳 Your membership is now active until *${expirationDate}*
+    const confirmationText = `✅ *Payment received successfully!*
+💳 Membership active until *${expirationDate}*
+🔗 [Transaction](https://solscan.io/tx/${sig})`;
 
-🔗 [View Transaction](https://solscan.io/tx/${sig})`,
+    // ✅ Editamos mensaje anterior con la confirmación
+    await bot.editMessageText(confirmationText, {
+      chat_id: chatId,
+      message_id: processingMsg.message_id,
       parse_mode: "Markdown",
       disable_web_page_preview: true
     });
 
+    // ✅ Notificación al admin también desde acá (reutilizando)
+    const adminMsg = `🟢 *New Membership Payment*
+👤 *User:* ${user.name || "Unknown"}
+💼 *Wallet:* \`${user.walletPublicKey}\`
+💳 *Paid:* ${solAmount} SOL for ${days} days
+🗓️ *Expires:* ${expirationDate}
+🔗 [View Tx](https://solscan.io/tx/${sig})`;
+
+    bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
+
+    // ✅ Mensaje final con los datos del usuario y botones
+    const statusLine = expiration === "never"
+      ? "✅ Unlimited"
+      : `✅ Active for ${Math.round((expiration - now) / (1000 * 60 * 60 * 24))} day(s)`;
+
+      const finalMsg = `✅ *User Registered!*
+      👤 *Name:* ${user.name}
+      📱 *Phone:* ${user.phone}
+      📧 *Email:* ${user.email}
+      💼 *Wallet:* \`${user.walletPublicKey}\`
+      🔐 *Referral:* ${user.rcode || "None"}
+      ⏳ *Status:* ${statusLine}`;
+      
+      bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+        caption: finalMsg,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
+            [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+          ]
+        }
+      });
+
   } catch (err) {
-    bot.sendMessage(chatId, `❌ Transaction failed: ${err.message}`);
+    bot.editMessageText(`❌ Transaction failed: ${err.message}`, {
+      chat_id: chatId,
+      message_id: processingMsg.message_id
+    });
   }
 }
 
@@ -313,53 +360,55 @@ bot.on("message", async (msg) => {
       }
       break;
 
-    case 5:
-      const result = validateReferralCode(text);
-      if (result.valid) {
-        user.referrer = result.referrer || "Unknown";
-        user.rcode = result.code;
-        user.expired = result.expiration;
-        user.step = 0;
-        user.subscribed = result.expiration === "never" || Date.now() < result.expiration; // 👈 Agregado
-
-        saveUsers();
-
-        const activeStatus = result.expiration === "never"
-          ? "✅ Unlimited"
-          : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
-
-        const confirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${result.code} (${user.referrer})
-⏳ *Status:* ${activeStatus}`;
-
-        bot.editMessageText(confirmation, {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "💳 Pay Membership", callback_data: "pay_menu" }],
-              [{ text: "📘 How to Use the Bot", callback_data: "how_to" }]
-            ]
-          }
-        });
-      } else {
-        user.expired = null;
-        user.step = 0;
-        user.subscribed = false; // 👈 Agregado
-        saveUsers();
-
-        bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        }).then(() => showPaymentButtons(chatId));
-      }
-      break;
+      case 5:
+        const result = validateReferralCode(text);
+        if (result.valid) {
+          user.referrer = result.referrer || "Unknown";
+          user.rcode = result.code;
+          user.expired = result.expiration;
+          user.step = 0;
+          user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
+      
+          saveUsers();
+      
+          const activeStatus = result.expiration === "never"
+            ? "✅ Unlimited"
+            : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
+      
+          const confirmation = `✅ *User Registered!*
+      👤 *Name:* ${user.name}
+      📱 *Phone:* ${user.phone}
+      📧 *Email:* ${user.email}
+      💼 *Wallet:* \`${user.walletPublicKey}\`
+      🔐 *Referral:* ${result.code} (${user.referrer})
+      ⏳ *Status:* ${activeStatus}`;
+      
+          await bot.deleteMessage(chatId, msgId).catch(() => {});
+      
+          bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+            caption: confirmation,
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
+                [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+              ]
+            }
+          });
+      
+        } else {
+          user.expired = null;
+          user.step = 0;
+          user.subscribed = false;
+          saveUsers();
+      
+          bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
+            chat_id: chatId,
+            message_id: msgId,
+            parse_mode: "Markdown"
+          }).then(() => showPaymentButtons(chatId));
+        }
+        break;
   }
 });
 
