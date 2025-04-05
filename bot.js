@@ -826,13 +826,13 @@ async function fetchRugCheckData(tokenAddress) {
 
     const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
       ? `${data.markets[0].lp.lpLockedPct}`
-      : "*no data*";
+      : "no data";
 
-    const riskDescription = data.risks?.map(r => r.description).join(", ") || "*no data*";
+    const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
 
     return {
-      name: data.fileMeta?.name || "*no data*",
-      symbol: data.fileMeta?.symbol || "*no data*",
+      name: data.fileMeta?.name || "no data",
+      symbol: data.fileMeta?.symbol || "no data",
       imageUrl: data.fileMeta?.image || "",
       riskLevel,
       riskDescription,
@@ -871,18 +871,18 @@ async function fetchRugCheckData(tokenAddress) {
 
     const riskDescription = filteredRisks.length > 0
       ? filteredRisks.map(r => r.description).join(", ")
-      : "*no data*";
+      : "No risks detected";
 
     const lpLocked = (typeof pool?.lpBurn === "number")
       ? `${pool.lpBurn}`
-      : "*no data*";
+      : "no data";
 
     const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
     const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
 
     return {
-      name: data.fileMeta?.name || data.token?.name || "*no data*",
-      symbol: data.fileMeta?.symbol || data.token?.symbol || "*no data*",
+      name: data.fileMeta?.name || data.token?.name || "no data",
+      symbol: data.fileMeta?.symbol || data.token?.symbol || "no data",
       imageUrl: data.fileMeta?.image || data.token?.image || "",
       riskLevel,
       riskDescription,
