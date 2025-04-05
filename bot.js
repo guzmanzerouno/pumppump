@@ -803,55 +803,96 @@ async function getDexScreenerData(mintAddress) {
 }
 
 // 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
-async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
-  let attempt = 1;
+async function fetchRugCheckData(tokenAddress) {
+  // 🔸 PRIMER INTENTO: RugCheck
+  try {
+    console.log("🔍 Intentando obtener datos desde RugCheck...");
+    const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+    const data = response.data;
 
-  while (attempt <= retries) {
-    try {
-      console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
-      const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+    if (!data) throw new Error("No se recibió data de RugCheck.");
 
-      if (!response.data) throw new Error("No response data from RugCheck.");
-
-      const data = response.data;
-
-      // 🧠 Definir nivel de riesgo basado en score_normalised
-      const normalizedScore = data.score_normalised || 0;
-      let riskLevel = "🟢 GOOD";
-      if (normalizedScore >= 41) {
-        riskLevel = "🔴 DANGER";
-      } else if (normalizedScore >= 21) {
-        riskLevel = "🟠 WARNING";
-      }
-
-      // 🧊 Freeze / Mint Authority
-      const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
-      const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
-
-      // 🔹 Resultado final formateado
-      return {
-        name: data.fileMeta?.name || "N/A",
-        symbol: data.fileMeta?.symbol || "N/A",
-        imageUrl: data.fileMeta?.image || "",
-        riskLevel,
-        riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
-        lpLocked: data.markets?.[0]?.lp?.lpLockedPct ?? "N/A",
-        freezeAuthority,
-        mintAuthority
-      };
-
-    } catch (error) {
-      console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
-
-      if (attempt < retries && error.response?.status === 502) {
-        console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        attempt++;
-      } else {
-        console.log(`❌ RugCheck API failed after ${retries} attempts.`);
-        return null;
-      }
+    const normalizedScore = data.score_normalised || 0;
+    let riskLevel = "🟢 GOOD";
+    if (normalizedScore >= 41) {
+      riskLevel = "🔴 DANGER";
+    } else if (normalizedScore >= 21) {
+      riskLevel = "🟠 WARNING";
     }
+
+    const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+    const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+
+    const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
+      ? `${data.markets[0].lp.lpLockedPct}%`
+      : "*no data*";
+
+    const riskDescription = data.risks?.map(r => r.description).join(", ") || "*no data*";
+
+    return {
+      name: data.fileMeta?.name || "*no data*",
+      symbol: data.fileMeta?.symbol || "*no data*",
+      imageUrl: data.fileMeta?.image || "",
+      riskLevel,
+      riskDescription,
+      lpLocked,
+      freezeAuthority,
+      mintAuthority
+    };
+
+  } catch (error) {
+    console.warn(`⚠️ RugCheck falló: ${error.message}`);
+  }
+
+  // 🔁 SEGUNDO INTENTO: SolanaTracker
+  try {
+    console.log("🔄 RugCheck falló. Intentando con SolanaTracker...");
+    const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
+      headers: {
+        "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
+      }
+    });
+
+    const data = response.data;
+    if (!data) throw new Error("No se recibió data de SolanaTracker.");
+
+    const pool = data.pools?.[0];
+    const score = data.risk?.score || 0;
+    let riskLevel = "🟢 GOOD";
+    if (score >= 5) {
+      riskLevel = "🔴 DANGER";
+    } else if (score >= 3) {
+      riskLevel = "🟠 WARNING";
+    }
+
+    const risks = data.risk?.risks || [];
+    const filteredRisks = risks.filter(r => r.name !== "No social media");
+
+    const riskDescription = filteredRisks.length > 0
+      ? filteredRisks.map(r => r.description).join(", ")
+      : "*no data*";
+
+    const lpLocked = (typeof pool?.lpBurn === "number")
+      ? `${pool.lpBurn}%`
+      : "*no data*";
+
+    const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+    const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+
+    return {
+      name: data.fileMeta?.name || data.token?.name || "*no data*",
+      symbol: data.fileMeta?.symbol || data.token?.symbol || "*no data*",
+      imageUrl: data.fileMeta?.image || data.token?.image || "",
+      riskLevel,
+      riskDescription,
+      lpLocked,
+      freezeAuthority,
+      mintAuthority
+    };
+
+  } catch (error) {
+    console.error(`❌ SolanaTracker también falló: ${error.message}`);
+    return null;
   }
 }
 
