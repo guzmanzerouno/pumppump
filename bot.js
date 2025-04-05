@@ -722,71 +722,72 @@ function escapeMarkdown(text) {
 
 const ADMIN_CHAT_ID = "472101348";
 
-// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pase 1 minuto. Si sigue siendo "pumpfun", descarta el token.
 async function getDexScreenerData(mintAddress) {
-    let dexData = null;
-    const maxWaitTime = 60000; // 1/2 minutos en milisegundos
-    const startTime = Date.now();
+  let dexData = null;
+  const maxWaitTime = 60000; // 1 minuto en milisegundos
+  const startTime = Date.now();
 
-    console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
+  console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
 
-    while (!dexData || dexData.dexId === "pumpfun") {
-        try {
-            const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-            if (response.data && response.data.length > 0) {
-                dexData = response.data[0];
-                console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
-            }
-        } catch (error) {
-            console.error("⚠️ Error en DexScreener:", error.message);
-            if (error.response && error.response.status === 429) {
-                // Preparamos la información estructural de la API que estamos consultando
-                const apiInfo = {
-                    endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-                    method: "GET",
-                    status: error.response.status,
-                    data: error.response.data
-                };
-                // Enviar mensaje al chat de administración con los detalles
-                bot.sendMessage(
-                    ADMIN_CHAT_ID,
-                    `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
-                );
-            }
-        }
-
-        // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
-        if (Date.now() - startTime >= maxWaitTime) {
-            console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
-            break;
-        }
-
-        if (!dexData || dexData.dexId === "pumpfun") {
-            console.log("⏳ Esperando 1 segundo para volver a intentar...");
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+  while (!dexData || dexData.dexId === "pumpfun") {
+    try {
+      const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+      if (response.data && response.data.length > 0) {
+        dexData = response.data[0];
+        console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+      }
+    } catch (error) {
+      console.error("⚠️ Error en DexScreener:", error.message);
+      if (error.response && error.response.status === 429) {
+        const apiInfo = {
+          endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+          method: "GET",
+          status: error.response.status,
+          data: error.response.data
+        };
+        bot.sendMessage(
+          ADMIN_CHAT_ID,
+          `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
+        );
+      }
     }
 
-    console.log("✅ DexScreener confirmado en:", dexData.dexId);
+    // ⏳ Si se pasó el tiempo límite
+    if (Date.now() - startTime >= maxWaitTime) {
+      if (dexData && dexData.dexId === "pumpfun") {
+        console.warn("⏱️ DexID sigue siendo 'pumpfun'. DESCARTANDO token.");
+        return null;
+      }
+      break;
+    }
 
-    return {
-        name: dexData.baseToken?.name || "Desconocido",
-        symbol: dexData.baseToken?.symbol || "N/A",
-        priceUsd: dexData.priceUsd || "N/A",
-        priceSol: dexData.priceNative || "N/A",
-        liquidity: dexData.liquidity?.usd || "N/A",
-        marketCap: dexData.marketCap || "N/A",
-        fdv: dexData.fdv || "N/A",
-        pairAddress: dexData.pairAddress || "N/A",
-        dex: dexData.dexId || "N/A",
-        chain: dexData.chainId || "solana",
-        creationTimestamp: Number(dexData.pairCreatedAt),
-        priceChange24h: dexData.priceChange?.h24 || "N/A",
-        volume24h: dexData.volume?.h24 || "N/A",
-        buys24h: dexData.txns?.h24?.buys || "N/A",
-        sells24h: dexData.txns?.h24?.sells || "N/A",
-        website: dexData.info?.websites?.[0]?.url || "N/A"
-    };
+    if (!dexData || dexData.dexId === "pumpfun") {
+      console.log("⏳ Esperando 1 segundo para volver a intentar...");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  console.log("✅ DexScreener confirmado en:", dexData.dexId);
+
+  return {
+    name: dexData.baseToken?.name || "Desconocido",
+    symbol: dexData.baseToken?.symbol || "N/A",
+    priceUsd: dexData.priceUsd || "N/A",
+    priceSol: dexData.priceNative || "N/A",
+    liquidity: dexData.liquidity?.usd || "N/A",
+    marketCap: dexData.marketCap || "N/A",
+    fdv: dexData.fdv || "N/A",
+    pairAddress: dexData.pairAddress || "N/A",
+    dex: dexData.dexId || "N/A",
+    chain: dexData.chainId || "solana",
+    creationTimestamp: Number(dexData.pairCreatedAt),
+    priceChange24h: dexData.priceChange?.h24 || "N/A",
+    volume24h: dexData.volume?.h24 || "N/A",
+    buys24h: dexData.txns?.h24?.buys || "N/A",
+    sells24h: dexData.txns?.h24?.sells || "N/A",
+    website: dexData.info?.websites?.[0]?.url || "N/A"
+  };
 }
 
 // 🔹 Obtener datos de riesgo desde SolanaTracker API con reintentos automáticos
