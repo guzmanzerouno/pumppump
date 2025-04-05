@@ -804,7 +804,7 @@ async function getDexScreenerData(mintAddress) {
 }
 
 // 🔹 Obtener datos de riesgo desde SolanaTracker API con reintentos automáticos
-async function fetchalgo CheckData(tokenAddress, retries = 3, delayMs = 5000) {
+async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
   let attempt = 1;
 
   while (attempt <= retries) {
@@ -830,7 +830,7 @@ async function fetchalgo CheckData(tokenAddress, retries = 3, delayMs = 5000) {
       if (score >= 5) {
         riskLevel = "🔴 DANGER";
       } else if (score >= 3) {
-        riskLevel = "🔴 WARNING";
+        riskLevel = "🟠 WARNING";
       }
 
       // ✅ Revisar descripción, ignorando solo "No social media"
