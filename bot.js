@@ -54,7 +54,7 @@ function isUserActive(user) {
 }
 
 function showPaymentButtons(chatId) {
-  bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+  return bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
     caption: "💳 Please select a subscription plan:",
     reply_markup: {
       inline_keyboard: [
@@ -141,6 +141,17 @@ await bot.editMessageMedia(
     }
   }
 );
+
+// ✅ Eliminar mensaje de botones de pago anterior si existe
+if (user.lastPaymentMsgId) {
+  try {
+    await bot.deleteMessage(chatId, user.lastPaymentMsgId);
+    user.lastPaymentMsgId = null;
+    saveUsers();
+  } catch (err) {
+    console.error("⚠️ No se pudo borrar el mensaje de pago:", err.message);
+  }
+}
 
 // ✅ Notificación al admin
 const adminMsg = `✅ *Payment received successfully!*
@@ -356,14 +367,16 @@ bot.on("message", async (msg) => {
           parse_mode: "Markdown"
         });
     
-        // ⏳ Pequeña pausa para evitar conflictos de edición/borrado
+        // 💳 Mostramos el mensaje con los planes y guardamos el message_id
+        const paymentMsg = await showPaymentButtons(chatId);
+        user.lastPaymentMsgId = paymentMsg.message_id;
+        saveUsers();
+    
+        // ⏳ Pausa breve para evitar conflictos al borrar
         await new Promise(res => setTimeout(res, 300));
     
-        // 🗑️ Borramos el mensaje anterior
+        // 🗑️ Borramos el mensaje anterior (el de advertencia)
         await bot.deleteMessage(chatId, msgId);
-    
-        // 💳 Mostramos solo el mensaje con los planes
-        showPaymentButtons(chatId);
       }
       break;
 
