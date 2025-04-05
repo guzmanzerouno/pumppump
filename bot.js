@@ -1361,70 +1361,60 @@ function saveProcessedMints() {
 const processedSignatures = new Set();
 
 // Función principal que ejecuta todo el proceso de análisis
+// Función principal que ejecuta todo el proceso de análisis
 async function analyzeTransaction(signature, forceCheck = false) {
-  console.log(`🔍 Analizando transacción: ${signature} (ForceCheck: ${forceCheck})`);
+  if (!forceCheck && processedSignatures.has(signature)) return;
+  if (!forceCheck) processedSignatures.add(signature);
 
-  // Evitar procesar firmas duplicadas
-  if (!forceCheck && processedSignatures.has(signature)) {
-    console.log(`⏩ Transacción ignorada: Firma duplicada (${signature})`);
-    return;
-  }
-  if (!forceCheck) {
-    processedSignatures.add(signature);
-  }
+  const mintData = await getMintAddressFromTransaction(signature);
+  if (!mintData || !mintData.mintAddress) return;
 
-  // Extraer el mint que termina en "pump" de la transacción
-  let mintData = await getMintAddressFromTransaction(signature);
-  if (!mintData || !mintData.mintAddress) {
-    console.log("⚠️ Mint address no válido o no obtenido. Se descarta la transacción.");
-    return;
-  }
-  console.log(`✅ Mint Address identificado: ${mintData.mintAddress}`);
-
-  // Evitar procesar el mismo token nuevamente (usando mint.json)
-  if (processedMints[mintData.mintAddress]) {
-    console.log(`⏩ El mint ${mintData.mintAddress} ya fue procesado (guardado en mint.json). Se omite este procesamiento.`);
-    return;
-  }
+  if (processedMints[mintData.mintAddress]) return;
   processedMints[mintData.mintAddress] = true;
   saveProcessedMints();
 
   // 🔔 Notificación previa al análisis
+  const alertMessages = {};
   for (const userId in users) {
     const user = users[userId];
     if (user && user.subscribed && user.privateKey) {
       try {
-        await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", { parse_mode: "Markdown" });
-      } catch (err) {
-        console.error(`❌ Error enviando alerta a ${userId}:`, err.message);
-      }
+        const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
+          parse_mode: "Markdown"
+        });
+        alertMessages[userId] = msg.message_id;
+
+        // 🕐 Borrar después de 1 minuto
+        setTimeout(() => {
+          bot.deleteMessage(userId, msg.message_id).catch(() => {});
+        }, 80000);
+      } catch (_) {}
     }
   }
 
-  // ⚠️ PRIMERO: Obtener datos de riesgo desde SolanaTracker (antes de DexScreener)
   const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-  if (!rugCheckData) {
-    console.log(`⚠️ No se pudo obtener información de RugCheck para ${mintData.mintAddress}`);
-    return;
-  }
-  console.log(`✅ Datos de RugCheck obtenidos para ${mintData.mintAddress}`);
+  if (!rugCheckData) return;
 
-  // ✅ Obtener datos actualizados de DexScreener
   const dexData = await getDexScreenerData(mintData.mintAddress);
   if (!dexData) {
-    console.log(`⚠️ No se pudo obtener información de DexScreener para ${mintData.mintAddress}`);
+    // ⚠️ Si fue descartado, actualizamos el mensaje anterior
+    for (const userId in alertMessages) {
+      try {
+        await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
+          chat_id: userId,
+          message_id: alertMessages[userId],
+          parse_mode: "Markdown"
+        });
+      } catch (_) {}
+    }
     return;
   }
-  console.log(`✅ Datos de DexScreener obtenidos para ${mintData.mintAddress}`);
 
-  // Calcular valores derivados
   const priceChange24h = dexData.priceChange24h !== "N/A"
     ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
     : "N/A";
   const age = calculateAge(dexData.creationTimestamp) || "N/A";
 
-  console.log("💾 Guardando datos en tokens.json...");
-  // Guarda toda la información en tokens.json
   saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
 
   // Construir el mensaje que se enviará a Telegram (ahora con freeze/mint authority)
