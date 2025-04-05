@@ -807,36 +807,51 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
   let attempt = 1;
 
   while (attempt <= retries) {
-      try {
-          console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
-          const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+    try {
+      console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
+      const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
 
-          if (!response.data) {
-              throw new Error("No response data from RugCheck.");
-          }
+      if (!response.data) throw new Error("No response data from RugCheck.");
 
-          const data = response.data;
-          return {
-              name: data.fileMeta?.name || "N/A",
-              symbol: data.fileMeta?.symbol || "N/A",
-              imageUrl: data.fileMeta?.image || "",
-              riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
-              riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
-              lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
-          };
+      const data = response.data;
 
-      } catch (error) {
-          console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
-
-          if (attempt < retries && error.response?.status === 502) {
-              console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
-              await new Promise(resolve => setTimeout(resolve, delayMs));
-              attempt++;
-          } else {
-              console.log(`❌ RugCheck API failed after ${retries} attempts.`);
-              return null;
-          }
+      // 🧠 Definir nivel de riesgo basado en score_normalised
+      const normalizedScore = data.score_normalised || 0;
+      let riskLevel = "🟢 GOOD";
+      if (normalizedScore >= 41) {
+        riskLevel = "🔴 DANGER";
+      } else if (normalizedScore >= 21) {
+        riskLevel = "🟠 WARNING";
       }
+
+      // 🧊 Freeze / Mint Authority
+      const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+      const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+
+      // 🔹 Resultado final formateado
+      return {
+        name: data.fileMeta?.name || "N/A",
+        symbol: data.fileMeta?.symbol || "N/A",
+        imageUrl: data.fileMeta?.image || "",
+        riskLevel,
+        riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+        lpLocked: data.markets?.[0]?.lp?.lpLockedPct ?? "N/A",
+        freezeAuthority,
+        mintAuthority
+      };
+
+    } catch (error) {
+      console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
+
+      if (attempt < retries && error.response?.status === 502) {
+        console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        attempt++;
+      } else {
+        console.log(`❌ RugCheck API failed after ${retries} attempts.`);
+        return null;
+      }
+    }
   }
 }
 
