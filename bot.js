@@ -738,47 +738,46 @@ const ADMIN_CHAT_ID = "472101348";
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pase 1 minuto. Si sigue siendo "pumpfun", descarta el token.
 async function getDexScreenerData(mintAddress) {
   let dexData = null;
-  const maxWaitTime = 90000; // 1 minuto en milisegundos
+  const maxWaitTime = 60000; // 1/2 minutos en milisegundos
   const startTime = Date.now();
 
   console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
 
   while (!dexData || dexData.dexId === "pumpfun") {
-    try {
-      const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-      if (response.data && response.data.length > 0) {
-        dexData = response.data[0];
-        console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+      try {
+          const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+          if (response.data && response.data.length > 0) {
+              dexData = response.data[0];
+              console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+          }
+      } catch (error) {
+          console.error("⚠️ Error en DexScreener:", error.message);
+          if (error.response && error.response.status === 429) {
+              // Preparamos la información estructural de la API que estamos consultando
+              const apiInfo = {
+                  endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+                  method: "GET",
+                  status: error.response.status,
+                  data: error.response.data
+              };
+              // Enviar mensaje al chat de administración con los detalles
+              bot.sendMessage(
+                  ADMIN_CHAT_ID,
+                  `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
+              );
+          }
       }
-    } catch (error) {
-      console.error("⚠️ Error en DexScreener:", error.message);
-      if (error.response && error.response.status === 429) {
-        const apiInfo = {
-          endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-          method: "GET",
-          status: error.response.status,
-          data: error.response.data
-        };
-        bot.sendMessage(
-          ADMIN_CHAT_ID,
-          `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
-        );
-      }
-    }
 
-    // ⏳ Si se pasó el tiempo límite
-    if (Date.now() - startTime >= maxWaitTime) {
-      if (dexData && dexData.dexId === "pumpfun") {
-        console.warn("⏱️ DexID sigue siendo 'pumpfun'. DESCARTANDO token.");
-        return null;
+      // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
+      if (Date.now() - startTime >= maxWaitTime) {
+          console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
+          break;
       }
-      break;
-    }
 
-    if (!dexData || dexData.dexId === "pumpfun") {
-      console.log("⏳ Esperando 1 segundo para volver a intentar...");
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+      if (!dexData || dexData.dexId === "pumpfun") {
+          console.log("⏳ Esperando 1 segundo para volver a intentar...");
+          await new Promise(resolve => setTimeout(resolve, 1000));
+      }
   }
 
   console.log("✅ DexScreener confirmado en:", dexData.dexId);
@@ -803,72 +802,41 @@ async function getDexScreenerData(mintAddress) {
   };
 }
 
-// 🔹 Obtener datos de riesgo desde SolanaTracker API con reintentos automáticos
+// 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
 async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
   let attempt = 1;
 
   while (attempt <= retries) {
-    try {
-      console.log(`🔍 Fetching SolanaTracker data (Attempt ${attempt}/${retries})...`);
+      try {
+          console.log(`🔍 Fetching RugCheck data (Attempt ${attempt}/${retries})...`);
+          const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
 
-      const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
-        headers: {
-          "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
-        }
-      });
+          if (!response.data) {
+              throw new Error("No response data from RugCheck.");
+          }
 
-      if (!response.data) {
-        throw new Error("No response data from SolanaTracker.");
+          const data = response.data;
+          return {
+              name: data.fileMeta?.name || "N/A",
+              symbol: data.fileMeta?.symbol || "N/A",
+              imageUrl: data.fileMeta?.image || "",
+              riskLevel: data.score <= 1000 ? "🟢 GOOD" : "🔴 WARNING",
+              riskDescription: data.risks?.map(r => r.description).join(", ") || "No risks detected",
+              lpLocked: data.markets?.[0]?.lp?.lpLockedPct || "N/A"
+          };
+
+      } catch (error) {
+          console.error(`❌ Error fetching RugCheck data (Attempt ${attempt}):`, error.message);
+
+          if (attempt < retries && error.response?.status === 502) {
+              console.log(`⚠ RugCheck API returned 502. Retrying in ${delayMs / 1000} seconds...`);
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+              attempt++;
+          } else {
+              console.log(`❌ RugCheck API failed after ${retries} attempts.`);
+              return null;
+          }
       }
-
-      const data = response.data;
-      const pool = data.pools?.[0];
-
-      // ✅ Score categorizado
-      const score = data.risk?.score || 0;
-      let riskLevel = "🟢 GOOD";
-      if (score >= 5) {
-        riskLevel = "🔴 DANGER";
-      } else if (score >= 3) {
-        riskLevel = "🟠 WARNING";
-      }
-
-      // ✅ Revisar descripción, ignorando solo "No social media"
-      const risks = data.risk?.risks || [];
-      const filteredRisks = risks.filter(r => r.name !== "No social media");
-
-      let riskDescription = "No risks detected";
-      if (filteredRisks.length > 0) {
-        riskDescription = filteredRisks.map(r => r.description).join(", ");
-      }
-
-      return {
-        name: data.fileMeta?.name || data.token?.name || "N/A",
-        symbol: data.fileMeta?.symbol || data.token?.symbol || "N/A",
-        imageUrl: data.fileMeta?.image || data.token?.image || "",
-        riskLevel,
-        riskDescription,
-        lpLocked: pool?.lpBurn ?? "N/A",
-        freezeAuthority: pool?.security?.freezeAuthority === null
-          ? "✅ Disabled"
-          : "🔒 Enabled",
-        mintAuthority: pool?.security?.mintAuthority === null
-          ? "✅ Revoked"
-          : "⚠️ Exists"
-      };
-
-    } catch (error) {
-      console.error(`❌ Error fetching SolanaTracker data (Attempt ${attempt}):`, error.message);
-
-      if (attempt < retries && error.response?.status === 502) {
-        console.log(`⚠ API returned 502. Retrying in ${delayMs / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        attempt++;
-      } else {
-        console.log(`❌ SolanaTracker API failed after ${retries} attempts.`);
-        return null;
-      }
-    }
   }
 }
 
