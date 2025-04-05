@@ -825,7 +825,7 @@ async function fetchRugCheckData(tokenAddress) {
     const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
 
     const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
-      ? `${data.markets[0].lp.lpLockedPct}%`
+      ? `${data.markets[0].lp.lpLockedPct}`
       : "*no data*";
 
     const riskDescription = data.risks?.map(r => r.description).join(", ") || "*no data*";
@@ -874,7 +874,7 @@ async function fetchRugCheckData(tokenAddress) {
       : "*no data*";
 
     const lpLocked = (typeof pool?.lpBurn === "number")
-      ? `${pool.lpBurn}%`
+      ? `${pool.lpBurn}`
       : "*no data*";
 
     const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
