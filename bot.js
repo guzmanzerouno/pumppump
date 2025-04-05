@@ -738,7 +738,7 @@ const ADMIN_CHAT_ID = "472101348";
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pase 1 minuto. Si sigue siendo "pumpfun", descarta el token.
 async function getDexScreenerData(mintAddress) {
   let dexData = null;
-  const maxWaitTime = 60000; // 1 minuto en milisegundos
+  const maxWaitTime = 90000; // 1 minuto en milisegundos
   const startTime = Date.now();
 
   console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
@@ -803,37 +803,69 @@ async function getDexScreenerData(mintAddress) {
   };
 }
 
-// 🔹 Obtener datos de riesgo desde SolanaTracker API con reintentos automáticos
+// 🔹 Intenta RugCheck primero. Si falla, fallback a SolanaTracker
 async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
+  // 🔸 1. PRIMER INTENTO: RugCheck.xyz (1 intento solamente)
+  try {
+    const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
+    const data = response.data;
+
+    if (data) {
+      const normalizedScore = data.score_normalised || 0;
+      let riskLevel = "🟢 GOOD";
+      if (normalizedScore >= 41) {
+        riskLevel = "🔴 DANGER";
+      } else if (normalizedScore >= 21) {
+        riskLevel = "🟠 WARNING";
+      }
+
+      const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
+      const lpLocked = data.markets?.[0]?.lp?.lpLockedPct ?? "N/A";
+
+      const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+      const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+
+      const name = data.fileMeta?.name || "N/A";
+      const symbol = data.fileMeta?.symbol || "N/A";
+      const imageUrl = data.fileMeta?.image || "";
+
+      return {
+        name,
+        symbol,
+        imageUrl,
+        riskLevel,
+        riskDescription,
+        lpLocked,
+        freezeAuthority,
+        mintAuthority
+      };
+    }
+  } catch (error) {
+    console.warn(`⚠️ RugCheck falló, usando SolanaTracker... (${error.message})`);
+  }
+
+  // 🔸 2. SEGUNDO INTENTO: SolanaTracker (con reintentos)
   let attempt = 1;
 
   while (attempt <= retries) {
     try {
-      console.log(`🔍 Fetching SolanaTracker data (Attempt ${attempt}/${retries})...`);
-
       const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
         headers: {
           "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
         }
       });
 
-      if (!response.data) {
-        throw new Error("No response data from SolanaTracker.");
-      }
-
       const data = response.data;
       const pool = data.pools?.[0];
 
-      // ✅ Score categorizado
       const score = data.risk?.score || 0;
       let riskLevel = "🟢 GOOD";
       if (score >= 5) {
         riskLevel = "🔴 DANGER";
       } else if (score >= 3) {
-        riskLevel = "🔴 WARNING";
+        riskLevel = "🟠 WARNING";
       }
 
-      // ✅ Revisar descripción, ignorando solo "No social media"
       const risks = data.risk?.risks || [];
       const filteredRisks = risks.filter(r => r.name !== "No social media");
 
@@ -856,16 +888,12 @@ async function fetchRugCheckData(tokenAddress, retries = 3, delayMs = 5000) {
           ? "✅ Revoked"
           : "⚠️ Exists"
       };
-
     } catch (error) {
-      console.error(`❌ Error fetching SolanaTracker data (Attempt ${attempt}):`, error.message);
-
-      if (attempt < retries && error.response?.status === 502) {
-        console.log(`⚠ API returned 502. Retrying in ${delayMs / 1000} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+      if (error.response?.status === 502 && attempt < retries) {
+        await new Promise(res => setTimeout(res, delayMs));
         attempt++;
       } else {
-        console.log(`❌ SolanaTracker API failed after ${retries} attempts.`);
+        console.error(`❌ SolanaTracker failed after ${attempt} attempts:`, error.message);
         return null;
       }
     }
