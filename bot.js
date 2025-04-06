@@ -1581,7 +1581,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
 // 🔹 Sección de valores estáticos (guardados en tokens.json)
 updatedMessage += `🕒 **Saved at Notification:**\n`;
-updatedMessage += `⏳ **Age:** ${escapeMarkdown(originalTokenData.age || "N/A")} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(calculateAgeFromTimestamp(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
 
