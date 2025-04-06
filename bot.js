@@ -1581,12 +1581,12 @@ async function analyzeTransaction(signature, forceCheck = false) {
           updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
 // 🔹 Sección de valores estáticos (guardados en tokens.json)
 updatedMessage += `🕒 **Saved at Notification:**\n`;
-updatedMessage += `⏳ **Age:** ${escapeMarkdown(calculateAge(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(originalTokenData["24H"] ? calculateAgeFromTimestamp(originalTokenData.creationTimestamp, true) : "N/A")} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
 
 // 🔹 Sección de valores actualizados (live)
-updatedMessage += `🧠 **Live Market Update:**\n`;
+updatedMessage += `📊 **Live Market Update:**\n`;
 updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
