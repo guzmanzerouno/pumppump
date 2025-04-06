@@ -1566,60 +1566,72 @@ async function analyzeTransaction(signature, forceCheck = false) {
           await bot.answerCallbackQuery(query.id, { text: "Error al actualizar datos." });
           return;
         }
+
+          const rugCheckData = await fetchRugCheckData(mint);
+          const updatedRiskLevel = rugCheckData?.riskLevel || originalTokenData.riskLevel;
+          const updatedWarning = rugCheckData?.riskDescription || originalTokenData.warning;
   
-        const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
-        const priceChange24h = moralisData.pricePercentChange?.["24h"];
-        const formattedChange = priceChange24h !== undefined
-          ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
-          : "N/A";
-  
-        let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
-        updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
-        updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n\n`;
-        updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
-        updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
-        updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
-  
-        updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
-        updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-        updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-        updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
-        updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
-  
-        updatedMessage += `**${escapeMarkdown(originalTokenData.riskLevel)}:** ${escapeMarkdown(originalTokenData.warning)}\n`;
-        updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n`;
-        updatedMessage += `🔐 **Freeze Authority:** ${escapeMarkdown(String(originalTokenData.freezeAuthority || "N/A"))}\n`;
-        updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
-  
-        updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
-        updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
-        updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
-        if (originalTokenData.signature) {
-          updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
-        }
-  
-        const reply_markup = {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
-            ],
-            [
-              { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-              { text: "💰 0.05 Sol", callback_data: `buy_${mint}_0.05` },
-              { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` }
-            ],
-            [
-              { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-              { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
-              { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
-            ],
-            [
-              { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` },
-              { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+          const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
+          const priceChange24h = moralisData.pricePercentChange?.["24h"];
+          const formattedChange = priceChange24h !== undefined
+            ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
+            : "N/A";
+    
+          let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
+          updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
+// 🔹 Sección de valores estáticos (guardados en tokens.json)
+updatedMessage += `🕒 **Saved at Notification:**\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(calculateAge(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
+updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
+
+// 🔹 Sección de valores actualizados (live)
+updatedMessage += `🧠 **Live Market Update:**\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n`;
+updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
+updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
+updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
+    
+          updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
+          updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+          updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+          updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
+          updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
+    
+          updatedMessage += `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n`;
+          updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n`;
+          updatedMessage += `🔐 **Freeze Authority:** ${escapeMarkdown(String(originalTokenData.freezeAuthority || "N/A"))}\n`;
+          updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
+    
+          updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
+          updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
+          updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
+          if (originalTokenData.signature) {
+            updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
+          }
+    
+          const reply_markup = {
+            inline_keyboard: [
+              [
+                { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+                { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+              ],
+              [
+                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                { text: "💰 0.05 Sol", callback_data: `buy_${mint}_0.05` },
+                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` }
+              ],
+              [
+                { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+                { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+              ],
+              [
+                { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` },
+                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+              ]
             ]
-          ]
-        };
+          };
   
         try {
           if (query.message.photo) {
