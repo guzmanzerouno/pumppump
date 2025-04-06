@@ -781,13 +781,19 @@ async function getDexScreenerData(pairAddress) {
 
 // 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticosaj
 async function fetchRugCheckData(tokenAddress) {
-  // 🔸 PRIMER INTENTO: RugCheck
+  let pairAddress = null;
+
+  // 🔍 PRIMER INTENTO: RugCheck
   try {
     console.log("🔍 Intentando obtener datos desde RugCheck...");
     const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
     const data = response.data;
 
     if (!data) throw new Error("No se recibió data de RugCheck.");
+
+    // Logs debug
+    console.log("📦 fileMeta desde RugCheck:", data.fileMeta);
+    console.log("📊 markets desde RugCheck:", data.markets);
 
     const normalizedScore = data.score_normalised || 0;
     let riskLevel = "🟢 GOOD";
@@ -802,27 +808,39 @@ async function fetchRugCheckData(tokenAddress) {
       : "no data";
 
     const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
-    const market = (data.markets || []).find(m => m.marketType === "pump_fun_amm");
-    const pairAddress = market?.pubkey || "no data";
 
-    return {
-      name: data.fileMeta?.name || "no data",
-      symbol: data.fileMeta?.symbol || "no data",
-      imageUrl: data.fileMeta?.image || "",
-      riskLevel,
-      riskDescription,
-      lpLocked,
-      freezeAuthority,
-      mintAuthority,
-      pairAddress
-    };
+    const marketList = data.markets || [];
+    let market = marketList.find(m => m.marketType === "pump_fun_amm");
+    if (!market && marketList.length > 0) {
+      console.warn("⚠️ No se encontró 'pump_fun_amm', usando el primer market disponible.");
+      market = marketList[0];
+    }
+
+    pairAddress = market?.pubkey;
+    if (pairAddress) {
+      console.log(`✅ pairAddress obtenido desde RugCheck: ${pairAddress}`);
+      return {
+        name: data.fileMeta?.name || "no data",
+        symbol: data.fileMeta?.symbol || "no data",
+        imageUrl: data.fileMeta?.image || "",
+        riskLevel,
+        riskDescription,
+        lpLocked,
+        freezeAuthority,
+        mintAuthority,
+        pairAddress
+      };
+    } else {
+      console.warn("⚠️ RugCheck no devolvió un pairAddress válido. Intentando con SolanaTracker...");
+    }
+
   } catch (error) {
     console.warn(`⚠️ RugCheck falló: ${error.message}`);
   }
 
   // 🔁 SEGUNDO INTENTO: SolanaTracker
   try {
-    console.log("🔄 RugCheck falló. Intentando con SolanaTracker...");
+    console.log("🔄 Intentando obtener datos desde SolanaTracker...");
     const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
       headers: {
         "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
@@ -852,7 +870,12 @@ async function fetchRugCheckData(tokenAddress) {
     const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
     const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
 
-    const pairAddress = pool?.poolId || "no data";
+    pairAddress = pool?.poolId;
+    if (pairAddress) {
+      console.log(`✅ pairAddress obtenido desde SolanaTracker: ${pairAddress}`);
+    } else {
+      console.warn("❌ SolanaTracker no devolvió un pairAddress válido.");
+    }
 
     return {
       name: data.fileMeta?.name || data.token?.name || "no data",
@@ -863,8 +886,9 @@ async function fetchRugCheckData(tokenAddress) {
       lpLocked,
       freezeAuthority,
       mintAuthority,
-      pairAddress
+      pairAddress: pairAddress || "no data"
     };
+
   } catch (error) {
     console.error(`❌ SolanaTracker también falló: ${error.message}`);
     return null;
