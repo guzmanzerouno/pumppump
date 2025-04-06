@@ -648,67 +648,63 @@ function processTransaction(transaction) {
 // Actualización de getMintAddressFromTransaction:
 // Se recorre primero postTokenBalances y, si no se encuentra, se recorre preTokenBalances.
 async function getMintAddressFromTransaction(signature) {
-    try {
-      const transaction = await connection.getTransaction(signature, {
-        maxSupportedTransactionVersion: 0,
-        commitment: "confirmed"
-      });
-  
-      if (!transaction || !transaction.meta) {
-        console.error("❌ No se pudo obtener la transacción.");
-        return null;
-      }
-  
-      const blockTime = transaction.blockTime; // timestamp en segundos
-      const dateEST = DateTime.fromSeconds(blockTime)
-        .setZone("America/New_York")
-        .toFormat("MM/dd/yyyy HH:mm:ss 'EST'");
-      const status = transaction.meta.err ? "Failed ❌" : "Confirmed ✅";
-  
-      let mintAddress = null;
-      // Primero se busca en postTokenBalances tokens que terminen en "pump"
-      if (transaction.meta.postTokenBalances && transaction.meta.postTokenBalances.length > 0) {
-        for (const tokenBalance of transaction.meta.postTokenBalances) {
-          if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
-            mintAddress = tokenBalance.mint;
-            break;
-          }
-        }
-        // Si no se encontró ninguno que termine en "pump", se toma el primero disponible
-        if (!mintAddress) {
-          mintAddress = transaction.meta.postTokenBalances[0].mint;
-        }
-      }
-  
-      // Si aún no se encontró mintAddress, se repite el proceso en preTokenBalances
-      if (!mintAddress && transaction.meta.preTokenBalances && transaction.meta.preTokenBalances.length > 0) {
-        for (const tokenBalance of transaction.meta.preTokenBalances) {
-          if (tokenBalance.mint && tokenBalance.mint.toLowerCase().endsWith("pump")) {
-            mintAddress = tokenBalance.mint;
-            break;
-          }
-        }
-        if (!mintAddress) {
-          mintAddress = transaction.meta.preTokenBalances[0].mint;
-        }
-      }
-  
-      if (!mintAddress) {
-        console.warn("⚠️ No se encontró ningún mint en la transacción.");
-        return null;
-      }
-  
-      return {
-        mintAddress,
-        date: dateEST,
-        status,
-        blockTime
-      };
-    } catch (error) {
-      console.error("❌ Error al obtener Mint Address:", error);
+  try {
+    const transaction = await connection.getTransaction(signature, {
+      maxSupportedTransactionVersion: 0,
+      commitment: "confirmed"
+    });
+
+    if (!transaction || !transaction.meta) {
+      console.error("❌ No se pudo obtener la transacción.");
       return null;
     }
+
+    const blockTime = transaction.blockTime; // timestamp en segundos
+    const timestamp = blockTime * 1000; // timestamp en milisegundos
+    const status = transaction.meta.err ? "Failed ❌" : "Confirmed ✅";
+
+    let mintAddress = null;
+
+    if (transaction.meta.postTokenBalances?.length > 0) {
+      for (const tokenBalance of transaction.meta.postTokenBalances) {
+        if (tokenBalance.mint?.toLowerCase().endsWith("pump")) {
+          mintAddress = tokenBalance.mint;
+          break;
+        }
+      }
+      if (!mintAddress) {
+        mintAddress = transaction.meta.postTokenBalances[0].mint;
+      }
+    }
+
+    if (!mintAddress && transaction.meta.preTokenBalances?.length > 0) {
+      for (const tokenBalance of transaction.meta.preTokenBalances) {
+        if (tokenBalance.mint?.toLowerCase().endsWith("pump")) {
+          mintAddress = tokenBalance.mint;
+          break;
+        }
+      }
+      if (!mintAddress) {
+        mintAddress = transaction.meta.preTokenBalances[0].mint;
+      }
+    }
+
+    if (!mintAddress) {
+      console.warn("⚠️ No se encontró ningún mint en la transacción.");
+      return null;
+    }
+
+    return {
+      mintAddress,
+      date: timestamp,  // 👈 Guardamos timestamp en milisegundos
+      status,
+      blockTime         // también puedes dejar blockTime si quieres (segundos)
+    };
+  } catch (error) {
+    console.error("❌ Error al obtener Mint Address:", error);
+    return null;
   }
+}
 
 function escapeMarkdown(text) {
     if (typeof text !== "string") {
@@ -945,7 +941,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     mintAuthority: rugCheckData.mintAuthority || "N/A",
     chain: dexData.chain || "solana",
     dex: dexData.dex || "N/A",
-    migrationDate: mintData.date || "N/A",
+    migrationDate: typeof mintData.date === "number" ? mintData.date : null,
     status: mintData.status || "N/A",
     pair: rugCheckData.pairAddress || "N/A", // 👈 ¡Este es el cambio importante!
     token: mintData.mintAddress || "N/A"
@@ -1455,11 +1451,15 @@ async function analyzeTransaction(signature, forceCheck = false) {
   }
 
   const priceChange24h = dexData.priceChange24h !== "N/A"
-    ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
-    : "N/A";
-  const age = calculateAge(dexData.creationTimestamp) || "N/A";
+  ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${dexData.priceChange24h}%`
+  : "N/A";
+const age = calculateAge(dexData.creationTimestamp) || "N/A";
 
-  saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+
+const createdDate = typeof mintData.date === "number"
+  ? DateTime.fromMillis(mintData.date).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'")
+  : "N/A";
 
   // Construir el mensaje que se enviará a Telegram
   let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
@@ -1475,7 +1475,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
   message += `🔐 **Freeze Authority:** ${escapeMarkdown(String(rugCheckData.freezeAuthority))}\n`;
   message += `🪙 **Mint Authority:** ${escapeMarkdown(String(rugCheckData.mintAuthority))}\n\n`;
   message += `⛓️ **Chain:** ${escapeMarkdown(String(dexData.chain))} ⚡ **Dex:** ${escapeMarkdown(String(dexData.dex))}\n`;
-  message += `📆 **Created:** ${escapeMarkdown(String(mintData.date))}\n\n`;
+  message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
   message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
 
   await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
