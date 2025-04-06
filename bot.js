@@ -770,7 +770,7 @@ async function getDexScreenerData(pairAddress) {
       volume24h: pair.volume?.h24 || "N/A",
       buys24h: pair.txns?.h24?.buys || "N/A",
       sells24h: pair.txns?.h24?.sells || "N/A",
-      website: dexData.info?.websites?.[0]?.url || "N/A"
+      website: pair.info?.websites?.[0]?.url || "N/A"  // <-- Solo si existe este path
     };
 
   } catch (error) {
@@ -791,11 +791,8 @@ async function fetchRugCheckData(tokenAddress) {
 
     const normalizedScore = data.score_normalised || 0;
     let riskLevel = "🟢 GOOD";
-    if (normalizedScore >= 41) {
-      riskLevel = "🔴 DANGER";
-    } else if (normalizedScore >= 21) {
-      riskLevel = "🟠 WARNING";
-    }
+    if (normalizedScore >= 41) riskLevel = "🔴 DANGER";
+    else if (normalizedScore >= 21) riskLevel = "🟠 WARNING";
 
     const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
     const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
@@ -805,8 +802,8 @@ async function fetchRugCheckData(tokenAddress) {
       : "no data";
 
     const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
-
-    const pairAddress = data.markets?.[0]?.pubkey || "no data";
+    const market = (data.markets || []).find(m => m.marketType === "pump_fun_amm");
+    const pairAddress = market?.pubkey || "no data";
 
     return {
       name: data.fileMeta?.name || "no data",
@@ -819,7 +816,6 @@ async function fetchRugCheckData(tokenAddress) {
       mintAuthority,
       pairAddress
     };
-
   } catch (error) {
     console.warn(`⚠️ RugCheck falló: ${error.message}`);
   }
@@ -839,11 +835,8 @@ async function fetchRugCheckData(tokenAddress) {
     const pool = data.pools?.[0];
     const score = data.risk?.score || 0;
     let riskLevel = "🟢 GOOD";
-    if (score >= 5) {
-      riskLevel = "🔴 DANGER";
-    } else if (score >= 3) {
-      riskLevel = "🟠 WARNING";
-    }
+    if (score >= 5) riskLevel = "🔴 DANGER";
+    else if (score >= 3) riskLevel = "🟠 WARNING";
 
     const risks = data.risk?.risks || [];
     const filteredRisks = risks.filter(r => r.name !== "No social media");
@@ -872,7 +865,6 @@ async function fetchRugCheckData(tokenAddress) {
       mintAuthority,
       pairAddress
     };
-
   } catch (error) {
     console.error(`❌ SolanaTracker también falló: ${error.message}`);
     return null;
