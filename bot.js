@@ -21,6 +21,7 @@ const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
+const tokenRefreshStatus = {}; // { [mint]: { running: true, count: 0, lastRugCheck: 0, finalRiskData: {...} } }
 global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 
 let ws;
@@ -1476,7 +1477,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
       return;
     }
   
-    // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
@@ -1498,25 +1498,33 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ]
     ];
   
-    // Enviar el mensaje a cada usuario suscrito
     for (const userId in users) {
       const user = users[userId];
       if (!user || !user.subscribed || !user.privateKey) continue;
   
       try {
+        let sentMessage;
+  
         if (imageUrl) {
-          await bot.sendPhoto(userId, imageUrl, {
+          sentMessage = await bot.sendPhoto(userId, imageUrl, {
             caption: message,
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         } else {
-          await bot.sendMessage(userId, message, {
+          sentMessage = await bot.sendMessage(userId, message, {
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         }
+  
         console.log(`✅ Mensaje enviado a ${userId}`);
+  
+        // 🚀 Inicia el refresco automático solo para el primer usuario
+        if (parseInt(userId) === parseInt(Object.keys(users)[0])) {
+          await autoRefreshTokenInfo(mint, userId, sentMessage.message_id);
+        }
+  
       } catch (error) {
         console.error(`❌ Error enviando mensaje a ${userId}:`, error);
       }
@@ -1663,6 +1671,132 @@ updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.tota
       await bot.answerCallbackQuery(query.id, { text: "Ocurrió un error." });
     }
   });
+
+  async function autoRefreshTokenInfo(mint, chatId, messageId) {
+    const tokenData = getTokenInfo(mint);
+    if (!tokenData) return;
+  
+    const pairAddress = tokenData.pair || tokenData.pairAddress;
+    if (!pairAddress) return;
+  
+    tokenRefreshStatus[mint] = {
+      running: true,
+      count: 0,
+      lastRugCheck: 0,
+      finalRiskData: {
+        riskLevel: tokenData.riskLevel,
+        warning: tokenData.warning
+      }
+    };
+  
+    const interval = setInterval(async () => {
+      const status = tokenRefreshStatus[mint];
+      if (!status || !status.running || status.count >= 120) {
+        clearInterval(interval);
+        tokenRefreshStatus[mint].running = false;
+        return;
+      }
+  
+      status.count++;
+  
+      // Fetch Moralis (cada segundo)
+      let moralisData;
+      try {
+        const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
+          headers: {
+            'accept': 'application/json',
+            'X-API-Key': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks'
+          }
+        });
+        moralisData = await response.json();
+      } catch {
+        return;
+      }
+  
+      // RugCheck solo cada 20s
+      if (status.count % 20 === 0) {
+        try {
+          const rugCheck = await fetchRugCheckData(mint);
+          if (rugCheck?.riskLevel) {
+            status.finalRiskData = {
+              riskLevel: rugCheck.riskLevel,
+              warning: rugCheck.riskDescription
+            };
+          }
+        } catch {}
+      }
+  
+      const age = calculateAge(tokenData.creationTimestamp);
+      const priceChange24h = moralisData.pricePercentChange?.["24h"];
+      const formattedChange = priceChange24h !== undefined
+        ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
+        : "N/A";
+  
+      let msg = `💎 *Symbol:* ${escapeMarkdown(tokenData.symbol)}\n`;
+      msg += `💎 *Name:* ${escapeMarkdown(tokenData.name)}\n\n`;
+      msg += `🕒 *Saved at Notification:*\n`;
+      msg += `⏳ *Notified:* ${formatTimestampToUTCandEST(tokenData.creationTimestamp)}\n`;
+      msg += `📊 *24H:* ${escapeMarkdown(tokenData["24H"] || "N/A")}\n`;
+      msg += `💲 *USD:* ${escapeMarkdown(tokenData.USD)}\n`;
+      msg += `💰 *SOL:* ${escapeMarkdown(tokenData.SOL)}\n\n`;
+  
+      msg += `📊 *Live Market Update:*\n`;
+      msg += `⏳ *Age:* ${escapeMarkdown(age)} 📊 *24H:* ${escapeMarkdown(formattedChange)}\n`;
+      msg += `💲 *USD:* ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
+      msg += `💰 *SOL:* ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
+      msg += `💧 *Liquidity:* $${Number(moralisData.totalLiquidityUsd).toLocaleString()}\n\n`;
+  
+      msg += `📊 *Buys 24h:* ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 *Sells 24h:* ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
+      msg += `💵 *Buy Vol:* $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      msg += `💸 *Sell Vol:* $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      msg += `🧑‍🤝‍🧑 *Buyers:* ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 *Sellers:* ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
+      msg += `📊 *Liquidity Δ:* ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
+  
+      msg += `*${escapeMarkdown(status.finalRiskData.riskLevel)}:* ${escapeMarkdown(status.finalRiskData.warning)}\n`;
+      msg += `🔒 *LPLOCKED:* ${escapeMarkdown(String(tokenData.LPLOCKED))}%\n`;
+      msg += `🔐 *Freeze Authority:* ${escapeMarkdown(String(tokenData.freezeAuthority || "N/A"))}\n`;
+      msg += `🪙 *Mint Authority:* ${escapeMarkdown(String(tokenData.mintAuthority || "N/A"))}\n\n`;
+  
+      msg += `⛓️ *Chain:* ${escapeMarkdown(tokenData.chain)} ⚡ *Dex:* ${escapeMarkdown(tokenData.dex)}\n`;
+      msg += `📆 *Created:* ${escapeMarkdown(tokenData.migrationDate)}\n\n`;
+      msg += `🔗 *Token:* \`${mint}\`\n`;
+  
+      const markup = {
+        inline_keyboard: [
+          [
+            { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+          ],
+          [
+            { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+            { text: "💰 0.05 Sol", callback_data: `buy_${mint}_0.05` },
+            { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` }
+          ],
+          [
+            { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+            { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+            { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` }
+          ],
+          [
+            { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` },
+            { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+          ]
+        ]
+      };
+  
+      try {
+        await bot.editMessageText(msg, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: "Markdown",
+          reply_markup: markup
+        });
+      } catch (err) {
+        // Ignorar errores si el mensaje ya no existe
+      }
+  
+    }, 1000); // 🔁 Cada 1 segundo
+  }
 
 async function getTokenNameFromSolana(mintAddress) {
     try {
