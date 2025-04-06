@@ -1581,7 +1581,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
 // 🔹 Sección de valores estáticos (guardados en tokens.json)
 updatedMessage += `🕒 **Saved at Notification:**\n`;
-updatedMessage += `⏳ **Age:** ${escapeMarkdown(calculateAgeFromTimestamp(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(formatTimestampToLocalTime(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
 
@@ -1684,16 +1684,18 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-function calculateAgeFromTimestamp(timestamp) {
+function formatTimestampToLocalTime(timestamp) {
   if (!timestamp) return "N/A";
-  const seconds = (Date.now() - timestamp) / 1000;
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  const remainingSeconds = Math.floor(seconds % 60);
 
-  if (hours > 0) return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`;
-  return `${remainingMinutes}m ${remainingSeconds}s`;
+  const date = new Date(timestamp);
+  const options = {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  };
+
+  return date.toLocaleTimeString("en-US", options);
 }
 
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
