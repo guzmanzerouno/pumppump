@@ -744,7 +744,7 @@ async function getDexScreenerData(pairAddress) {
     return null;
   }
 
-  const MAX_RETRIES = 30;
+  const MAX_RETRIES = 60;
   const DELAY_MS = 1000;
 
   console.log(`🔄 Consultando DexScreener con pairAddress: ${pairAddress}`);
