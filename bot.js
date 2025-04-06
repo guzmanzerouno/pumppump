@@ -1522,13 +1522,6 @@ for (const userId in users) {
 
     console.log(`✅ Mensaje enviado a ${userId}`);
 
-    // 🕐 Iniciar auto refresh 2 segundos después
-    setTimeout(() => {
-      const chatId = userId;
-      const messageId = sentMsg.message_id;
-      startAutoRefreshToken(mint, chatId, messageId);
-    }, 2000);
-
   } catch (error) {
     console.error(`❌ Error enviando mensaje a ${userId}:`, error);
   }
