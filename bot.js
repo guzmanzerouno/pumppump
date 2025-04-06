@@ -1581,7 +1581,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
 // 🔹 Sección de valores estáticos (guardados en tokens.json)
 updatedMessage += `🕒 **Saved at Notification:**\n`;
-updatedMessage += `⏳ **Age:** ${escapeMarkdown(originalTokenData["24H"] ? calculateAgeFromTimestamp(originalTokenData.creationTimestamp, true) : "N/A")} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `⏳ **Age:** ${escapeMarkdown(originalTokenData.age || "N/A")} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
 
@@ -1684,9 +1684,9 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-function calculateAgeFromTimestamp(timestamp, freeze = false) {
+function calculateAgeFromTimestamp(timestamp) {
   if (!timestamp) return "N/A";
-  const seconds = freeze ? (Date.now() - timestamp) / 1000 : 0;
+  const seconds = (Date.now() - timestamp) / 1000;
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
