@@ -744,39 +744,48 @@ async function getDexScreenerData(pairAddress) {
     return null;
   }
 
-  try {
-    console.log(`🔄 Consultando DexScreener con pairAddress: ${pairAddress}`);
-    const response = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
+  const MAX_RETRIES = 30;
+  const DELAY_MS = 1000;
 
-    const pair = response.data?.pair;
-    if (!pair) {
-      console.warn("⚠️ No se encontró información de la pareja en DexScreener.");
-      return null;
+  console.log(`🔄 Consultando DexScreener con pairAddress: ${pairAddress}`);
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
+      const pair = response.data?.pair;
+
+      if (pair && pair.baseToken && pair.priceUsd) {
+        console.log(`✅ Información de DexScreener obtenida en el intento ${attempt}`);
+        return {
+          name: pair.baseToken?.name || "Desconocido",
+          symbol: pair.baseToken?.symbol || "N/A",
+          priceUsd: pair.priceUsd || "N/A",
+          priceSol: pair.priceNative || "N/A",
+          liquidity: pair.liquidity?.usd || "N/A",
+          marketCap: pair.marketCap || "N/A",
+          fdv: pair.fdv || "N/A",
+          pairAddress: pair.pairAddress || pairAddress,
+          dex: pair.dexId || "N/A",
+          chain: pair.chainId || "solana",
+          creationTimestamp: Number(pair.pairCreatedAt),
+          priceChange24h: pair.priceChange?.h24 || "N/A",
+          volume24h: pair.volume?.h24 || "N/A",
+          buys24h: pair.txns?.h24?.buys || "N/A",
+          sells24h: pair.txns?.h24?.sells || "N/A",
+          website: pair.url || "https://dexscreener.com"
+        };
+      } else {
+        console.log(`⏳ Intento ${attempt}: Datos aún no disponibles en DexScreener...`);
+      }
+    } catch (error) {
+      console.warn(`❌ Error en intento ${attempt}: ${error.message}`);
     }
 
-    return {
-      name: pair.baseToken?.name || "Desconocido",
-      symbol: pair.baseToken?.symbol || "N/A",
-      priceUsd: pair.priceUsd || "N/A",
-      priceSol: pair.priceNative || "N/A",
-      liquidity: pair.liquidity?.usd || "N/A",
-      marketCap: pair.marketCap || "N/A",
-      fdv: pair.fdv || "N/A",
-      pairAddress: pair.pairAddress || pairAddress,
-      dex: pair.dexId || "N/A",
-      chain: pair.chainId || "solana",
-      creationTimestamp: Number(pair.pairCreatedAt),
-      priceChange24h: pair.priceChange?.h24 || "N/A",
-      volume24h: pair.volume?.h24 || "N/A",
-      buys24h: pair.txns?.h24?.buys || "N/A",
-      sells24h: pair.txns?.h24?.sells || "N/A",
-      website: pair.info?.websites?.[0]?.url || "N/A"  // <-- Solo si existe este path
-    };
-
-  } catch (error) {
-    console.error("❌ Error consultando DexScreener:", error.message);
-    return null;
+    await new Promise(resolve => setTimeout(resolve, DELAY_MS));
   }
+
+  console.warn("⚠️ DexScreener: Se alcanzó el máximo de reintentos sin obtener datos.");
+  return null;
 }
 
 // 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticosaj
