@@ -744,7 +744,7 @@ async function getDexScreenerData(pairAddress) {
     return null;
   }
 
-  const MAX_RETRIES = 60;
+  const MAX_RETRIES = 30;
   const DELAY_MS = 1000;
 
   console.log(`🔄 Consultando DexScreener con pairAddress: ${pairAddress}`);
@@ -754,7 +754,12 @@ async function getDexScreenerData(pairAddress) {
       const response = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
       const pair = response.data?.pair;
 
-      if (pair && pair.baseToken && pair.priceUsd) {
+      const hasValidData = pair 
+        && typeof pair === 'object'
+        && pair.baseToken?.name
+        && typeof pair.priceUsd !== 'undefined';
+
+      if (hasValidData) {
         console.log(`✅ Información de DexScreener obtenida en el intento ${attempt}`);
         return {
           name: pair.baseToken?.name || "Desconocido",
@@ -785,6 +790,14 @@ async function getDexScreenerData(pairAddress) {
   }
 
   console.warn("⚠️ DexScreener: Se alcanzó el máximo de reintentos sin obtener datos.");
+  console.log("📦 Última respuesta recibida de DexScreener:");
+  try {
+    const finalResponse = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
+    console.dir(finalResponse.data, { depth: null });
+  } catch (finalError) {
+    console.error("❌ Error al obtener última respuesta para logging:", finalError.message);
+  }
+
   return null;
 }
 
