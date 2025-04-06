@@ -737,49 +737,49 @@ function escapeMarkdown(text) {
 const ADMIN_CHAT_ID = "472101348";
 
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pase 1 minuto. Si sigue siendo "pumpfun", descarta el token.
+// 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
 async function getDexScreenerData(mintAddress) {
   let dexData = null;
-  const maxWaitTime = 90000; // 1 minuto en milisegundos
+  const maxWaitTime = 60000; // 1/2 minutos en milisegundos
   const startTime = Date.now();
 
   console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
 
   while (!dexData || dexData.dexId === "pumpfun") {
-    try {
-      const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-      if (response.data && response.data.length > 0) {
-        dexData = response.data[0];
-        console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+      try {
+          const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
+          if (response.data && response.data.length > 0) {
+              dexData = response.data[0];
+              console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
+          }
+      } catch (error) {
+          console.error("⚠️ Error en DexScreener:", error.message);
+          if (error.response && error.response.status === 429) {
+              // Preparamos la información estructural de la API que estamos consultando
+              const apiInfo = {
+                  endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
+                  method: "GET",
+                  status: error.response.status,
+                  data: error.response.data
+              };
+              // Enviar mensaje al chat de administración con los detalles
+              bot.sendMessage(
+                  ADMIN_CHAT_ID,
+                  `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
+              );
+          }
       }
-    } catch (error) {
-      console.error("⚠️ Error en DexScreener:", error.message);
-      if (error.response && error.response.status === 429) {
-        const apiInfo = {
-          endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-          method: "GET",
-          status: error.response.status,
-          data: error.response.data
-        };
-        bot.sendMessage(
-          ADMIN_CHAT_ID,
-          `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
-        );
-      }
-    }
 
-    // ⏳ Si se pasó el tiempo límite
-    if (Date.now() - startTime >= maxWaitTime) {
-      if (dexData && dexData.dexId === "pumpfun") {
-        console.warn("⏱️ DexID sigue siendo 'pumpfun'. DESCARTANDO token.");
-        return null;
+      // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
+      if (Date.now() - startTime >= maxWaitTime) {
+          console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
+          break;
       }
-      break;
-    }
 
-    if (!dexData || dexData.dexId === "pumpfun") {
-      console.log("⏳ Esperando 1 segundo para volver a intentar...");
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+      if (!dexData || dexData.dexId === "pumpfun") {
+          console.log("⏳ Esperando 1 segundo para volver a intentar...");
+          await new Promise(resolve => setTimeout(resolve, 1000));
+      }
   }
 
   console.log("✅ DexScreener confirmado en:", dexData.dexId);
