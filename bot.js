@@ -981,9 +981,6 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Ejecuta este comando para arreglarlo:");
     console.log(`chmod 666 ${filePath}`);
   }
-
-  // 🟢 Iniciar autorefresh por 2 minutos (120s)
-  startAutoRefreshToken(dexData.mintAddress, chatId, messageId);
 }
 
 function getTokenInfo(mintAddress) {
@@ -1520,9 +1517,17 @@ async function analyzeTransaction(signature, forceCheck = false) {
           });
         }
         console.log(`✅ Mensaje enviado a ${userId}`);
-      } catch (error) {
-        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
-      }
+
+  // 🕐 Iniciar auto refresh 2 segundos después
+  setTimeout(() => {
+    const chatId = userId;
+    const messageId = sentMsg.message_id;
+    startAutoRefreshToken(mint, chatId, messageId);
+  }, 2000);
+
+} catch (error) {
+  console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+}
     }
   }
 
