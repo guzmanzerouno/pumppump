@@ -606,7 +606,7 @@ function startHeartbeat() {
 startHeartbeat();
 
 // ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 5 * 1000; // 5 segundos por defecto
+let DELAY_BEFORE_ANALYSIS = 1 * 1000; // 1 segundos por defecto
 
 bot.onText(/\/delay (\d+)/, (msg, match) => {
     const chatId = msg.chat.id;
@@ -738,73 +738,48 @@ const ADMIN_CHAT_ID = "472101348";
 
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pase 1 minuto. Si sigue siendo "pumpfun", descarta el token.
 // 🔹 Obtener datos desde DexScreener hasta que `dexId` sea diferente de `"pumpfun"` o pasen 2 minutos
-async function getDexScreenerData(mintAddress) {
-  let dexData = null;
-  const maxWaitTime = 60000; // 1/2 minutos en milisegundos
-  const startTime = Date.now();
-
-  console.log(`🔄 Buscando en DexScreener para: ${mintAddress}`);
-
-  while (!dexData || dexData.dexId === "pumpfun") {
-      try {
-          const response = await axios.get(`https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`);
-          if (response.data && response.data.length > 0) {
-              dexData = response.data[0];
-              console.log(`🔍 Obteniendo datos... DexID: ${dexData.dexId}`);
-          }
-      } catch (error) {
-          console.error("⚠️ Error en DexScreener:", error.message);
-          if (error.response && error.response.status === 429) {
-              // Preparamos la información estructural de la API que estamos consultando
-              const apiInfo = {
-                  endpoint: `https://api.dexscreener.com/tokens/v1/solana/${mintAddress}`,
-                  method: "GET",
-                  status: error.response.status,
-                  data: error.response.data
-              };
-              // Enviar mensaje al chat de administración con los detalles
-              bot.sendMessage(
-                  ADMIN_CHAT_ID,
-                  `Error 429 en DexScreener:\n${JSON.stringify(apiInfo, null, 2)}`
-              );
-          }
-      }
-
-      // Si pasaron más de 2 minutos, rompemos el bucle y aceptamos el dato como esté
-      if (Date.now() - startTime >= maxWaitTime) {
-          console.warn("⏱️ Tiempo máximo de espera alcanzado. Devolviendo datos aunque sea pumpfun.");
-          break;
-      }
-
-      if (!dexData || dexData.dexId === "pumpfun") {
-          console.log("⏳ Esperando 1 segundo para volver a intentar...");
-          await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+async function getDexScreenerData(pairAddress) {
+  if (!pairAddress || pairAddress === "no data") {
+    console.warn("⚠️ Pair address inválido. No se puede hacer la consulta a DexScreener.");
+    return null;
   }
 
-  console.log("✅ DexScreener confirmado en:", dexData.dexId);
+  try {
+    console.log(`🔄 Consultando DexScreener con pairAddress: ${pairAddress}`);
+    const response = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`);
 
-  return {
-    name: dexData.baseToken?.name || "Desconocido",
-    symbol: dexData.baseToken?.symbol || "N/A",
-    priceUsd: dexData.priceUsd || "N/A",
-    priceSol: dexData.priceNative || "N/A",
-    liquidity: dexData.liquidity?.usd || "N/A",
-    marketCap: dexData.marketCap || "N/A",
-    fdv: dexData.fdv || "N/A",
-    pairAddress: dexData.pairAddress || "N/A",
-    dex: dexData.dexId || "N/A",
-    chain: dexData.chainId || "solana",
-    creationTimestamp: Number(dexData.pairCreatedAt),
-    priceChange24h: dexData.priceChange?.h24 || "N/A",
-    volume24h: dexData.volume?.h24 || "N/A",
-    buys24h: dexData.txns?.h24?.buys || "N/A",
-    sells24h: dexData.txns?.h24?.sells || "N/A",
-    website: dexData.info?.websites?.[0]?.url || "N/A"
-  };
+    const pair = response.data?.pair;
+    if (!pair) {
+      console.warn("⚠️ No se encontró información de la pareja en DexScreener.");
+      return null;
+    }
+
+    return {
+      name: pair.baseToken?.name || "Desconocido",
+      symbol: pair.baseToken?.symbol || "N/A",
+      priceUsd: pair.priceUsd || "N/A",
+      priceSol: pair.priceNative || "N/A",
+      liquidity: pair.liquidity?.usd || "N/A",
+      marketCap: pair.marketCap || "N/A",
+      fdv: pair.fdv || "N/A",
+      pairAddress: pair.pairAddress || pairAddress,
+      dex: pair.dexId || "N/A",
+      chain: pair.chainId || "solana",
+      creationTimestamp: Number(pair.pairCreatedAt),
+      priceChange24h: pair.priceChange?.h24 || "N/A",
+      volume24h: pair.volume?.h24 || "N/A",
+      buys24h: pair.txns?.h24?.buys || "N/A",
+      sells24h: pair.txns?.h24?.sells || "N/A",
+      website: dexData.info?.websites?.[0]?.url || "N/A"
+    };
+
+  } catch (error) {
+    console.error("❌ Error consultando DexScreener:", error.message);
+    return null;
+  }
 }
 
-// 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
+// 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticosaj
 async function fetchRugCheckData(tokenAddress) {
   // 🔸 PRIMER INTENTO: RugCheck
   try {
@@ -831,6 +806,8 @@ async function fetchRugCheckData(tokenAddress) {
 
     const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
 
+    const pairAddress = data.markets?.[0]?.pubkey || "no data";
+
     return {
       name: data.fileMeta?.name || "no data",
       symbol: data.fileMeta?.symbol || "no data",
@@ -839,7 +816,8 @@ async function fetchRugCheckData(tokenAddress) {
       riskDescription,
       lpLocked,
       freezeAuthority,
-      mintAuthority
+      mintAuthority,
+      pairAddress
     };
 
   } catch (error) {
@@ -881,6 +859,8 @@ async function fetchRugCheckData(tokenAddress) {
     const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
     const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
 
+    const pairAddress = pool?.poolId || "no data";
+
     return {
       name: data.fileMeta?.name || data.token?.name || "no data",
       symbol: data.fileMeta?.symbol || data.token?.symbol || "no data",
@@ -889,7 +869,8 @@ async function fetchRugCheckData(tokenAddress) {
       riskDescription,
       lpLocked,
       freezeAuthority,
-      mintAuthority
+      mintAuthority,
+      pairAddress
     };
 
   } catch (error) {
@@ -901,7 +882,6 @@ async function fetchRugCheckData(tokenAddress) {
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
   console.log("🔄 Intentando guardar datos en tokens.json...");
 
-  // 1️⃣ Verificar si los datos son válidos antes de guardar
   if (!dexData || !mintData || !rugCheckData) {
     console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
     return;
@@ -910,7 +890,6 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
   console.log("✅ Datos validados correctamente.");
   console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h }, null, 2));
 
-  // 2️⃣ Formatear datos antes de guardar
   const tokenInfo = {
     symbol: dexData.symbol || "Unknown",
     name: dexData.name || "Unknown",
@@ -919,26 +898,25 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     liquidity: dexData.liquidity || "N/A",
     marketCap: dexData.marketCap || "N/A",
     FDV: dexData.fdv || "N/A",
-    creationTimestamp: dexData.creationTimestamp || null, // 🆕 Agregado aquí
+    creationTimestamp: dexData.creationTimestamp || null,
     "24H": priceChange24h || "N/A",
-    riskLevel: rugCheckData.riskLevel || "N/A",         // Nuevo campo para el nivel de riesgo
-    warning: rugCheckData.riskDescription || "No risks detected",  // Nuevo campo para la descripción del riesgo
+    riskLevel: rugCheckData.riskLevel || "N/A",
+    warning: rugCheckData.riskDescription || "No risks detected",
     LPLOCKED: rugCheckData.lpLocked || "N/A",
-    freezeAuthority: rugCheckData.freezeAuthority || "N/A",   // 🆕 Nuevo campo
-    mintAuthority: rugCheckData.mintAuthority || "N/A",       // 🆕 Nuevo campo
+    freezeAuthority: rugCheckData.freezeAuthority || "N/A",
+    mintAuthority: rugCheckData.mintAuthority || "N/A",
     chain: dexData.chain || "solana",
     dex: dexData.dex || "N/A",
     migrationDate: mintData.date || "N/A",
     status: mintData.status || "N/A",
-    pair: dexData.pairAddress || "N/A",
+    pair: rugCheckData.pairAddress || "N/A", // 👈 ¡Este es el cambio importante!
     token: mintData.mintAddress || "N/A"
   };
 
   console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
 
-  // 3️⃣ Verificar si el archivo tokens.json existe y es válido
-  let tokens = {};
   const filePath = 'tokens.json';
+  let tokens = {};
 
   if (fs.existsSync(filePath)) {
     try {
@@ -955,7 +933,6 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
   }
 
-  // 4️⃣ Verificar que mintData.mintAddress no sea undefined
   if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
     console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
     return;
@@ -963,25 +940,23 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
 
   console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
 
-// 5️⃣ Guardar los datos en tokens.json
-tokens[mintData.mintAddress] = tokenInfo;
+  tokens[mintData.mintAddress] = tokenInfo;
 
-try {
-  fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-  console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
-} catch (error) {
-  console.error("❌ Error guardando token en tokens.json:", error);
-}
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
+    console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+  } catch (error) {
+    console.error("❌ Error guardando token en tokens.json:", error);
+  }
 
-// 6️⃣ Verificar permisos de escritura en tokens.json
-try {
-  fs.accessSync(filePath, fs.constants.W_OK);
-  console.log("✅ Permisos de escritura en tokens.json verificados.");
-} catch (error) {
-  console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-  console.log("🔄 Ejecuta este comando para arreglarlo:");
-  console.log(`chmod 666 ${filePath}`);
-}
+  try {
+    fs.accessSync(filePath, fs.constants.W_OK);
+    console.log("✅ Permisos de escritura en tokens.json verificados.");
+  } catch (error) {
+    console.error("❌ Error: No hay permisos de escritura en tokens.json.");
+    console.log("🔄 Ejecuta este comando para arreglarlo:");
+    console.log(`chmod 666 ${filePath}`);
+  }
 }
 
 function getTokenInfo(mintAddress) {
@@ -1426,9 +1401,9 @@ async function analyzeTransaction(signature, forceCheck = false) {
   const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
   if (!rugCheckData) return;
 
-  const dexData = await getDexScreenerData(mintData.mintAddress);
+  // ✅ Aquí usamos el pairAddress desde rugCheckData
+  const dexData = await getDexScreenerData(rugCheckData.pairAddress);
   if (!dexData) {
-    // ⚠️ Si fue descartado, actualizamos el mensaje anterior
     for (const userId in alertMessages) {
       try {
         await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
@@ -1448,7 +1423,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
 
   saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
 
-  // Construir el mensaje que se enviará a Telegram (ahora con freeze/mint authority)
+  // Construir el mensaje que se enviará a Telegram
   let message = `💎 **Symbol:** ${escapeMarkdown(String(dexData.symbol))}\n`;
   message += `💎 **Name:** ${escapeMarkdown(String(dexData.name))}\n`;
   message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
@@ -1465,7 +1440,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
   message += `📆 **Created:** ${escapeMarkdown(String(mintData.date))}\n\n`;
   message += `🔗 **Token:** \`${escapeMarkdown(String(mintData.mintAddress))}\`\n\n`;
 
-  // Enviar mensaje a usuarios
   await notifySubscribers(message, rugCheckData.imageUrl, mintData.mintAddress);
 }
   
