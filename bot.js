@@ -963,24 +963,25 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
 
   console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
 
-  // 5️⃣ Guardar los datos en tokens.json
-  tokens[mintData.mintAddress] = tokenInfo;
+// 5️⃣ Guardar los datos en tokens.json
+tokens[mintData.mintAddress] = tokenInfo;
 
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-    console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
-  } catch (error) {
-    console.error("❌ Error guardando token en tokens.json:", error);
-  }
+try {
+  fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
+  console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
+} catch (error) {
+  console.error("❌ Error guardando token en tokens.json:", error);
+}
 
-  try {
-    fs.accessSync(filePath, fs.constants.W_OK);
-    console.log("✅ Permisos de escritura en tokens.json verificados.");
-  } catch (error) {
-    console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-    console.log("🔄 Ejecuta este comando para arreglarlo:");
-    console.log(`chmod 666 ${filePath}`);
-  }
+// 6️⃣ Verificar permisos de escritura en tokens.json
+try {
+  fs.accessSync(filePath, fs.constants.W_OK);
+  console.log("✅ Permisos de escritura en tokens.json verificados.");
+} catch (error) {
+  console.error("❌ Error: No hay permisos de escritura en tokens.json.");
+  console.log("🔄 Ejecuta este comando para arreglarlo:");
+  console.log(`chmod 666 ${filePath}`);
+}
 }
 
 function getTokenInfo(mintAddress) {
