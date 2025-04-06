@@ -21,7 +21,7 @@ const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
-const tokenRefreshStatus = {}; // { [mint]: { running: true, count: 0, lastRugCheck: 0, finalRiskData: {...} } }
+const refreshingTokens = {};
 global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 
 let ws;
@@ -972,8 +972,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
   } catch (error) {
     console.error("❌ Error guardando token en tokens.json:", error);
   }
-
-  // 6️⃣ Verificar permisos de escritura en tokens.json
+  
   try {
     fs.accessSync(filePath, fs.constants.W_OK);
     console.log("✅ Permisos de escritura en tokens.json verificados.");
@@ -982,7 +981,9 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Ejecuta este comando para arreglarlo:");
     console.log(`chmod 666 ${filePath}`);
   }
-}
+  
+  // 🟢 Iniciar autorefresh por 2 minutos (120s)
+  startAutoRefreshToken(dexData.mintAddress, chatId, messageId);
 
 function getTokenInfo(mintAddress) {
   if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
@@ -1477,6 +1478,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       return;
     }
   
+    // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
@@ -1498,33 +1500,25 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ]
     ];
   
+    // Enviar el mensaje a cada usuario suscrito
     for (const userId in users) {
       const user = users[userId];
       if (!user || !user.subscribed || !user.privateKey) continue;
   
       try {
-        let sentMessage;
-  
         if (imageUrl) {
-          sentMessage = await bot.sendPhoto(userId, imageUrl, {
+          await bot.sendPhoto(userId, imageUrl, {
             caption: message,
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         } else {
-          sentMessage = await bot.sendMessage(userId, message, {
+          await bot.sendMessage(userId, message, {
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         }
-  
         console.log(`✅ Mensaje enviado a ${userId}`);
-  
-        // 🚀 Inicia el refresco automático solo para el primer usuario
-        if (parseInt(userId) === parseInt(Object.keys(users)[0])) {
-          await autoRefreshTokenInfo(mint, userId, sentMessage.message_id);
-        }
-  
       } catch (error) {
         console.error(`❌ Error enviando mensaje a ${userId}:`, error);
       }
@@ -1672,34 +1666,30 @@ updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.tota
     }
   });
 
-  async function autoRefreshTokenInfo(mint, chatId, messageId) {
-    const tokenData = getTokenInfo(mint);
-    if (!tokenData) return;
+  function startAutoRefreshToken(mint, chatId, messageId) {
+    if (refreshingTokens[mint]) return; // evita duplicación
+    refreshingTokens[mint] = true;
   
-    const pairAddress = tokenData.pair || tokenData.pairAddress;
+    const originalTokenData = getTokenInfo(mint);
+    if (!originalTokenData) return;
+  
+    const pairAddress = originalTokenData.pair || originalTokenData.pairAddress;
     if (!pairAddress) return;
   
-    tokenRefreshStatus[mint] = {
-      running: true,
-      count: 0,
-      lastRugCheck: 0,
-      finalRiskData: {
-        riskLevel: tokenData.riskLevel,
-        warning: tokenData.warning
-      }
-    };
+    let counter = 0;
+    let rugCheckCounter = 0;
+    const maxCycles = 120;
   
     const interval = setInterval(async () => {
-      const status = tokenRefreshStatus[mint];
-      if (!status || !status.running || status.count >= 120) {
+      if (counter >= maxCycles) {
         clearInterval(interval);
-        tokenRefreshStatus[mint].running = false;
+        console.log(`✅ Autorefresh finalizado para ${mint}`);
+        delete refreshingTokens[mint];
         return;
       }
   
-      status.count++;
+      counter++;
   
-      // Fetch Moralis (cada segundo)
       let moralisData;
       try {
         const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`, {
@@ -1709,59 +1699,60 @@ updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.tota
           }
         });
         moralisData = await response.json();
-      } catch {
+      } catch (err) {
+        console.error(`❌ Moralis error en autorefresh ${mint}:`, err.message);
         return;
       }
   
-      // RugCheck solo cada 20s
-      if (status.count % 20 === 0) {
-        try {
-          const rugCheck = await fetchRugCheckData(mint);
-          if (rugCheck?.riskLevel) {
-            status.finalRiskData = {
-              riskLevel: rugCheck.riskLevel,
-              warning: rugCheck.riskDescription
-            };
-          }
-        } catch {}
+      // Lógica rugcheck solo cada 20s (cada 2 ciclos)
+      let updatedRiskLevel = originalTokenData.riskLevel;
+      let updatedWarning = originalTokenData.warning;
+      if (counter % 20 === 0 && rugCheckCounter < 6) {
+        const rugCheckData = await fetchRugCheckData(mint);
+        updatedRiskLevel = rugCheckData?.riskLevel || updatedRiskLevel;
+        updatedWarning = rugCheckData?.riskDescription || updatedWarning;
+        rugCheckCounter++;
       }
   
-      const age = calculateAge(tokenData.creationTimestamp);
+      const age = calculateAge(originalTokenData.creationTimestamp) || "N/A";
       const priceChange24h = moralisData.pricePercentChange?.["24h"];
       const formattedChange = priceChange24h !== undefined
         ? `${priceChange24h > 0 ? "🟢 +" : "🔴 "}${priceChange24h.toFixed(2)}%`
         : "N/A";
   
-      let msg = `💎 *Symbol:* ${escapeMarkdown(tokenData.symbol)}\n`;
-      msg += `💎 *Name:* ${escapeMarkdown(tokenData.name)}\n\n`;
-      msg += `🕒 *Saved at Notification:*\n`;
-      msg += `⏳ *Notified:* ${formatTimestampToUTCandEST(tokenData.creationTimestamp)}\n`;
-      msg += `📊 *24H:* ${escapeMarkdown(tokenData["24H"] || "N/A")}\n`;
-      msg += `💲 *USD:* ${escapeMarkdown(tokenData.USD)}\n`;
-      msg += `💰 *SOL:* ${escapeMarkdown(tokenData.SOL)}\n\n`;
+      let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
+      updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
+      updatedMessage += `🕒 **Saved at Notification:**\n`;
+      updatedMessage += `⏳ **Notified:** ${formatTimestampToUTCandEST(originalTokenData.creationTimestamp)}\n`;
+      updatedMessage += `📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+      updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
+      updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
   
-      msg += `📊 *Live Market Update:*\n`;
-      msg += `⏳ *Age:* ${escapeMarkdown(age)} 📊 *24H:* ${escapeMarkdown(formattedChange)}\n`;
-      msg += `💲 *USD:* ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
-      msg += `💰 *SOL:* ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
-      msg += `💧 *Liquidity:* $${Number(moralisData.totalLiquidityUsd).toLocaleString()}\n\n`;
+      updatedMessage += `📊 **Live Market Update:**\n`;
+      updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(formattedChange)}\n`;
+      updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(moralisData.currentUsdPrice).toFixed(6))}\n`;
+      updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(moralisData.currentNativePrice).toFixed(9))}\n`;
+      updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.totalLiquidityUsd).toLocaleString())}\n\n`;
   
-      msg += `📊 *Buys 24h:* ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 *Sells 24h:* ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
-      msg += `💵 *Buy Vol:* $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-      msg += `💸 *Sell Vol:* $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
-      msg += `🧑‍🤝‍🧑 *Buyers:* ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 *Sellers:* ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
-      msg += `📊 *Liquidity Δ:* ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
+      updatedMessage += `📊 **Buys 24h:** ${moralisData.buys?.["24h"] ?? "N/A"} 🟥 **Sells 24h:** ${moralisData.sells?.["24h"] ?? "N/A"}\n`;
+      updatedMessage += `💵 **Buy Vol 24h:** $${Number(moralisData.buyVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      updatedMessage += `💸 **Sell Vol 24h:** $${Number(moralisData.sellVolume?.["24h"] ?? 0).toLocaleString()}\n`;
+      updatedMessage += `🧑‍🤝‍🧑 **Buyers:** ${moralisData.buyers?.["24h"] ?? "N/A"} 👤 **Sellers:** ${moralisData.sellers?.["24h"] ?? "N/A"}\n`;
+      updatedMessage += `📊 **Liquidity Δ 24h:** ${moralisData.liquidityPercentChange?.["24h"]?.toFixed(2)}%\n\n`;
   
-      msg += `*${escapeMarkdown(status.finalRiskData.riskLevel)}:* ${escapeMarkdown(status.finalRiskData.warning)}\n`;
-      msg += `🔒 *LPLOCKED:* ${escapeMarkdown(String(tokenData.LPLOCKED))}%\n`;
-      msg += `🔐 *Freeze Authority:* ${escapeMarkdown(String(tokenData.freezeAuthority || "N/A"))}\n`;
-      msg += `🪙 *Mint Authority:* ${escapeMarkdown(String(tokenData.mintAuthority || "N/A"))}\n\n`;
+      updatedMessage += `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n`;
+      updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n`;
+      updatedMessage += `🔐 **Freeze Authority:** ${escapeMarkdown(String(originalTokenData.freezeAuthority || "N/A"))}\n`;
+      updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
   
-      msg += `⛓️ *Chain:* ${escapeMarkdown(tokenData.chain)} ⚡ *Dex:* ${escapeMarkdown(tokenData.dex)}\n`;
-      msg += `📆 *Created:* ${escapeMarkdown(tokenData.migrationDate)}\n\n`;
-      msg += `🔗 *Token:* \`${mint}\`\n`;
+      updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
+      updatedMessage += `📆 **Created:** ${escapeMarkdown(originalTokenData.migrationDate)}\n\n`;
+      updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
+      if (originalTokenData.signature) {
+        updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
+      }
   
-      const markup = {
+      const reply_markup = {
         inline_keyboard: [
           [
             { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
@@ -1785,17 +1776,15 @@ updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(moralisData.tota
       };
   
       try {
-        await bot.editMessageText(msg, {
-          chat_id: chatId,
-          message_id: messageId,
+        await bot.sendMessage(chatId, updatedMessage, {
           parse_mode: "Markdown",
-          reply_markup: markup
+          reply_markup
         });
       } catch (err) {
-        // Ignorar errores si el mensaje ya no existe
+        console.error(`❌ Error al enviar autorefresh ${mint}:`, err.message);
       }
   
-    }, 1000); // 🔁 Cada 1 segundo
+    }, 1000); // cada 1s
   }
 
 async function getTokenNameFromSolana(mintAddress) {
