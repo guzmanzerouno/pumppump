@@ -1684,6 +1684,18 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
+function calculateAgeFromTimestamp(timestamp) {
+  if (!timestamp) return "N/A";
+  const seconds = (Date.now() - timestamp) / 1000;
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  const remainingSeconds = Math.floor(seconds % 60);
+
+  if (hours > 0) return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`;
+  return `${remainingMinutes}m ${remainingSeconds}s`;
+}
+
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
   const FAST_RPC = "https://ros-5f117e-fast-mainnet.helius-rpc.com";
   const V0_API = "https://api.helius.xyz/v0/transactions/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
