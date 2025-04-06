@@ -1581,7 +1581,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
           updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
 // 🔹 Sección de valores estáticos (guardados en tokens.json)
 updatedMessage += `🕒 **Saved at Notification:**\n`;
-updatedMessage += `⏳ **Age:** ${escapeMarkdown(formatTimestampToLocalTime(originalTokenData.creationTimestamp))} 📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+updatedMessage += `⏳ **Notified:** ${escapeMarkdown(formatTimestampToUTCandEST(originalTokenData.creationTimestamp))}\n`;
+updatedMessage += `📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
 updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
 updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
 
@@ -1684,18 +1685,20 @@ async function getTokenNameFromSolana(mintAddress) {
     }
 }
 
-function formatTimestampToLocalTime(timestamp) {
-  if (!timestamp) return "N/A";
-
+function formatTimestampToUTCandEST(timestamp) {
   const date = new Date(timestamp);
-  const options = {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  };
 
-  return date.toLocaleTimeString("en-US", options);
+  const utcTime = date.toLocaleTimeString("en-GB", {
+    hour12: false,
+    timeZone: "UTC"
+  });
+
+  const estTime = date.toLocaleTimeString("en-US", {
+    hour12: false,
+    timeZone: "America/New_York"
+  });
+
+  return `${utcTime} UTC | ${estTime} EST`;
 }
 
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
