@@ -972,7 +972,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
   } catch (error) {
     console.error("❌ Error guardando token en tokens.json:", error);
   }
-  
+
   try {
     fs.accessSync(filePath, fs.constants.W_OK);
     console.log("✅ Permisos de escritura en tokens.json verificados.");
@@ -981,9 +981,10 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Ejecuta este comando para arreglarlo:");
     console.log(`chmod 666 ${filePath}`);
   }
-  
+
   // 🟢 Iniciar autorefresh por 2 minutos (120s)
   startAutoRefreshToken(dexData.mintAddress, chatId, messageId);
+}
 
 function getTokenInfo(mintAddress) {
   if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
