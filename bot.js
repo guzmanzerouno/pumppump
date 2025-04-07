@@ -15,8 +15,8 @@ const USERS_FILE = "users.json";
 const RUGCHECK_API_BASE = "https://api.rugcheck.xyz/v1/tokens";
 const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
 
-const INSTANTNODES_WS_URL = "wss://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-const MIGRATION_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
+const INSTANTNODES_WS_URL = "wss://solana-api.instantnodes.io/token-hL8J457Dhvr7qc4c1GJ91VtxVaFnHzzW";
+const TOKEN_MINT_AUTHORITY_PROGRAM_ID = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
@@ -534,126 +534,65 @@ bot.onText(/\/status/, (msg) => {
 
 
 
-// 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
-    if (ws) {
-        ws.removeAllListeners();
-    }
+  ws = new WebSocket(INSTANTNODES_WS_URL);
 
-    ws = new WebSocket(INSTANTNODES_WS_URL);
+  ws.on("open", () => {
+    console.log("✅ Conectado al WebSocket de InstantNodes");
 
-    ws.on("open", () => {
-        console.log("✅ Conectado al WebSocket de InstantNodes");
+    const subscribeMessage = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "logsSubscribe",
+      params: [
+        { mentions: [TOKEN_MINT_AUTHORITY_PROGRAM_ID] },
+        { commitment: "finalized" }
+      ]
+    };
 
-        const subscribeMessage = {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "logsSubscribe",
-            params: [
-                { mentions: [MIGRATION_PROGRAM_ID] },
-                { commitment: "finalized" }
-            ]
-        };
+    ws.send(JSON.stringify(subscribeMessage));
+  });
 
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(subscribeMessage));
-        }
-    });
-
-    ws.on("message", (data) => {
-        try {
-            const transaction = JSON.parse(data);
-            if (transaction) {
-                processTransaction(transaction);
-            }
-        } catch (error) {
-            console.error("❌ Error al procesar el mensaje:", error);
-        }
-    });
-
-    ws.on("close", (code, reason) => {
-        console.warn(`⚠️ Conexión cerrada (Código: ${code}, Razón: ${reason || "Desconocida"})`);
-        setTimeout(() => {
-            console.log("🔄 Intentando reconectar...");
-            connectWebSocket();
-        }, 5000);
-    });
-
-    ws.on("error", (error) => {
-        console.error("❌ Error en WebSocket:", error);
-    });
-
-    // 💓 Mantener conexión viva
-    ws.on("pong", () => {
-        console.log("💓 Recibido PONG desde el servidor.");
-    });
-}
-
-// 🔥 Cargar suscriptores antes de iniciar el WebSocket y Heartbeat
-loadUsers();
-connectWebSocket();
-
-// 💓 Mantener la conexión activa enviando ping cada 30s
-function startHeartbeat() {
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.ping(); // 🔥 Ahora usa `ping()` en lugar de `ws.send("ping")`
-            console.log("💓 Enviando ping al WebSocket");
-        }
-    }, 30000);
-}
-
-startHeartbeat();
-
-// ⏳ Configuración del tiempo de espera antes de ejecutar el análisis
-let DELAY_BEFORE_ANALYSIS = 1 * 1000; // 1 segundos por defecto
-
-bot.onText(/\/delay (\d+)/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const newDelay = parseInt(match[1]);
-
-    if (isNaN(newDelay) || newDelay < 0 || newDelay > 300) {
-        bot.sendMessage(chatId, "⚠️ *Tiempo inválido.* Introduce un número entre 0 y 300 segundos.", { parse_mode: "Markdown" });
-        return;
-    }
-
-    DELAY_BEFORE_ANALYSIS = newDelay * 1000;
-    bot.sendMessage(chatId, `⏳ *Nuevo tiempo de espera configurado:* ${newDelay} segundos.`, { parse_mode: "Markdown" });
-
-    console.log(`🔧 Delay actualizado a ${newDelay} segundos por el usuario.`);
-});
-
-// 🔹 Procesar transacciones WebSocket y ejecutar análisis después de un delay
-function processTransaction(transaction) {
+  ws.on("message", (data) => {
     try {
-        const logs = transaction?.params?.result?.value?.logs || [];
-        const signature = transaction?.params?.result?.value?.signature;
-
-        if (!logs.length || !signature) return;
-
-        if (logs.some(log => log.includes("Program log: Instruction: CreatePool"))) {
-            console.log(`📌 Transacción detectada: ${signature}`);
-            console.log(`⏳ Esperando ${DELAY_BEFORE_ANALYSIS / 1000} segundos antes de ejecutar el análisis...`);
-
-            setTimeout(async () => {
-                console.log(`🚀 Ejecutando análisis para la transacción: ${signature}`);
-                await analyzeTransaction(signature);
-            }, DELAY_BEFORE_ANALYSIS);
-        }
+      const transaction = JSON.parse(data);
+      if (transaction) {
+        processTransaction(transaction);
+      }
     } catch (error) {
-        console.error("❌ Error en processTransaction:", error);
+      console.error("❌ Error al procesar el mensaje:", error);
     }
+  });
+
+  ws.on("close", () => {
+    console.log("⚠ Conexión cerrada, intentando reconectar...");
+    setTimeout(connectWebSocket, 5000);
+  });
+
+  ws.on("error", (error) => {
+    console.error("❌ Error en WebSocket:", error);
+  });
 }
 
-// Actualización de getMintAddressFromTransaction:
-// Se recorre primero postTokenBalances y, si no se encuentra, se recorre preTokenBalances.
+async function fetchTransactionWithRetries(signature, retries = 3, delayMs = 1200) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const tx = await connection.getTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "confirmed"
+      });
+      if (tx) return tx;
+    } catch (err) {
+      console.warn(`⚠️ Intento ${i + 1} fallido para ${signature}:`, err.message);
+    }
+    await new Promise(res => setTimeout(res, delayMs));
+  }
+  return null;
+}
+
 async function getMintAddressFromTransaction(signature) {
   try {
-    const transaction = await connection.getTransaction(signature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: "confirmed"
-    });
-
+    const transaction = await fetchTransactionWithRetries(signature);
     if (!transaction || !transaction.meta) {
       console.error("❌ No se pudo obtener la transacción.");
       return null;
@@ -672,9 +611,7 @@ async function getMintAddressFromTransaction(signature) {
           break;
         }
       }
-      if (!mintAddress) {
-        mintAddress = transaction.meta.postTokenBalances[0].mint;
-      }
+      if (!mintAddress) mintAddress = transaction.meta.postTokenBalances[0].mint;
     }
 
     if (!mintAddress && transaction.meta.preTokenBalances?.length > 0) {
@@ -684,9 +621,7 @@ async function getMintAddressFromTransaction(signature) {
           break;
         }
       }
-      if (!mintAddress) {
-        mintAddress = transaction.meta.preTokenBalances[0].mint;
-      }
+      if (!mintAddress) mintAddress = transaction.meta.preTokenBalances[0].mint;
     }
 
     if (!mintAddress) {
@@ -694,12 +629,7 @@ async function getMintAddressFromTransaction(signature) {
       return null;
     }
 
-    return {
-      mintAddress,
-      date: timestamp,  // 👈 Guardamos timestamp en milisegundos
-      status,
-      blockTime         // también puedes dejar blockTime si quieres (segundos)
-    };
+    return { mintAddress, date: timestamp, status, blockTime };
   } catch (error) {
     console.error("❌ Error al obtener Mint Address:", error);
     return null;
