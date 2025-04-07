@@ -22,6 +22,7 @@ const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
 const refreshingTokens = {};
+const refreshIntervals = {};
 global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 
 let ws;
@@ -2429,7 +2430,28 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
   console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
 }
 
-async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
+// Función para iniciar el auto-refresh. Se ejecuta cada 5 segundos (ajusta el intervalo si lo deseas).
+function startAutoRefresh(tokenMint, chatId, messageId) {
+    const key = `${chatId}_${tokenMint}`;
+    if (refreshIntervals[key]) return; // Si ya existe, no reiniciamos
+    refreshIntervals[key] = setInterval(() => {
+      refreshBuyConfirmationV2(chatId, messageId, tokenMint);
+    }, 1250);
+    console.log(`Started auto-refresh for token ${tokenMint} in chat ${chatId}`);
+  }
+  
+  // Función para detener el auto-refresh cuando el usuario toca "SELL MAX"
+  function stopAutoRefresh(tokenMint, chatId) {
+    const key = `${chatId}_${tokenMint}`;
+    if (refreshIntervals[key]) {
+      clearInterval(refreshIntervals[key]);
+      delete refreshIntervals[key];
+      console.log(`Stopped auto-refresh for token ${tokenMint} in chat ${chatId}`);
+    }
+  }
+  
+  // Función actualizada para refrescar la confirmación de compra sin Moralis
+  async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
   
     try {
@@ -2462,8 +2484,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   
       // 🧮 Funciones formateadoras
       const formatDefault = (val) => {
-        if (val >= 1) return val.toFixed(6);
-        return val.toFixed(9).replace(/0+$/, "");
+        return val >= 1 ? val.toFixed(6) : val.toFixed(9).replace(/0+$/, "");
       };
   
       const formatWithZeros = (val) => {
@@ -2501,8 +2522,9 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
         : "Unknown";
   
-      // 📬 Construir el mensaje final sin datos de Moralis
-      const updatedMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
+      // 📬 Construir el mensaje final (sin datos de Moralis)
+      const updatedMessage =
+        `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
         `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
         `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
@@ -2536,12 +2558,10 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
     } catch (error) {
       const errorMessage = error?.response?.body?.description || error.message;
-  
       if (errorMessage.includes("message is not modified")) {
         console.log(`⏸ Message not modified for ${tokenSymbol}, skipping.`);
         return;
       }
-  
       console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
       await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
     }
