@@ -2430,19 +2430,17 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
   console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
 }
 
-// ====================
-// FUNCIONES DE AUTO-REFRESH
-// ====================
-
+// Función para iniciar el auto-refresh. Se ejecuta cada 5 segundos (ajusta el intervalo si lo deseas).
 function startAutoRefresh(tokenMint, chatId, messageId) {
     const key = `${chatId}_${tokenMint}`;
     if (refreshIntervals[key]) return; // Si ya existe, no reiniciamos
     refreshIntervals[key] = setInterval(() => {
       refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-    }, 1000);
+    }, 1250);
     console.log(`Started auto-refresh for token ${tokenMint} in chat ${chatId}`);
   }
   
+  // Función para detener el auto-refresh cuando el usuario toca "SELL MAX"
   function stopAutoRefresh(tokenMint, chatId) {
     const key = `${chatId}_${tokenMint}`;
     if (refreshIntervals[key]) {
@@ -2452,10 +2450,7 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
     }
   }
   
-  // ====================
-  // FUNCIÓN REFRESH
-  // ====================
-  
+  // Función actualizada para refrescar la confirmación de compra sin Moralis
   async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
   
@@ -2467,7 +2462,6 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
       if (!original || !original.solBeforeBuy) {
         console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
         await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
-        stopAutoRefresh(tokenMint, chatId); // Detenemos el auto-refresh
         return;
       }
   
@@ -2475,7 +2469,6 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
       if (!pairAddress || pairAddress === "N/A") {
         console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
         await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
-        stopAutoRefresh(tokenMint, chatId); // Detenemos el auto-refresh
         return;
       }
   
@@ -2570,47 +2563,9 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
         return;
       }
       console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
-      // Si ocurre un error, también detenemos el auto-refresh para evitar bucles
-      stopAutoRefresh(tokenMint, chatId);
       await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
     }
   }
-  
-// ====================
-// CALLBACK QUERY HANDLER
-// ====================
-bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
-    const data = query.data;
-  
-    // Si el callback es para "Refresh", inicia el auto-refresh
-    if (data.startsWith("refresh_buy_")) {
-      // El callback_data tiene el formato "refresh_buy_<tokenMint>"
-      const tokenMint = data.split("_").slice(2).join("_");
-      startAutoRefresh(tokenMint, chatId, messageId);
-      bot.answerCallbackQuery(query.id, { text: "Auto-refresh started." })
-        .catch(err => {
-          if (err.message && err.message.includes("query is too old")) { }
-          else console.error(err);
-        });
-      return;
-    }
-  
-    // Si el callback es para "Sell MAX", detiene el auto-refresh y procede con la venta
-    if (data.startsWith("sell_")) {
-      // El callback_data tiene el formato "sell_<tokenMint>_100"
-      const tokenMint = data.split("_")[1];
-      stopAutoRefresh(tokenMint, chatId);
-      bot.answerCallbackQuery(query.id, { text: "Auto-refresh stopped. Proceeding with sale." })
-        .catch(err => {
-          if (err.message && err.message.includes("query is too old")) { }
-          else console.error(err);
-        });
-
-      return;
-    }
-  });
 
 async function getSolPriceUSD() {
   try {
