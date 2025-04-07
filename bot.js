@@ -770,9 +770,9 @@ async function getPairAddressFromSolanaTracker(tokenAddress) {
 async function getDexScreenerData(pairAddress) {
     const url = `https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`;
     const headers = {
-      accept: "application/json",
-      "X-API-Key": "TU_API_KEY"
-    };
+        accept: "application/json",
+        "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
+      };
   
     const maxRetries = 10;
     const delayMs = 1000;
