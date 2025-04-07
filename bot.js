@@ -477,7 +477,7 @@ function ensureActiveUser(msg, callback) {
   callback();
 }
 
-// ✅ Revisión periódica de expiración (puede ejecutarse cada X minutos)
+// ✅ Revisión periódica de expiración (ahora cada 10 minutos)
 setInterval(() => {
   const now = Date.now();
   for (const [chatId, user] of Object.entries(users)) {
@@ -490,7 +490,7 @@ setInterval(() => {
       }
     }
   }
-}, 60 * 60 * 1000);
+}, 10 * 60 * 1000); // ⏱️ Cada 10 minutos
 
 function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   const expirationDate = new Date(expiration).toLocaleDateString();
@@ -1500,7 +1500,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
   message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
   message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
   message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-  message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n\n`;
+  message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
 
   message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
   message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
