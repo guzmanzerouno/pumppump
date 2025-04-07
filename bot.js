@@ -1374,19 +1374,15 @@ function saveSwap(chatId, type, details) {
 
 // 🔹 Calcular el tiempo desde la creación del par en horas, minutos y segundos
 function calculateAge(timestamp) {
-    if (!timestamp) return "N/A";
-    const now = Date.now();
-    const elapsedMs = now - timestamp;
+  if (!timestamp) return "N/A";
+  const now = Date.now();
+  const elapsedMs = now - timestamp;
 
-    const hours = Math.floor(elapsedMs / 3600000); // 1 hora = 3600000 ms
-    const minutes = Math.floor((elapsedMs % 3600000) / 60000);
-    const seconds = Math.floor((elapsedMs % 60000) / 1000);
+  const hours = Math.floor(elapsedMs / 3600000);
+  const minutes = Math.floor((elapsedMs % 3600000) / 60000);
+  const seconds = Math.floor((elapsedMs % 60000) / 1000);
 
-    if (hours > 0) {
-        return `${hours}h ${minutes}m ${seconds}s`; // Si hay horas, las mostramos
-    } else {
-        return `${minutes}m ${seconds}s`; // Si no hay horas, solo minutos y segundos
-    }
+  return hours > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`;
 }
 
 const MINTS_FILE = "mint.json";
@@ -1454,11 +1450,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
-  // 🔍 1️⃣ Obtener el Pair desde SolanaTracker
+  // 1️⃣ Obtener Pair
   const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
   if (!pairAddress) return;
 
-  // 🧩 2️⃣ Obtener datos de Moralis
+  // 2️⃣ Datos de Moralis
   const dexData = await getDexScreenerData(pairAddress);
   if (!dexData) {
     for (const userId in alertMessages) {
@@ -1473,50 +1469,43 @@ async function analyzeTransaction(signature, forceCheck = false) {
     return;
   }
 
-  // 🔐 3️⃣ Seguridad desde RugCheck o SolanaTracker
+  // 3️⃣ Datos de riesgo
   const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
   if (!rugCheckData) return;
 
-  // 🧠 Calcular cambios
-  const liquidityChange = dexData.liquidityChange24h !== "N/A"
-    ? Number(dexData.liquidityChange24h).toFixed(2)
+  // 🧠 Cálculos
+  const priceChange24h = dexData.priceChange24h !== "N/A"
+    ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
     : "N/A";
 
-  const liquidityEmoji = liquidityChange === "N/A"
-    ? ""
-    : Number(liquidityChange) > 100
-      ? "🚀 +"
-      : Number(liquidityChange) > 0
-        ? "🟢 +"
-        : Number(liquidityChange) < 0
-          ? "🔻 "
-          : "";
+  const liquidityChange = dexData.liquidityChange24h || 0;
+  const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
 
-  const liquidityDisplay = liquidityChange !== "N/A"
-    ? `${liquidityEmoji}${liquidityChange}%`
-    : "N/A";
+  const migrationTimestamp = mintData.date || Date.now();
+  const age = calculateAge(migrationTimestamp);
+  const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
 
-  const age = calculateAge(dexData.migrationDate) || "N/A";
-
-  const createdDate = typeof dexData.migrationDate === "number"
-    ? formatTimestampToUTCandEST(dexData.migrationDate)
-    : "N/A";
+  // 🛠️ Normalizar valores vacíos a 0
+  const buys24h = dexData.buys24h === "N/A" ? 0 : dexData.buys24h;
+  const sells24h = dexData.sells24h === "N/A" ? 0 : dexData.sells24h;
+  const buyers24h = dexData.buyers24h === "N/A" ? 0 : dexData.buyers24h;
+  const sellers24h = dexData.sellers24h === "N/A" ? 0 : dexData.sellers24h;
 
   // 💾 Guardar
-  saveTokenData(dexData, mintData, rugCheckData, age, liquidityChange);
+  saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
 
-  // 📩 Mensaje final
+  // 📨 Mensaje final
   let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
   message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidityDisplay)}\n\n`;
+  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
   message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
   message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
   message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n\n`;
 
-  message += `🟩 Buys 24h: ${escapeMarkdown(dexData.buys24h)} 🟥 Sells 24h: ${escapeMarkdown(dexData.sells24h)}\n`;
+  message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
   message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
   message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-  message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(dexData.buyers24h)} 👤 Sellers: ${escapeMarkdown(dexData.sellers24h)}\n\n`;
+  message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
 
   message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
   message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
