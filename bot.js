@@ -771,9 +771,9 @@ async function getDexScreenerData(pairAddress) {
     const url = `https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`;
     const headers = {
       accept: "application/json",
-      "X-API-Key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjNkNDUyNGViLWE2N2ItNDBjZi1hOTBiLWE0NDI0ZmU3Njk4MSIsIm9yZ0lkIjoiNDI3MDc2IiwidXNlcklkIjoiNDM5Mjk0IiwidHlwZUlkIjoiZWNhZDFiODAtODRiZS00ZTlmLWEzZjgtYTZjMGQ0MjVhNGMwIiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3Mzc1OTc1OTYsImV4cCI6NDg5MzM1NzU5Nn0.y9bv5sPVgcR4xCwgs8qvy2LOzZQMN3LSebEYfR9I_ks"
+      "X-API-Key": "TU_API_KEY"
     };
-
+  
     const maxRetries = 10;
     const delayMs = 1000;
   
@@ -786,10 +786,14 @@ async function getDexScreenerData(pairAddress) {
         if (data && data.tokenAddress && data.tokenSymbol) {
           console.log(`✅ Datos de Moralis recibidos en el intento ${attempt}`);
   
+          // 🔄 Normalizar symbol y name
+          const symbol = typeof data.tokenSymbol === "string" ? data.tokenSymbol.trim().toUpperCase() : "N/A";
+          const name = typeof data.tokenName === "string" ? data.tokenName.trim() : "Unknown";
+  
           return {
-            // 🪙 Token info
-            name: data.tokenName || "Desconocido",
-            symbol: data.tokenSymbol || "N/A",
+            // 🪙 Token info (formato DexScreener)
+            name: name,
+            symbol: symbol,
             tokenAddress: data.tokenAddress || "N/A",
             tokenLogo: data.tokenLogo || "",
   
@@ -803,10 +807,10 @@ async function getDexScreenerData(pairAddress) {
             buyVolume24h: data.buyVolume?.["24h"] ?? "N/A",
             sellVolume24h: data.sellVolume?.["24h"] ?? "N/A",
             totalVolume24h: data.totalVolume?.["24h"] ?? "N/A",
-            buys24h: data.buys?.["24h"] ?? "N/A",
-            sells24h: data.sells?.["24h"] ?? "N/A",
-            buyers24h: data.buyers?.["24h"] ?? "N/A",
-            sellers24h: data.sellers?.["24h"] ?? "N/A",
+            buys24h: typeof data.buys?.["24h"] === "number" ? data.buys["24h"] : 0,
+            sells24h: typeof data.sells?.["24h"] === "number" ? data.sells["24h"] : 0,
+            buyers24h: typeof data.buyers?.["24h"] === "number" ? data.buyers["24h"] : 0,
+            sellers24h: typeof data.sellers?.["24h"] === "number" ? data.sellers["24h"] : 0,
             priceChange24h: data.pricePercentChange?.["24h"] ?? "N/A",
   
             // 🧩 DEX info
@@ -817,7 +821,7 @@ async function getDexScreenerData(pairAddress) {
             pairLabel: data.pairLabel || "N/A",
   
             // Extra
-            chain: "solana"
+            chain: "Solana"
           };
         } else {
           console.warn(`⚠️ Moralis devolvió respuesta incompleta en el intento ${attempt}`);
@@ -2178,17 +2182,10 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
   
     const soldTokenMint = sellDetails.soldTokenMint || "Unknown";
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
-  
-    const tokenSymbolRaw = soldTokenData.symbol || "Unknown";
-    const tokenNameRaw = soldTokenData.name || "Unknown";
-  
-    const tokenSymbol = escapeMarkdown(tokenSymbolRaw);
-    const tokenName = escapeMarkdown(tokenNameRaw);
-  
+    const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
     const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido
-    const soldAmountFloat = parseFloat(soldAmount); // tokens vendidos
+    const soldAmountFloat = parseFloat(soldAmount); // Asegurarse de que sea número
   
-    // Calcular PNL
     let winLossDisplay = "N/A";
     if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
       const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
@@ -2201,31 +2198,27 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
   
     const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
+    // 🔥 Nuevo: Calcular el precio por token
     const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
-  
-    const confirmationMessage =
-      `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-      `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n\n` +
-      `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${tokenPrice} SOL\n` +
-      `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
-      `💲 *Sold:* ${soldAmount} Tokens\n` +
-      `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
-      `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
-      `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-  
-    try {
-      await bot.editMessageText(confirmationMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true
-      });
-    } catch (err) {
-      console.error("❌ Error enviando mensaje de confirmación de venta:", err.message);
-    }
+
+    const confirmationMessage = `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+  `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
+  `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n\n` +
+  `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+  `💲 *Token Price:* ${tokenPrice} SOL\n` +
+  `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
+  `💲 *Sold:* ${soldAmount} Tokens\n` +
+  `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
+  `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
+  `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
+  `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
+
+await bot.editMessageText(confirmationMessage, {
+  chat_id: chatId,
+  message_id: messageId,
+  parse_mode: "Markdown",
+  disable_web_page_preview: true
+});
   
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
@@ -2237,10 +2230,10 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       "Sold Token": tokenSymbol,
       "Sold Token Address": soldTokenMint,
       "Wallet": sellDetails.walletAddress,
-      "Time": sellDetails.timeStamp,
+      "Time": `${sellDetails.timeStamp}`,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
       "SOL PNL": winLossDisplay,
-      "messageText": confirmationMessage
+      "messageText": confirmationMessage  // 🔥 agregar esto
     });
   
     console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
@@ -2345,95 +2338,88 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
 global.buyReferenceMap = global.buyReferenceMap || {};
 
 async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
-    const solPrice = await getSolPriceUSD();
-  
-    const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
-    const receivedTokenMint = swapDetails.receivedTokenMint;
-  
-    if (!receivedTokenMint || receivedTokenMint.length < 32) {
-      console.error("❌ Error: No se pudo determinar un token recibido válido.");
-      await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
-        chat_id: chatId,
-        message_id: messageId
-      });
-      return;
-    }
-  
-    const swapTokenData = getTokenInfo(receivedTokenMint) || {};
-    const tokenSymbolRaw = swapTokenData.symbol || "Unknown";
-    const tokenNameRaw = swapTokenData.name || "Unknown";
-  
-    const tokenSymbol = escapeMarkdown(tokenSymbolRaw);
-    const tokenName = escapeMarkdown(tokenNameRaw);
-  
-    const inputAmount = parseFloat(swapDetails.inputAmount);
-    const swapFee = parseFloat(swapDetails.swapFee);
-    const spentTotal = (inputAmount + swapFee).toFixed(3);
-    const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
-  
-    const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
-  
-    const confirmationMessage =
-      `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
-      `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
-      `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-      `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
-      `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
-  
-    try {
-      await bot.editMessageText(confirmationMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
-            ],
-            [
-              { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
-            ]
-          ]
-        }
-      });
-    } catch (err) {
-      console.error("❌ Error enviando mensaje de confirmación de compra:", err.message);
-    }
-  
-    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
-    buyReferenceMap[chatId][receivedTokenMint] = {
-      solBeforeBuy: parseFloat(spentTotal),
-      receivedAmount: receivedAmount,
-      tokenPrice: tokenPrice,
-      walletAddress: swapDetails.walletAddress,
-      txSignature,
-      time: Date.now()
-    };
-  
-    saveSwap(chatId, "Buy", {
-      "Swap completed successfully": true,
-      "Pair": `SOL/${tokenSymbol}`,
-      "Spent": `${spentTotal} SOL`,
-      "Got": `${receivedAmount.toFixed(3)} Tokens`,
-      "Swap Fee": `${swapFee} SOL`,
-      "Token Price": `${tokenPrice.toFixed(9)} SOL`,
-      "Received Token": tokenSymbol,
-      "Received Token Address": receivedTokenMint,
-      "Wallet": swapDetails.walletAddress,
-      "Time": swapDetails.timeStamp,
-      "Transaction": `https://solscan.io/tx/${txSignature}`,
-      "messageText": confirmationMessage
+  const solPrice = await getSolPriceUSD();
+
+  const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
+  const receivedTokenMint = swapDetails.receivedTokenMint;
+
+  if (!receivedTokenMint || receivedTokenMint.length < 32) {
+    console.error("❌ Error: No se pudo determinar un token recibido válido.");
+    await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
+      chat_id: chatId,
+      message_id: messageId
     });
-  
-    console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
+    return;
   }
+
+  const swapTokenData = getTokenInfo(receivedTokenMint);
+  const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
+
+  const inputAmount = parseFloat(swapDetails.inputAmount);
+  const swapFee = parseFloat(swapDetails.swapFee);
+  const spentTotal = (inputAmount + swapFee).toFixed(3);
+  const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
+
+  const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
+
+  const confirmationMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+    `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
+    `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
+    `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+    `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
+    `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
+    `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
+    `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
+    `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+    `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
+
+  await bot.editMessageText(confirmationMessage, {
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
+          { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+        ],
+        [
+          { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
+        ]
+      ]
+    }
+  });
+
+  // Guardar referencia para refreshBuyConfirmation
+  if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+  buyReferenceMap[chatId][receivedTokenMint] = {
+    solBeforeBuy: parseFloat(spentTotal),
+    receivedAmount: receivedAmount,
+    tokenPrice: tokenPrice,
+    walletAddress: swapDetails.walletAddress,
+    txSignature,
+    time: Date.now()
+  };
+
+  // Guardar en swaps.json
+  saveSwap(chatId, "Buy", {
+    "Swap completed successfully": true,
+    "Pair": `SOL/${tokenSymbol}`,
+    "Spent": `${spentTotal} SOL`,
+    "Got": `${receivedAmount.toFixed(3)} Tokens`,
+    "Swap Fee": `${swapFee} SOL`,
+    "Token Price": `${tokenPrice.toFixed(9)} SOL`,
+    "Received Token": tokenSymbol,
+    "Received Token Address": receivedTokenMint,
+    "Wallet": swapDetails.walletAddress,
+    "Time": swapDetails.timeStamp,
+    "Transaction": `https://solscan.io/tx/${txSignature}`,
+    "messageText": confirmationMessage
+  });
+
+  console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
+}
 
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   let tokenSymbol = "Unknown";
