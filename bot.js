@@ -1477,24 +1477,38 @@ async function analyzeTransaction(signature, forceCheck = false) {
   const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
   if (!rugCheckData) return;
 
-  // 🧠 Cálculos extra
-  const liquidity24hFormatted = dexData.liquidityChange24h !== "N/A"
-    ? `${Number(dexData.liquidityChange24h).toFixed(2)}%`
+  // 🧠 Calcular cambios
+  const liquidityChange = dexData.liquidityChange24h !== "N/A"
+    ? Number(dexData.liquidityChange24h).toFixed(2)
+    : "N/A";
+
+  const liquidityEmoji = liquidityChange === "N/A"
+    ? ""
+    : Number(liquidityChange) > 100
+      ? "🚀 +"
+      : Number(liquidityChange) > 0
+        ? "🟢 +"
+        : Number(liquidityChange) < 0
+          ? "🔻 "
+          : "";
+
+  const liquidityDisplay = liquidityChange !== "N/A"
+    ? `${liquidityEmoji}${liquidityChange}%`
     : "N/A";
 
   const age = calculateAge(dexData.migrationDate) || "N/A";
 
   const createdDate = typeof dexData.migrationDate === "number"
-    ? DateTime.fromMillis(dexData.migrationDate).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'")
+    ? formatTimestampToUTCandEST(dexData.migrationDate)
     : "N/A";
 
   // 💾 Guardar
-  saveTokenData(dexData, mintData, rugCheckData, age, liquidity24hFormatted);
+  saveTokenData(dexData, mintData, rugCheckData, age, liquidityChange);
 
   // 📩 Mensaje final
   let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
   message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** (${escapeMarkdown(liquidity24hFormatted)})\n\n`;
+  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidityDisplay)}\n\n`;
   message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
   message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
   message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n\n`;
@@ -1513,7 +1527,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
   message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
   message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
 
-  // 📤 Enviar notificación
   await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
 }
   
