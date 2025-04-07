@@ -2439,7 +2439,7 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
     if (refreshIntervals[key]) return; // Si ya existe, no reiniciamos
     refreshIntervals[key] = setInterval(() => {
       refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-    }, 1250);
+    }, 1000);
     console.log(`Started auto-refresh for token ${tokenMint} in chat ${chatId}`);
   }
   
