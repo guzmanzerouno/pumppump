@@ -1513,7 +1513,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
   message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
 
   message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-  message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
+  message += `📆 **Created:** ${createdDate}\n\n`;
   message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
 
   await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
