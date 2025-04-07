@@ -1486,10 +1486,10 @@ async function analyzeTransaction(signature, forceCheck = false) {
   const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
 
   // 🛠️ Normalizar valores vacíos a 0
-  const buys24h = dexData.buys24h === "N/A" ? 0 : dexData.buys24h;
-  const sells24h = dexData.sells24h === "N/A" ? 0 : dexData.sells24h;
-  const buyers24h = dexData.buyers24h === "N/A" ? 0 : dexData.buyers24h;
-  const sellers24h = dexData.sellers24h === "N/A" ? 0 : dexData.sellers24h;
+  const buys24h = isNaN(Number(dexData.buys24h)) ? 0 : dexData.buys24h;
+  const sells24h = isNaN(Number(dexData.sells24h)) ? 0 : dexData.sells24h;
+  const buyers24h = isNaN(Number(dexData.buyers24h)) ? 0 : dexData.buyers24h;
+  const sellers24h = isNaN(Number(dexData.sellers24h)) ? 0 : dexData.sellers24h;
 
   // 💾 Guardar
   saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
