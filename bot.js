@@ -953,10 +953,10 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
       buyVolume24h: dexData.buyVolume24h || "N/A",
       sellVolume24h: dexData.sellVolume24h || "N/A",
       totalVolume24h: dexData.totalVolume24h || "N/A",
-      buys24h: dexData.buys24h || "N/A",
-      sells24h: dexData.sells24h || "N/A",
-      buyers24h: dexData.buyers24h || "N/A",
-      sellers24h: dexData.sellers24h || "N/A",
+      buys24h: dexData.buys24h || "0",
+      sells24h: dexData.sells24h || "0",
+      buyers24h: dexData.buyers24h || "0",
+      sellers24h: dexData.sellers24h || "0",
   
       // 🔐 Seguridad
       riskLevel: rugCheckData.riskLevel || "N/A",
@@ -1426,96 +1426,96 @@ const processedSignatures = new Set();
 
 // Función principal que ejecuta todo el proceso de análisis
 async function analyzeTransaction(signature, forceCheck = false) {
-    if (!forceCheck && processedSignatures.has(signature)) return;
-    if (!forceCheck) processedSignatures.add(signature);
-  
-    const mintData = await getMintAddressFromTransaction(signature);
-    if (!mintData || !mintData.mintAddress) return;
-  
-    if (processedMints[mintData.mintAddress]) return;
-    processedMints[mintData.mintAddress] = true;
-    saveProcessedMints();
-  
-    // 🚨 Alerta previa
-    const alertMessages = {};
-    for (const userId in users) {
-      const user = users[userId];
-      if (user && user.subscribed && user.privateKey) {
-        try {
-          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
-            parse_mode: "Markdown"
-          });
-          alertMessages[userId] = msg.message_id;
-  
-          setTimeout(() => {
-            bot.deleteMessage(userId, msg.message_id).catch(() => {});
-          }, 80000);
-        } catch (_) {}
-      }
+  if (!forceCheck && processedSignatures.has(signature)) return;
+  if (!forceCheck) processedSignatures.add(signature);
+
+  const mintData = await getMintAddressFromTransaction(signature);
+  if (!mintData || !mintData.mintAddress) return;
+
+  if (processedMints[mintData.mintAddress]) return;
+  processedMints[mintData.mintAddress] = true;
+  saveProcessedMints();
+
+  // 🚨 Alerta previa
+  const alertMessages = {};
+  for (const userId in users) {
+    const user = users[userId];
+    if (user && user.subscribed && user.privateKey) {
+      try {
+        const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
+          parse_mode: "Markdown"
+        });
+        alertMessages[userId] = msg.message_id;
+
+        setTimeout(() => {
+          bot.deleteMessage(userId, msg.message_id).catch(() => {});
+        }, 80000);
+      } catch (_) {}
     }
-  
-    // 🔍 1️⃣ Obtener el Pair desde SolanaTracker
-    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
-    if (!pairAddress) return;
-  
-    // 🧩 2️⃣ Obtener datos de Moralis
-    const dexData = await getDexScreenerData(pairAddress);
-    if (!dexData) {
-      for (const userId in alertMessages) {
-        try {
-          await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
-            chat_id: userId,
-            message_id: alertMessages[userId],
-            parse_mode: "Markdown"
-          });
-        } catch (_) {}
-      }
-      return;
-    }
-  
-    // 🔐 3️⃣ Seguridad desde RugCheck o SolanaTracker
-    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-    if (!rugCheckData) return;
-  
-    // 🧠 Cálculos extra
-    const priceChange24h = dexData.priceChange24h !== "N/A"
-      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-      : "N/A";
-  
-    const age = calculateAge(dexData.migrationDate) || "N/A";
-  
-    // 💾 Guardar
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
-  
-    const createdDate = typeof dexData.migrationDate === "number"
-      ? DateTime.fromMillis(dexData.migrationDate).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'")
-      : "N/A";
-  
-    // 📩 Mensaje final
-    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n\n`;
-    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-    message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)} (${escapeMarkdown(dexData.liquidityChange24h)}%)\n\n`;
-  
-    message += `🟩 Buys 24h: ${escapeMarkdown(dexData.buys24h)} 🟥 Sells 24h: ${escapeMarkdown(dexData.sells24h)}\n`;
-    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(dexData.buyers24h)} 👤 Sellers: ${escapeMarkdown(dexData.sellers24h)}\n\n`;
-  
-    message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-  
-    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-    message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-  
-    // 📤 Enviar notificación
-    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
   }
+
+  // 🔍 1️⃣ Obtener el Pair desde SolanaTracker
+  const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+  if (!pairAddress) return;
+
+  // 🧩 2️⃣ Obtener datos de Moralis
+  const dexData = await getDexScreenerData(pairAddress);
+  if (!dexData) {
+    for (const userId in alertMessages) {
+      try {
+        await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
+          chat_id: userId,
+          message_id: alertMessages[userId],
+          parse_mode: "Markdown"
+        });
+      } catch (_) {}
+    }
+    return;
+  }
+
+  // 🔐 3️⃣ Seguridad desde RugCheck o SolanaTracker
+  const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+  if (!rugCheckData) return;
+
+  // 🧠 Cálculos extra
+  const liquidity24hFormatted = dexData.liquidityChange24h !== "N/A"
+    ? `${Number(dexData.liquidityChange24h).toFixed(2)}%`
+    : "N/A";
+
+  const age = calculateAge(dexData.migrationDate) || "N/A";
+
+  const createdDate = typeof dexData.migrationDate === "number"
+    ? DateTime.fromMillis(dexData.migrationDate).setZone("America/New_York").toFormat("MM/dd/yyyy HH:mm:ss 'EST'")
+    : "N/A";
+
+  // 💾 Guardar
+  saveTokenData(dexData, mintData, rugCheckData, age, liquidity24hFormatted);
+
+  // 📩 Mensaje final
+  let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+  message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** (${escapeMarkdown(liquidity24hFormatted)})\n\n`;
+  message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+  message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+  message += `💧 **Liquidity:** $${escapeMarkdown(dexData.liquidity)}\n\n`;
+
+  message += `🟩 Buys 24h: ${escapeMarkdown(dexData.buys24h)} 🟥 Sells 24h: ${escapeMarkdown(dexData.sells24h)}\n`;
+  message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+  message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+  message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(dexData.buyers24h)} 👤 Sellers: ${escapeMarkdown(dexData.sellers24h)}\n\n`;
+
+  message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
+  message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
+  message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
+  message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
+
+  message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
+  message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
+  message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+
+  // 📤 Enviar notificación
+  await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
+}
   
   // Función para notificar a los usuarios (manteniendo la información original de tokens.json)
   // Se usan botones que incluyen la URL a Dexscreener y un botón "Refresh" que enviará el mint en el callback.
