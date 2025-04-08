@@ -28,6 +28,25 @@ global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+// ==========================================
+// VARIABLE GLOBAL PARA AUTO CREACIÓN DE ATA
+// ==========================================
+let ataAutoCreationEnabled = true;
+
+// Comando para activar/desactivar el auto-creado de ATA
+bot.onText(/\/ata (on|off)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const command = match[1].toLowerCase();
+
+  if (command === 'on') {
+    ataAutoCreationEnabled = true;
+    bot.sendMessage(chatId, "✅ Auto creation of ATAs is now ENABLED.");
+  } else if (command === 'off') {
+    ataAutoCreationEnabled = false;
+    bot.sendMessage(chatId, "❌ Auto creation of ATAs is now DISABLED.");
+  }
+});
+
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
     if (fs.existsSync(USERS_FILE)) {
@@ -1040,95 +1059,86 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
 
 // 🔹 Función para comprar tokens usando Jupiter API con transacciones versionadas
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-  try {
-      // console.log(`🛒 Attempt ${attempt}: Processing purchase of ${amountSOL} SOL for ${mint}...`);
-
+    try {
       const user = users[chatId];
       if (!user || !user.privateKey) {
-          throw new Error("User not registered or missing privateKey.");
+        throw new Error("User not registered or missing privateKey.");
       }
-
-      const privateKeyUint8 = new Uint8Array(bs58.decode(user.privateKey));
-      const userKeypair = Keypair.fromSecretKey(privateKeyUint8);
+  
+      // Obtener keypair y conexión usando el endpoint rápido de Helius
+      const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-
-      // Verificar o crear ATA
-      const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
+  
+      // Ejecutar de forma concurrente la verificación/creación de la ATA y la consulta de balance
+      const [ata, balanceLamports] = await Promise.all([
+        ensureAssociatedTokenAccount(userKeypair, mint, connection),
+        connection.getBalance(userPublicKey)
+      ]);
+  
       if (!ata) {
-          // console.log(`⚠️ ATA not found, waiting for creation... Retrying purchase.`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          return await buyToken(chatId, mint, amountSOL, attempt + 1);
+        // Si no se obtuvo la ATA, reintentar después de 3 segundos
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-
-      // console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
-
-      // Verificar balance
-      const balance = await connection.getBalance(userPublicKey) / 1e9;
+  
+      const balance = balanceLamports / 1e9;
       if (balance < amountSOL) {
-          throw new Error(`❌ Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
+        throw new Error(`Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
       }
-
-      // console.log("🔹 Fetching best quote from Jupiter...");
-
+  
+      // Solicitar la cotización a la API de Jupiter
       const quoteResponse = await axios.get("https://quote-api.jup.ag/v6/quote", {
-  params: {
-    inputMint: "So11111111111111111111111111111111111111112",
-    outputMint: mint,
-    amount: Math.floor(amountSOL * 1e9),
-    // dynamicSlippage: true,
-    swapMode: "ExactIn",
-    slippageBps: 1000  // 1000 basis points = 10% slippage
-  }
-});
-
-      if (!quoteResponse.data || !quoteResponse.data.routePlan) {
-          throw new Error("❌ Failed to retrieve a valid quote from Jupiter.");
-      }
-
-      // console.log("✅ Quote obtained, requesting swap transaction...");
-
-      const swapResponse = await axios.post(JUPITER_API_URL, {
-          quoteResponse: quoteResponse.data,
-          userPublicKey: userPublicKey.toBase58(),
-          wrapAndUnwrapSol: true,
-          prioritizationFeeLamports: 2000000
+        params: {
+          inputMint: "So11111111111111111111111111111111111111112",
+          outputMint: mint,
+          amount: Math.floor(amountSOL * 1e9),
+          dynamicSlippage: true,
+          swapMode: "ExactIn"
+        }
       });
-
-      if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-          throw new Error("❌ Failed to construct swap transaction.");
+      if (!quoteResponse.data || !quoteResponse.data.routePlan) {
+        throw new Error("Failed to retrieve a valid quote from Jupiter.");
       }
-
-      // console.log("✅ Swap transaction received from Jupiter.");
-
+  
+      // Solicitar la construcción de la transacción de swap a Jupiter
+      const swapResponse = await axios.post(JUPITER_API_URL, {
+        quoteResponse: quoteResponse.data,
+        userPublicKey: userPublicKey.toBase58(),
+        wrapAndUnwrapSol: true,
+        prioritizationFeeLamports: 2000000
+      });
+      if (!swapResponse.data || !swapResponse.data.swapTransaction) {
+        throw new Error("Failed to construct swap transaction.");
+      }
+  
+      // Decodificar, firmar y enviar la transacción real
       const transactionBuffer = Buffer.from(swapResponse.data.swapTransaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-
       versionedTransaction.sign([userKeypair]);
-
-      // console.log("✅ Transaction successfully signed. Sending to Solana...");
-
+  
       const txId = await connection.sendTransaction(versionedTransaction, {
-          skipPreflight: false,
-          preflightCommitment: "confirmed"
+        skipPreflight: false,
+        preflightCommitment: "confirmed"
       });
-
-      // console.log(`✅ Purchase completed successfully: ${txId}`);
+  
       return txId;
-
-  } catch (error) {
-      console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
-      // console.error(error.stack);
-
-      if (attempt < 3) {
-          // console.log(`🔄 Retrying purchase (Attempt ${attempt + 1})...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          return await buyToken(chatId, mint, amountSOL, attempt + 1);
-      } else {
-          return Promise.reject(error); // ⬅ devolvemos el error real para manejarlo en el callback
+    } catch (error) {
+      const errorMessage = error.message || "";
+      // Filtrar el log si el error contiene "Simulation failed"
+      if (!errorMessage.includes("Simulation failed")) {
+        console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response?.data || "");
       }
+      // Backoff exponencial para reintentos
+      if (attempt < 3) {
+        const delay = 3000 * Math.pow(2, attempt - 1); // 3s, 6s, 12s,...
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return await buyToken(chatId, mint, amountSOL, attempt + 1);
+      } else {
+        return Promise.reject(error);
+      }
+    }
   }
-}
 
 async function getTokenBalance(chatId, mint) {
     try {
@@ -1306,38 +1316,34 @@ async function getTokenDecimals(mint) {
 // 🔹 Función para verificar y crear la ATA si no existe
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
-        const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-
-        // 🔹 Verificar si la cuenta ya existe en la blockchain
-        const ataInfo = await connection.getAccountInfo(ata);
-        if (ataInfo !== null) {
-            console.log(`✅ ATA already exists for ${mint}: ${ata.toBase58()}`);
-            return ata;
-        }
-
-        console.log(`⚠️ ATA not found, creating a new one for token ${mint}...`);
-
-        // 🔹 Crear la instrucción para la ATA
-        const transaction = new Transaction().add(
-            createAssociatedTokenAccountInstruction(
-                wallet.publicKey,  // Payer (quién paga la transacción)
-                ata,               // Dirección de la ATA
-                wallet.publicKey,  // Owner (propietario)
-                new PublicKey(mint) // Mint del token
-            )
-        );
-
-        // 🔹 Firmar y enviar la transacción
-        const txSignature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
-
-        console.log(`✅ ATA created successfully: ${ata.toBase58()} - TX: ${txSignature}`);
-
+      // Generar la dirección ATA para el mint y la wallet del usuario
+      const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+      
+      // Consultar si la ATA ya existe en la blockchain
+      const ataInfo = await connection.getAccountInfo(ata);
+      if (ataInfo !== null) {
         return ata;
+      }
+      
+      // Si no existe, crear la instrucción para la ATA
+      const transaction = new Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          wallet.publicKey,     // Payer: quien paga la transacción
+          ata,                  // Dirección de la ATA a crear
+          wallet.publicKey,     // Owner: dueño de la ATA (la misma wallet)
+          new PublicKey(mint)   // Mint del token
+        )
+      );
+      
+      // Firmar y enviar la transacción
+      await sendAndConfirmTransaction(connection, transaction, [wallet]);
+      
+      return ata;
     } catch (error) {
-        console.error(`❌ Error creating ATA for ${mint}:`, error);
-        return null;
+      // Puedes manejar el error aquí o propagarlo
+      throw error;
     }
-}
+  }
 
 // 🔥 Cargar swaps desde el archivo JSON
 function loadSwaps() {
@@ -1436,112 +1442,97 @@ const processedSignatures = new Set();
 
 // Función principal que ejecuta todo el proceso de análisis
 async function analyzeTransaction(signature, forceCheck = false) {
-  if (!forceCheck && processedSignatures.has(signature)) return;
-  if (!forceCheck) processedSignatures.add(signature);
-
-  const mintData = await getMintAddressFromTransaction(signature);
-  if (!mintData || !mintData.mintAddress) return;
-
-  if (processedMints[mintData.mintAddress]) return;
-  processedMints[mintData.mintAddress] = true;
-  saveProcessedMints();
-
-  // 🚨 Alerta previa
-  const alertMessages = {};
-  for (const userId in users) {
-    const user = users[userId];
-    if (user && user.subscribed && user.privateKey) {
-      try {
-        const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
-          parse_mode: "Markdown"
-        });
-        alertMessages[userId] = msg.message_id;
-
-        setTimeout(() => {
-          bot.deleteMessage(userId, msg.message_id).catch(() => {});
-        }, 80000);
-      } catch (_) {}
-    }
-  }
-
-  // 1️⃣ Obtener Pair
-  const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
-  if (!pairAddress) return;
-
-  // 2️⃣ Datos de Moralis
-  const dexData = await getDexScreenerData(pairAddress);
-  if (!dexData) {
-    for (const userId in alertMessages) {
-      try {
-        await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
-          chat_id: userId,
-          message_id: alertMessages[userId],
-          parse_mode: "Markdown"
-        });
-      } catch (_) {}
-    }
-    return;
-  }
-
-  // 3️⃣ Datos de riesgo
-  const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-  if (!rugCheckData) return;
-
-  // 🧠 Cálculos
-  const priceChange24h = dexData.priceChange24h !== "N/A"
-    ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-    : "N/A";
-
-  const liquidityChange = dexData.liquidityChange24h || 0;
-  const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
-
-  const migrationTimestamp = mintData.date || Date.now();
-  const age = calculateAge(migrationTimestamp);
-  const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-
-  // 🛠️ Normalizar valores vacíos a 0
-  const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
-  const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
-  const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
-  const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
+    if (!forceCheck && processedSignatures.has(signature)) return;
+    if (!forceCheck) processedSignatures.add(signature);
   
-  // 💾 Guardar
-  saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
-
-  // 📨 Mensaje final
-  let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-  message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
-  message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-  message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-  message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-
-  message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
-  message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-  message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-  message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
-
-  message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-  message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-  message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-  message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-
-  message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-  message += `📆 **Created:** ${createdDate}\n\n`;
-  message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-
-  await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
-}
+    const mintData = await getMintAddressFromTransaction(signature);
+    if (!mintData || !mintData.mintAddress) return;
   
-  // Función para notificar a los usuarios (manteniendo la información original de tokens.json)
-  // Se usan botones que incluyen la URL a Dexscreener y un botón "Refresh" que enviará el mint en el callback.
+    if (processedMints[mintData.mintAddress]) return;
+    processedMints[mintData.mintAddress] = true;
+    saveProcessedMints();
+  
+    // Llamar a la pre-creación de ATA en modo fire-and-forget si está activada
+    if (ataAutoCreationEnabled) {
+      preCreateATAsForToken(mintData.mintAddress).catch(err =>
+        console.error("❌ Error pre-creating ATAs:", err.message)
+      );
+    }
+  
+    const alertMessages = {};
+    for (const userId in users) {
+      const user = users[userId];
+      if (user && user.subscribed && user.privateKey) {
+        try {
+          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
+            parse_mode: "Markdown"
+          });
+          alertMessages[userId] = msg.message_id;
+          setTimeout(() => {
+            bot.deleteMessage(userId, msg.message_id).catch(() => {});
+          }, 80000);
+        } catch (_) {}
+      }
+    }
+  
+    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+    if (!pairAddress) return;
+    const dexData = await getDexScreenerData(pairAddress);
+    if (!dexData) {
+      for (const userId in alertMessages) {
+        try {
+          await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
+            chat_id: userId,
+            message_id: alertMessages[userId],
+            parse_mode: "Markdown"
+          });
+        } catch (_) {}
+      }
+      return;
+    }
+    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+    if (!rugCheckData) return;
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
+      : "N/A";
+    const liquidityChange = dexData.liquidityChange24h || 0;
+    const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
+    const migrationTimestamp = mintData.date || Date.now();
+    const age = calculateAge(migrationTimestamp);
+    const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
+    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
+    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
+    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
+    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
+    
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+  
+    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
+    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
+    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
+    message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
+    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
+    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
+    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
+    message += `📆 **Created:** ${createdDate}\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+    
+    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
+  }
+  
   async function notifySubscribers(message, imageUrl, mint) {
     if (!mint) {
       console.error("⚠️ Mint inválido, no se enviará notificación.");
       return;
     }
-  
-    // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
@@ -1562,34 +1553,68 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
       ]
     ];
-  
-    // Enviar el mensaje a cada usuario suscrito
-for (const userId in users) {
-  const user = users[userId];
-  if (!user || !user.subscribed || !user.privateKey) continue;
-
-  try {
-    let sentMsg;
-
-    if (imageUrl) {
-      sentMsg = await bot.sendPhoto(userId, imageUrl, {
-        caption: message,
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: actionButtons }
-      });
-    } else {
-      sentMsg = await bot.sendMessage(userId, message, {
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: actionButtons }
-      });
+    for (const userId in users) {
+      const user = users[userId];
+      if (!user || !user.subscribed || !user.privateKey) continue;
+      try {
+        let sentMsg;
+        if (imageUrl) {
+          sentMsg = await bot.sendPhoto(userId, imageUrl, {
+            caption: message,
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        } else {
+          sentMsg = await bot.sendMessage(userId, message, {
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        }
+        console.log(`✅ Mensaje enviado a ${userId}`);
+      } catch (error) {
+        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+      }
     }
-
-    console.log(`✅ Mensaje enviado a ${userId}`);
-
-  } catch (error) {
-    console.error(`❌ Error enviando mensaje a ${userId}:`, error);
   }
-    }
+
+// ====================================================
+// Función para pre-crear el ATA para un token nuevo (versión concurrente)
+// ====================================================
+async function preCreateATAsForToken(mintAddress) {
+    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
+    
+    // Filtramos los usuarios que están suscritos y tienen clave privada
+    const usersToProcess = Object.entries(users).filter(([chatId, user]) => 
+      user.subscribed && user.privateKey
+    );
+  
+    // Ejecutamos en paralelo usando Promise.all
+    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
+      try {
+        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), userKeypair.publicKey);
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (ataInfo === null) {
+          console.log(`No se encontró ATA para el usuario ${chatId} para el token ${mintAddress}. Creándola...`);
+          const transaction = new Transaction().add(
+            createAssociatedTokenAccountInstruction(
+              userKeypair.publicKey,     // Payer
+              ata,                       // ATA a crear
+              userKeypair.publicKey,     // Owner
+              new PublicKey(mintAddress) // Mint del token
+            )
+          );
+          const txSignature = await sendAndConfirmTransaction(connection, transaction, [userKeypair]);
+          console.log(`ATA creada para el usuario ${chatId}. TX: ${txSignature}`);
+        } else {
+          console.log(`El usuario ${chatId} ya tiene ATA para el token ${mintAddress}: ${ata.toBase58()}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al crear ATA para el usuario ${chatId}:`, error.message);
+      }
+    }));
   }
 
   bot.on("callback_query", async (query) => {
@@ -2430,33 +2455,8 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
 
   console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
 }
-
-// ====================
-// FUNCIONES DE AUTO-REFRESH
-// ====================
-
-function startAutoRefresh(tokenMint, chatId, messageId) {
-    const key = `${chatId}_${tokenMint}`;
-    if (refreshIntervals[key]) return; // Si ya existe, no reiniciamos
-    refreshIntervals[key] = setInterval(() => {
-      refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-    }, 1000);
-    console.log(`Started auto-refresh for token ${tokenMint} in chat ${chatId}`);
-  }
   
-  function stopAutoRefresh(tokenMint, chatId) {
-    const key = `${chatId}_${tokenMint}`;
-    if (refreshIntervals[key]) {
-      clearInterval(refreshIntervals[key]);
-      delete refreshIntervals[key];
-      console.log(`Stopped auto-refresh for token ${tokenMint} in chat ${chatId}`);
-    }
-  }
-  
-  // ====================
-  // FUNCIÓN REFRESH
-  // ====================
-  
+  // Función actualizada para refrescar la confirmación de compra sin Moralis
   async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
   
@@ -2468,7 +2468,6 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
       if (!original || !original.solBeforeBuy) {
         console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
         await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
-        stopAutoRefresh(tokenMint, chatId); // Detenemos el auto-refresh
         return;
       }
   
@@ -2476,7 +2475,6 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
       if (!pairAddress || pairAddress === "N/A") {
         console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
         await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
-        stopAutoRefresh(tokenMint, chatId); // Detenemos el auto-refresh
         return;
       }
   
@@ -2571,47 +2569,9 @@ function startAutoRefresh(tokenMint, chatId, messageId) {
         return;
       }
       console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
-      // Si ocurre un error, también detenemos el auto-refresh para evitar bucles
-      stopAutoRefresh(tokenMint, chatId);
       await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
     }
   }
-  
-// ====================
-// CALLBACK QUERY HANDLER
-// ====================
-bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
-    const data = query.data;
-  
-    // Si el callback es para "Refresh", inicia el auto-refresh
-    if (data.startsWith("refresh_buy_")) {
-      // El callback_data tiene el formato "refresh_buy_<tokenMint>"
-      const tokenMint = data.split("_").slice(2).join("_");
-      startAutoRefresh(tokenMint, chatId, messageId);
-      bot.answerCallbackQuery(query.id, { text: "Auto-refresh started." })
-        .catch(err => {
-          if (err.message && err.message.includes("query is too old")) { }
-          else console.error(err);
-        });
-      return;
-    }
-  
-    // Si el callback es para "Sell MAX", detiene el auto-refresh y procede con la venta
-    if (data.startsWith("sell_")) {
-      // El callback_data tiene el formato "sell_<tokenMint>_100"
-      const tokenMint = data.split("_")[1];
-      stopAutoRefresh(tokenMint, chatId);
-      bot.answerCallbackQuery(query.id, { text: "Auto-refresh stopped. Proceeding with sale." })
-        .catch(err => {
-          if (err.message && err.message.includes("query is too old")) { }
-          else console.error(err);
-        });
-
-      return;
-    }
-  });
 
 async function getSolPriceUSD() {
   try {
