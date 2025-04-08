@@ -1682,10 +1682,7 @@ async function preCreateATAsForToken(mintAddress) {
   
         // Construir el mensaje actualizado combinando datos guardados y en vivo
         let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
-        updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n\n`;
-        updatedMessage += `🕒 **Saved at Notification:**\n`;
-        updatedMessage += `⏳ **Notified:** ${formatTimestampToUTCandEST(originalTokenData.creationTimestamp)}\n`;
-        updatedMessage += `📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
+        updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
         updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
         updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
   
@@ -1718,7 +1715,7 @@ async function preCreateATAsForToken(mintAddress) {
         updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
   
         updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
-        updatedMessage += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
+        updatedMessage += `📆 **Created:** ${createdDate}\n\n`;
         updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
         if (originalTokenData.signature) {
           updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
