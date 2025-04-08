@@ -1452,18 +1452,20 @@ async function analyzeTransaction(signature, forceCheck = false) {
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Fire-and-forget: si está activada la auto-creación de ATA se lanza sin esperar
+    // Llamar a la pre-creación de ATA en modo fire-and-forget si está activada
     if (ataAutoCreationEnabled) {
-      preCreateATAsForToken(mintData.mintAddress).catch(() => {});
-    }
+        preCreateATAsForToken(mintData.mintAddress)
+          .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
+      }
   
-    // Enviar notificación de alerta a usuarios suscritos
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
       if (user && user.subscribed && user.privateKey) {
         try {
-          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", { parse_mode: "Markdown" });
+          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
+            parse_mode: "Markdown"
+          });
           alertMessages[userId] = msg.message_id;
           setTimeout(() => {
             bot.deleteMessage(userId, msg.message_id).catch(() => {});
@@ -1472,60 +1474,57 @@ async function analyzeTransaction(signature, forceCheck = false) {
       }
     }
   
-    // Paso 1: Obtener pairAddress usando la info guardada del token
-    const pairAddress = getPairAddressFromSolanaTracker(mintData.mintAddress);
+    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
     if (!pairAddress) return;
-  
-    // Paso 2: Obtener datos "live" actualizados de riesgo y de mercado
-    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-    if (!rugCheckData) return;
-  
-    let updatedDexData;
-    try {
-      updatedDexData = await getDexScreenerData(pairAddress);
-    } catch (_) {
+    const dexData = await getDexScreenerData(pairAddress);
+    if (!dexData) {
+      for (const userId in alertMessages) {
+        try {
+          await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
+            chat_id: userId,
+            message_id: alertMessages[userId],
+            parse_mode: "Markdown"
+          });
+        } catch (_) {}
+      }
       return;
     }
-    if (!updatedDexData) return;
-  
-    // Cálculos para el refresco
-    const priceChange24h =
-      updatedDexData.priceChange24h !== "N/A" && !isNaN(Number(updatedDexData.priceChange24h))
-        ? `${Number(updatedDexData.priceChange24h) > 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.priceChange24h).toFixed(2)}%`
-        : "N/A";
-    const liquidityChange = updatedDexData.liquidityChange24h || 0;
+    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+    if (!rugCheckData) return;
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
+      : "N/A";
+    const liquidityChange = dexData.liquidityChange24h || 0;
     const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
     const migrationTimestamp = mintData.date || Date.now();
-    const age = calculateAge(migrationTimestamp) || "N/A";
+    const age = calculateAge(migrationTimestamp);
     const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-    const buys24h = typeof updatedDexData.buys24h === "number" ? updatedDexData.buys24h : 0;
-    const sells24h = typeof updatedDexData.sells24h === "number" ? updatedDexData.sells24h : 0;
-    const buyers24h = typeof updatedDexData.buyers24h === "number" ? updatedDexData.buyers24h : 0;
-    const sellers24h = typeof updatedDexData.sellers24h === "number" ? updatedDexData.sellers24h : 0;
+    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
+    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
+    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
+    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
+    
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
   
-    // Se guarda la información actualizada (puede servir para futuras consultas)
-    saveTokenData(updatedDexData, mintData, rugCheckData, age, priceChange24h);
-  
-    // Construir el mensaje combinando datos estáticos (guardados) y "live" (actualizados)
-    let message = `💎 **Symbol:** ${escapeMarkdown(updatedDexData.symbol)}\n`;
-    message += `💎 **Name:** ${escapeMarkdown(updatedDexData.name)}\n`;
+    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
     message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
-    message += `💲 **USD:** ${!isNaN(Number(updatedDexData.priceUsd)) ? escapeMarkdown(Number(updatedDexData.priceUsd).toFixed(6)) : "N/A"}\n`;
-    message += `💰 **SOL:** ${!isNaN(Number(updatedDexData.priceSol)) ? escapeMarkdown(Number(updatedDexData.priceSol).toFixed(9)) : "N/A"}\n`;
-    message += `💧 **Liquidity:** $${!isNaN(Number(updatedDexData.liquidity)) ? escapeMarkdown(Number(updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : "N/A"}\n\n`;
-    message += `🟩 Buys 24h: ${escapeMarkdown(String(buys24h))} 🟥 Sells 24h: ${escapeMarkdown(String(sells24h))}\n`;
-    message += `💵 Buy Vol 24h: $${Number(updatedDexData.buyVolume24h ?? 0).toLocaleString()}\n`;
-    message += `💸 Sell Vol 24h: $${Number(updatedDexData.sellVolume24h ?? 0).toLocaleString()}\n`;
-    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(String(buyers24h))} 👤 Sellers: ${escapeMarkdown(String(sellers24h))}\n\n`;
+    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
+    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
     message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-    message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n`;
-    message += `🔐 **Freeze Authority:** ${escapeMarkdown(String(rugCheckData.freezeAuthority))}\n`;
-    message += `🪙 **Mint Authority:** ${escapeMarkdown(String(rugCheckData.mintAuthority))}\n\n`;
-    message += `⛓️ **Chain:** ${escapeMarkdown(updatedDexData.chain)} ⚡ **Dex:** ${escapeMarkdown(updatedDexData.dex)}\n`;
-    message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n`;
-  
-    await notifySubscribers(message, updatedDexData.tokenLogo, mintData.mintAddress);
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
+    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
+    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
+    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
+    message += `📆 **Created:** ${createdDate}\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+    
+    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
   }
   
   async function notifySubscribers(message, imageUrl, mint) {
