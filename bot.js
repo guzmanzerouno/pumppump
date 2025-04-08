@@ -28,6 +28,25 @@ global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+// ==========================================
+// VARIABLE GLOBAL PARA AUTO CREACIÓN DE ATA
+// ==========================================
+let ataAutoCreationEnabled = true;
+
+// Comando para activar/desactivar el auto-creado de ATA
+bot.onText(/\/ata (on|off)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const command = match[1].toLowerCase();
+
+  if (command === 'on') {
+    ataAutoCreationEnabled = true;
+    bot.sendMessage(chatId, "✅ Auto creation of ATAs is now ENABLED.");
+  } else if (command === 'off') {
+    ataAutoCreationEnabled = false;
+    bot.sendMessage(chatId, "❌ Auto creation of ATAs is now DISABLED.");
+  }
+});
+
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
     if (fs.existsSync(USERS_FILE)) {
@@ -1435,112 +1454,97 @@ const processedSignatures = new Set();
 
 // Función principal que ejecuta todo el proceso de análisis
 async function analyzeTransaction(signature, forceCheck = false) {
-  if (!forceCheck && processedSignatures.has(signature)) return;
-  if (!forceCheck) processedSignatures.add(signature);
-
-  const mintData = await getMintAddressFromTransaction(signature);
-  if (!mintData || !mintData.mintAddress) return;
-
-  if (processedMints[mintData.mintAddress]) return;
-  processedMints[mintData.mintAddress] = true;
-  saveProcessedMints();
-
-  // 🚨 Alerta previa
-  const alertMessages = {};
-  for (const userId in users) {
-    const user = users[userId];
-    if (user && user.subscribed && user.privateKey) {
-      try {
-        const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
-          parse_mode: "Markdown"
-        });
-        alertMessages[userId] = msg.message_id;
-
-        setTimeout(() => {
-          bot.deleteMessage(userId, msg.message_id).catch(() => {});
-        }, 80000);
-      } catch (_) {}
-    }
-  }
-
-  // 1️⃣ Obtener Pair
-  const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
-  if (!pairAddress) return;
-
-  // 2️⃣ Datos de Moralis
-  const dexData = await getDexScreenerData(pairAddress);
-  if (!dexData) {
-    for (const userId in alertMessages) {
-      try {
-        await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
-          chat_id: userId,
-          message_id: alertMessages[userId],
-          parse_mode: "Markdown"
-        });
-      } catch (_) {}
-    }
-    return;
-  }
-
-  // 3️⃣ Datos de riesgo
-  const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-  if (!rugCheckData) return;
-
-  // 🧠 Cálculos
-  const priceChange24h = dexData.priceChange24h !== "N/A"
-    ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-    : "N/A";
-
-  const liquidityChange = dexData.liquidityChange24h || 0;
-  const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
-
-  const migrationTimestamp = mintData.date || Date.now();
-  const age = calculateAge(migrationTimestamp);
-  const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-
-  // 🛠️ Normalizar valores vacíos a 0
-  const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
-  const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
-  const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
-  const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
+    if (!forceCheck && processedSignatures.has(signature)) return;
+    if (!forceCheck) processedSignatures.add(signature);
   
-  // 💾 Guardar
-  saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
-
-  // 📨 Mensaje final
-  let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-  message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
-  message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-  message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-  message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-
-  message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
-  message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-  message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-  message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
-
-  message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-  message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-  message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-  message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-
-  message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-  message += `📆 **Created:** ${createdDate}\n\n`;
-  message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-
-  await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
-}
+    const mintData = await getMintAddressFromTransaction(signature);
+    if (!mintData || !mintData.mintAddress) return;
   
-  // Función para notificar a los usuarios (manteniendo la información original de tokens.json)
-  // Se usan botones que incluyen la URL a Dexscreener y un botón "Refresh" que enviará el mint en el callback.
+    if (processedMints[mintData.mintAddress]) return;
+    processedMints[mintData.mintAddress] = true;
+    saveProcessedMints();
+  
+    // Llamar a la pre-creación de ATA en modo fire-and-forget si está activada
+    if (ataAutoCreationEnabled) {
+      preCreateATAsForToken(mintData.mintAddress).catch(err =>
+        console.error("❌ Error pre-creating ATAs:", err.message)
+      );
+    }
+  
+    const alertMessages = {};
+    for (const userId in users) {
+      const user = users[userId];
+      if (user && user.subscribed && user.privateKey) {
+        try {
+          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
+            parse_mode: "Markdown"
+          });
+          alertMessages[userId] = msg.message_id;
+          setTimeout(() => {
+            bot.deleteMessage(userId, msg.message_id).catch(() => {});
+          }, 80000);
+        } catch (_) {}
+      }
+    }
+  
+    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+    if (!pairAddress) return;
+    const dexData = await getDexScreenerData(pairAddress);
+    if (!dexData) {
+      for (const userId in alertMessages) {
+        try {
+          await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
+            chat_id: userId,
+            message_id: alertMessages[userId],
+            parse_mode: "Markdown"
+          });
+        } catch (_) {}
+      }
+      return;
+    }
+    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+    if (!rugCheckData) return;
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
+      : "N/A";
+    const liquidityChange = dexData.liquidityChange24h || 0;
+    const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
+    const migrationTimestamp = mintData.date || Date.now();
+    const age = calculateAge(migrationTimestamp);
+    const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
+    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
+    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
+    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
+    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
+    
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+  
+    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
+    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
+    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
+    message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
+    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
+    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
+    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
+    message += `📆 **Created:** ${createdDate}\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+    
+    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
+  }
+  
   async function notifySubscribers(message, imageUrl, mint) {
     if (!mint) {
       console.error("⚠️ Mint inválido, no se enviará notificación.");
       return;
     }
-  
-    // Creamos los botones: para compra, venta, y para refrescar solo los datos de DexScreener
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
@@ -1561,33 +1565,65 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
       ]
     ];
-  
-    // Enviar el mensaje a cada usuario suscrito
-for (const userId in users) {
-  const user = users[userId];
-  if (!user || !user.subscribed || !user.privateKey) continue;
-
-  try {
-    let sentMsg;
-
-    if (imageUrl) {
-      sentMsg = await bot.sendPhoto(userId, imageUrl, {
-        caption: message,
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: actionButtons }
-      });
-    } else {
-      sentMsg = await bot.sendMessage(userId, message, {
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: actionButtons }
-      });
+    for (const userId in users) {
+      const user = users[userId];
+      if (!user || !user.subscribed || !user.privateKey) continue;
+      try {
+        let sentMsg;
+        if (imageUrl) {
+          sentMsg = await bot.sendPhoto(userId, imageUrl, {
+            caption: message,
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        } else {
+          sentMsg = await bot.sendMessage(userId, message, {
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: actionButtons }
+          });
+        }
+        console.log(`✅ Mensaje enviado a ${userId}`);
+      } catch (error) {
+        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+      }
     }
-
-    console.log(`✅ Mensaje enviado a ${userId}`);
-
-  } catch (error) {
-    console.error(`❌ Error enviando mensaje a ${userId}:`, error);
   }
+
+  // ====================================================
+// Función para pre-crear el ATA para un token nuevo
+// ====================================================
+async function preCreateATAsForToken(mintAddress) {
+    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
+    // Recorremos a todos los usuarios registrados
+    for (const chatId of Object.keys(users)) {
+      const user = users[chatId];
+      // Solo procesar usuarios suscritos que tienen clave privada
+      if (!user.subscribed || !user.privateKey) continue;
+  
+      try {
+        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), userKeypair.publicKey);
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (ataInfo === null) {
+          console.log(`No se encontró ATA para el usuario ${chatId} para el token ${mintAddress}. Creándola...`);
+          const transaction = new Transaction().add(
+            createAssociatedTokenAccountInstruction(
+              userKeypair.publicKey,  // Payer
+              ata,                    // ATA a crear
+              userKeypair.publicKey,  // Owner
+              new PublicKey(mintAddress) // Mint del token
+            )
+          );
+          const txSignature = await sendAndConfirmTransaction(connection, transaction, [userKeypair]);
+          console.log(`ATA creada para el usuario ${chatId}. TX: ${txSignature}`);
+        } else {
+          console.log(`El usuario ${chatId} ya tiene ATA para el token ${mintAddress}: ${ata.toBase58()}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al crear ATA para el usuario ${chatId}:`, error.message);
+      }
     }
   }
 
@@ -2429,26 +2465,6 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
 
   console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
 }
-
-// Función para iniciar el auto-refresh. Se ejecuta cada 5 segundos (ajusta el intervalo si lo deseas).
-function startAutoRefresh(tokenMint, chatId, messageId) {
-    const key = `${chatId}_${tokenMint}`;
-    if (refreshIntervals[key]) return; // Si ya existe, no reiniciamos
-    refreshIntervals[key] = setInterval(() => {
-      refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-    }, 1250);
-    console.log(`Started auto-refresh for token ${tokenMint} in chat ${chatId}`);
-  }
-  
-  // Función para detener el auto-refresh cuando el usuario toca "SELL MAX"
-  function stopAutoRefresh(tokenMint, chatId) {
-    const key = `${chatId}_${tokenMint}`;
-    if (refreshIntervals[key]) {
-      clearInterval(refreshIntervals[key]);
-      delete refreshIntervals[key];
-      console.log(`Stopped auto-refresh for token ${tokenMint} in chat ${chatId}`);
-    }
-  }
   
   // Función actualizada para refrescar la confirmación de compra sin Moralis
   async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
