@@ -1589,17 +1589,19 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
-  // ====================================================
-// Función para pre-crear el ATA para un token nuevo
+// ====================================================
+// Función para pre-crear el ATA para un token nuevo (versión concurrente)
 // ====================================================
 async function preCreateATAsForToken(mintAddress) {
     console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
-    // Recorremos a todos los usuarios registrados
-    for (const chatId of Object.keys(users)) {
-      const user = users[chatId];
-      // Solo procesar usuarios suscritos que tienen clave privada
-      if (!user.subscribed || !user.privateKey) continue;
+    
+    // Filtramos los usuarios que están suscritos y tienen clave privada
+    const usersToProcess = Object.entries(users).filter(([chatId, user]) => 
+      user.subscribed && user.privateKey
+    );
   
+    // Ejecutamos en paralelo usando Promise.all
+    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
       try {
         const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
         const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
@@ -1610,9 +1612,9 @@ async function preCreateATAsForToken(mintAddress) {
           console.log(`No se encontró ATA para el usuario ${chatId} para el token ${mintAddress}. Creándola...`);
           const transaction = new Transaction().add(
             createAssociatedTokenAccountInstruction(
-              userKeypair.publicKey,  // Payer
-              ata,                    // ATA a crear
-              userKeypair.publicKey,  // Owner
+              userKeypair.publicKey,     // Payer
+              ata,                       // ATA a crear
+              userKeypair.publicKey,     // Owner
               new PublicKey(mintAddress) // Mint del token
             )
           );
@@ -1624,7 +1626,7 @@ async function preCreateATAsForToken(mintAddress) {
       } catch (error) {
         console.error(`❌ Error al crear ATA para el usuario ${chatId}:`, error.message);
       }
-    }
+    }));
   }
 
   bot.on("callback_query", async (query) => {
