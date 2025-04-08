@@ -1689,11 +1689,11 @@ async function preCreateATAsForToken(mintAddress) {
     
         updatedMessage += `📊 **Live Market Update:**\n`;
         updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n`;
-        updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(updatedDexData.currentUsdPrice).toFixed(6))}\n`;
-        updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(updatedDexData.currentNativePrice).toFixed(9))}\n`;
-        updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(updatedDexData.totalLiquidityUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}\n\n`;
+        updatedMessage += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+        updatedMessage += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+        updatedMessage += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
     
-        updatedMessage += `📊 **Buys 24h:** ${updatedDexData.buys24h ?? "N/A"} 🟥 **Sells 24h:** ${updatedDexData.sells24h ?? "N/A"}\n`;
+        updatedMessage += `🟩 **Buys 24h:** ${updatedDexData.buys24h ?? "N/A"} 🟥 **Sells 24h:** ${updatedDexData.sells24h ?? "N/A"}\n`;
         updatedMessage += `💵 Buy Vol 24h: $${Number(updatedDexData.buyVolume24h ?? 0).toLocaleString()}\n`;
         updatedMessage += `💸 Sell Vol 24h: $${Number(updatedDexData.sellVolume24h ?? 0).toLocaleString()}\n`;
         updatedMessage += `🧑‍🤝‍🧑 Buyers: ${updatedDexData.buyers24h ?? "N/A"} 👤 Sellers: ${updatedDexData.sellers24h ?? "N/A"}\n`;
@@ -1705,7 +1705,7 @@ async function preCreateATAsForToken(mintAddress) {
         updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
     
         updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
-        updatedMessage += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
+        updatedMessage += `📆 **Created:** ${createdDate}\n\n`;
         updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
         if (originalTokenData.signature) {
           updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
