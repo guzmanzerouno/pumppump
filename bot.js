@@ -861,93 +861,92 @@ async function getDexScreenerData(pairAddress) {
     return null;
   }
 
-// 🔹 Obtener datos de riesgo desde RugCheck API con reintentos automáticos
-async function fetchRugCheckData(tokenAddress) {
-  // 🔸 PRIMER INTENTO: RugCheck
-  try {
-    console.log("🔍 Intentando obtener datos desde RugCheck...");
-    const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`);
-    const data = response.data;
-
-    if (!data) throw new Error("No se recibió data de RugCheck.");
-
-    const normalizedScore = data.score_normalised || 0;
-    let riskLevel = "🟢 GOOD";
-    if (normalizedScore >= 41) {
-      riskLevel = "🔴 DANGER";
-    } else if (normalizedScore >= 21) {
-      riskLevel = "🟠 WARNING";
-    }
-
-    const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
-    const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
-
-    const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
-      ? `${data.markets[0].lp.lpLockedPct}`
-      : "no data";
-
-    const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
-
-    return {
-      riskLevel,
-      riskDescription,
-      lpLocked,
-      freezeAuthority,
-      mintAuthority
-    };
-
-  } catch (error) {
-    console.warn(`⚠️ RugCheck falló: ${error.message}`);
-  }
-
-  // 🔁 SEGUNDO INTENTO: SolanaTracker
-  try {
-    console.log("🔄 RugCheck falló. Intentando con SolanaTracker...");
-    const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
-      headers: {
-        "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
+  async function fetchRugCheckData(tokenAddress) {
+    // 🔸 PRIMER INTENTO: RugCheck con timeout de 2000 ms
+    try {
+      console.log("🔍 Intentando obtener datos desde RugCheck...");
+      const response = await axios.get(`https://api.rugcheck.xyz/v1/tokens/${tokenAddress}/report`, {
+        timeout: 2000 // 2 segundos de espera máximo
+      });
+      const data = response.data;
+      if (!data) throw new Error("No se recibió data de RugCheck.");
+  
+      const normalizedScore = data.score_normalised || 0;
+      let riskLevel = "🟢 GOOD";
+      if (normalizedScore >= 41) {
+        riskLevel = "🔴 DANGER";
+      } else if (normalizedScore >= 21) {
+        riskLevel = "🟠 WARNING";
       }
-    });
-
-    const data = response.data;
-    if (!data) throw new Error("No se recibió data de SolanaTracker.");
-
-    const pool = data.pools?.[0];
-    const score = data.risk?.score || 0;
-    let riskLevel = "🟢 GOOD";
-    if (score >= 5) {
-      riskLevel = "🔴 DANGER";
-    } else if (score >= 3) {
-      riskLevel = "🟠 WARNING";
+  
+      const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+      const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+  
+      const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
+        ? `${data.markets[0].lp.lpLockedPct}`
+        : "no data";
+  
+      const riskDescription = data.risks?.map(r => r.description).join(", ") || "No risks detected";
+  
+      return {
+        riskLevel,
+        riskDescription,
+        lpLocked,
+        freezeAuthority,
+        mintAuthority
+      };
+  
+    } catch (error) {
+      console.warn(`⚠️ RugCheck falló (2s timeout o error): ${error.message}`);
     }
-
-    const risks = data.risk?.risks || [];
-    const filteredRisks = risks.filter(r => r.name !== "No social media");
-
-    const riskDescription = filteredRisks.length > 0
-      ? filteredRisks.map(r => r.description).join(", ")
-      : "No risks detected";
-
-    const lpLocked = (typeof pool?.lpBurn === "number")
-      ? `${pool.lpBurn}`
-      : "no data";
-
-    const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
-    const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
-
-    return {
-      riskLevel,
-      riskDescription,
-      lpLocked,
-      freezeAuthority,
-      mintAuthority
-    };
-
-  } catch (error) {
-    console.error(`❌ SolanaTracker también falló: ${error.message}`);
-    return null;
+  
+    // 🔁 SEGUNDO INTENTO: SolanaTracker
+    try {
+      console.log("🔄 RugCheck falló. Intentando con SolanaTracker...");
+      const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
+        headers: {
+          "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
+        }
+      });
+  
+      const data = response.data;
+      if (!data) throw new Error("No se recibió data de SolanaTracker.");
+  
+      const pool = data.pools?.[0];
+      const score = data.risk?.score || 0;
+      let riskLevel = "🟢 GOOD";
+      if (score >= 5) {
+        riskLevel = "🔴 DANGER";
+      } else if (score >= 3) {
+        riskLevel = "🟠 WARNING";
+      }
+  
+      const risks = data.risk?.risks || [];
+      const filteredRisks = risks.filter(r => r.name !== "No social media");
+      const riskDescription = filteredRisks.length > 0
+        ? filteredRisks.map(r => r.description).join(", ")
+        : "No risks detected";
+  
+      const lpLocked = (typeof pool?.lpBurn === "number")
+        ? `${pool.lpBurn}`
+        : "no data";
+  
+      const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
+      const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+  
+      return {
+        riskLevel,
+        riskDescription,
+        lpLocked,
+        freezeAuthority,
+        mintAuthority
+      };
+  
+    } catch (error) {
+      console.error(`❌ SolanaTracker también falló: ${error.message}`);
+      return null;
+    }
   }
-}
 
 function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     console.log("🔄 Intentando guardar datos en tokens.json...");
@@ -1453,20 +1452,18 @@ async function analyzeTransaction(signature, forceCheck = false) {
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Llamar a la pre-creación de ATA en modo fire-and-forget si está activada
+    // Fire-and-forget: si está activada la auto-creación de ATA se lanza sin esperar
     if (ataAutoCreationEnabled) {
-        preCreateATAsForToken(mintData.mintAddress)
-          .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
-      }
+      preCreateATAsForToken(mintData.mintAddress).catch(() => {});
+    }
   
+    // Enviar notificación de alerta a usuarios suscritos
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
       if (user && user.subscribed && user.privateKey) {
         try {
-          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", {
-            parse_mode: "Markdown"
-          });
+          const msg = await bot.sendMessage(userId, "🚨 Token incoming. *Prepare to Buy‼️* 🚨", { parse_mode: "Markdown" });
           alertMessages[userId] = msg.message_id;
           setTimeout(() => {
             bot.deleteMessage(userId, msg.message_id).catch(() => {});
@@ -1475,57 +1472,60 @@ async function analyzeTransaction(signature, forceCheck = false) {
       }
     }
   
-    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+    // Paso 1: Obtener pairAddress usando la info guardada del token
+    const pairAddress = originalPairAddress(mintData.mintAddress);
     if (!pairAddress) return;
-    const dexData = await getDexScreenerData(pairAddress);
-    if (!dexData) {
-      for (const userId in alertMessages) {
-        try {
-          await bot.editMessageText("⚠️ Token discarded due to insufficient info for analysis.", {
-            chat_id: userId,
-            message_id: alertMessages[userId],
-            parse_mode: "Markdown"
-          });
-        } catch (_) {}
-      }
-      return;
-    }
+  
+    // Paso 2: Obtener datos "live" actualizados de riesgo y de mercado
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
-    const priceChange24h = dexData.priceChange24h !== "N/A"
-      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-      : "N/A";
-    const liquidityChange = dexData.liquidityChange24h || 0;
+  
+    let updatedDexData;
+    try {
+      updatedDexData = await getDexScreenerData(pairAddress);
+    } catch (_) {
+      return;
+    }
+    if (!updatedDexData) return;
+  
+    // Cálculos para el refresco
+    const priceChange24h =
+      updatedDexData.priceChange24h !== "N/A" && !isNaN(Number(updatedDexData.priceChange24h))
+        ? `${Number(updatedDexData.priceChange24h) > 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.priceChange24h).toFixed(2)}%`
+        : "N/A";
+    const liquidityChange = updatedDexData.liquidityChange24h || 0;
     const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
     const migrationTimestamp = mintData.date || Date.now();
-    const age = calculateAge(migrationTimestamp);
+    const age = calculateAge(migrationTimestamp) || "N/A";
     const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
-    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
-    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
-    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
-    
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+    const buys24h = typeof updatedDexData.buys24h === "number" ? updatedDexData.buys24h : 0;
+    const sells24h = typeof updatedDexData.sells24h === "number" ? updatedDexData.sells24h : 0;
+    const buyers24h = typeof updatedDexData.buyers24h === "number" ? updatedDexData.buyers24h : 0;
+    const sellers24h = typeof updatedDexData.sellers24h === "number" ? updatedDexData.sellers24h : 0;
   
-    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+    // Se guarda la información actualizada (puede servir para futuras consultas)
+    saveTokenData(updatedDexData, mintData, rugCheckData, age, priceChange24h);
+  
+    // Construir el mensaje combinando datos estáticos (guardados) y "live" (actualizados)
+    let message = `💎 **Symbol:** ${escapeMarkdown(updatedDexData.symbol)}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(updatedDexData.name)}\n`;
     message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
-    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
-    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
+    message += `💲 **USD:** ${!isNaN(Number(updatedDexData.priceUsd)) ? escapeMarkdown(Number(updatedDexData.priceUsd).toFixed(6)) : "N/A"}\n`;
+    message += `💰 **SOL:** ${!isNaN(Number(updatedDexData.priceSol)) ? escapeMarkdown(Number(updatedDexData.priceSol).toFixed(9)) : "N/A"}\n`;
+    message += `💧 **Liquidity:** $${!isNaN(Number(updatedDexData.liquidity)) ? escapeMarkdown(Number(updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : "N/A"}\n\n`;
+    message += `🟩 Buys 24h: ${escapeMarkdown(String(buys24h))} 🟥 Sells 24h: ${escapeMarkdown(String(sells24h))}\n`;
+    message += `💵 Buy Vol 24h: $${Number(updatedDexData.buyVolume24h ?? 0).toLocaleString()}\n`;
+    message += `💸 Sell Vol 24h: $${Number(updatedDexData.sellVolume24h ?? 0).toLocaleString()}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(String(buyers24h))} 👤 Sellers: ${escapeMarkdown(String(sellers24h))}\n\n`;
     message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-    message += `📆 **Created:** ${createdDate}\n\n`;
-    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-    
-    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(String(rugCheckData.lpLocked))}%\n`;
+    message += `🔐 **Freeze Authority:** ${escapeMarkdown(String(rugCheckData.freezeAuthority))}\n`;
+    message += `🪙 **Mint Authority:** ${escapeMarkdown(String(rugCheckData.mintAuthority))}\n\n`;
+    message += `⛓️ **Chain:** ${escapeMarkdown(updatedDexData.chain)} ⚡ **Dex:** ${escapeMarkdown(updatedDexData.dex)}\n`;
+    message += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n`;
+  
+    await notifySubscribers(message, updatedDexData.tokenLogo, mintData.mintAddress);
   }
   
   async function notifySubscribers(message, imageUrl, mint) {
