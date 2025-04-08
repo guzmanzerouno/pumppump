@@ -1473,7 +1473,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   
     // Paso 1: Obtener pairAddress usando la info guardada del token
-    const pairAddress = originalPairAddress(mintData.mintAddress);
+    const pairAddress = getPairAddressFromSolanaTracker(mintData.mintAddress);
     if (!pairAddress) return;
   
     // Paso 2: Obtener datos "live" actualizados de riesgo y de mercado
