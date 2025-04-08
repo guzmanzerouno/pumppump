@@ -30,8 +30,9 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
 // ==========================================
 // VARIABLE GLOBAL PARA AUTO CREACIÓN DE ATA
+// (Por defecto DESACTIVADA)
 // ==========================================
-let ataAutoCreationEnabled = true;
+let ataAutoCreationEnabled = false;
 
 // Comando para activar/desactivar el auto-creado de ATA
 bot.onText(/\/ata (on|off)/, async (msg, match) => {
@@ -39,10 +40,10 @@ bot.onText(/\/ata (on|off)/, async (msg, match) => {
   const command = match[1].toLowerCase();
 
   if (command === 'on') {
-    ataAutoCreationEnabled = false;
+    ataAutoCreationEnabled = true;
     bot.sendMessage(chatId, "✅ Auto creation of ATAs is now ENABLED.");
   } else if (command === 'off') {
-    ataAutoCreationEnabled = true;
+    ataAutoCreationEnabled = false;
     bot.sendMessage(chatId, "❌ Auto creation of ATAs is now DISABLED.");
   }
 });
