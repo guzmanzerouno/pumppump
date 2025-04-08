@@ -21,8 +21,7 @@ const JUPITER_API_URL = "https://quote-api.jup.ag/v6/swap";
 const LOG_FILE = "transactions.log";
 const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
-const refreshingTokens = {};
-const refreshIntervals = {};
+let refreshRiskCount = {};
 global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
 
 let ws;
@@ -1652,7 +1651,31 @@ async function preCreateATAsForToken(mintAddress) {
           return;
         }
   
-        // Obtenemos datos “live” a través de getDexScreenerData (esta función retorna priceUsd, priceSol, liquidity, etc.)
+        // Actualización de datos de riesgo solo cada 10 refresh para este token:
+        if (!refreshRiskCount[mint]) {
+          refreshRiskCount[mint] = 1;
+        } else {
+          refreshRiskCount[mint]++;
+        }
+        let updatedRiskLevel, updatedWarning;
+        if (refreshRiskCount[mint] % 10 === 1) {
+          // Solo en el primer refresh (y cada 10 refresh) se actualiza la data de riesgo
+          const rugCheckData = await fetchRugCheckData(mint);
+          if (rugCheckData) {
+            updatedRiskLevel = rugCheckData.riskLevel;
+            updatedWarning = rugCheckData.riskDescription;
+            // Opcional: se podría actualizar la información en originalTokenData para cachear la nueva data
+          } else {
+            updatedRiskLevel = originalTokenData.riskLevel;
+            updatedWarning = originalTokenData.warning;
+          }
+        } else {
+          // En los refrescos intermedios se usa la data ya almacenada
+          updatedRiskLevel = originalTokenData.riskLevel;
+          updatedWarning = originalTokenData.warning;
+        }
+  
+        // Obtener datos "live" de mercado (actualización siempre)
         let updatedDexData;
         try {
           updatedDexData = await getDexScreenerData(pairAddress);
@@ -1665,61 +1688,58 @@ async function preCreateATAsForToken(mintAddress) {
           return;
         }
   
-        // Obtener datos de riesgo actualizados
-        const rugCheckData = await fetchRugCheckData(mint);
-        const updatedRiskLevel = rugCheckData?.riskLevel || originalTokenData.riskLevel;
-        const updatedWarning = rugCheckData?.riskDescription || originalTokenData.warning;
-  
-        // Usamos migrationDate para calcular la edad y la fecha de creación
+        // Calcular y formatear datos
         const age = calculateAge(originalTokenData.migrationDate) || "N/A";
         const createdDate = formatTimestampToUTCandEST(originalTokenData.migrationDate);
-  
-        // Para el cambio 24h, se formatea si es numérico
         const priceChange24h = updatedDexData.priceChange24h !== "N/A" && !isNaN(Number(updatedDexData.priceChange24h))
           ? `${Number(updatedDexData.priceChange24h) > 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.priceChange24h).toFixed(2)}%`
+          : "N/A";
+        const liveUsd = !isNaN(Number(updatedDexData.priceUsd))
+          ? Number(updatedDexData.priceUsd).toFixed(6)
+          : "N/A";
+        const liveSol = !isNaN(Number(updatedDexData.priceSol))
+          ? Number(updatedDexData.priceSol).toFixed(9)
+          : "N/A";
+        const liveLiquidity = !isNaN(Number(updatedDexData.liquidity))
+          ? Number(updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           : "N/A";
   
         // Construir el mensaje actualizado combinando datos guardados y en vivo
         let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
         updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
+        updatedMessage += `🕒 **Saved at Notification:**\n`;
+        updatedMessage += `⏳ **Notified:** ${formatTimestampToUTCandEST(originalTokenData.creationTimestamp)}\n`;
+        updatedMessage += `📊 **24H:** ${escapeMarkdown(originalTokenData["24H"] || "N/A")}\n`;
         updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
         updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
-  
+        
         updatedMessage += `📊 **Live Market Update:**\n`;
         updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n`;
-  
-        // Convertir de manera segura los valores en vivo (si son numéricos)
-        const liveUsd = !isNaN(Number(updatedDexData.priceUsd)) ? Number(updatedDexData.priceUsd).toFixed(6) : "N/A";
-        const liveSol = !isNaN(Number(updatedDexData.priceSol)) ? Number(updatedDexData.priceSol).toFixed(9) : "N/A";
-        const liveLiquidity = !isNaN(Number(updatedDexData.liquidity)) ? Number(updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "N/A";
-  
         updatedMessage += `💲 **USD:** ${escapeMarkdown(liveUsd)}\n`;
         updatedMessage += `💰 **SOL:** ${escapeMarkdown(liveSol)}\n`;
         updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(liveLiquidity)}\n\n`;
-  
+        
         updatedMessage += `🟩 **Buys 24h:** ${updatedDexData.buys24h ?? "N/A"} 🟥 **Sells 24h:** ${updatedDexData.sells24h ?? "N/A"}\n`;
         updatedMessage += `💵 Buy Vol 24h: $${Number(updatedDexData.buyVolume24h ?? 0).toLocaleString()}\n`;
         updatedMessage += `💸 Sell Vol 24h: $${Number(updatedDexData.sellVolume24h ?? 0).toLocaleString()}\n`;
         updatedMessage += `🧑‍🤝‍🧑 Buyers: ${updatedDexData.buyers24h ?? "N/A"} 👤 Sellers: ${updatedDexData.sellers24h ?? "N/A"}\n`;
-  
-        // Liquidity change (Live) — usamos liquidityChange24h del objeto actualizado
         const liqChange = updatedDexData.liquidityChange24h !== "N/A" && !isNaN(Number(updatedDexData.liquidityChange24h))
           ? `${Number(updatedDexData.liquidityChange24h) >= 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.liquidityChange24h).toFixed(2)}%`
           : "N/A";
         updatedMessage += `📊 **Liquidity Δ 24h:** ${liqChange}\n\n`;
-  
+        
         updatedMessage += `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n`;
         updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n`;
         updatedMessage += `🔐 **Freeze Authority:** ${escapeMarkdown(String(originalTokenData.freezeAuthority || "N/A"))}\n`;
         updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
-  
+        
         updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
-        updatedMessage += `📆 **Created:** ${createdDate}\n\n`;
+        updatedMessage += `📆 **Created:** ${escapeMarkdown(createdDate)}\n\n`;
         updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
         if (originalTokenData.signature) {
           updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
         }
-  
+        
         const reply_markup = {
           inline_keyboard: [
             [
