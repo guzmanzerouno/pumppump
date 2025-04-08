@@ -39,10 +39,10 @@ bot.onText(/\/ata (on|off)/, async (msg, match) => {
   const command = match[1].toLowerCase();
 
   if (command === 'on') {
-    ataAutoCreationEnabled = true;
+    ataAutoCreationEnabled = false;
     bot.sendMessage(chatId, "✅ Auto creation of ATAs is now ENABLED.");
   } else if (command === 'off') {
-    ataAutoCreationEnabled = false;
+    ataAutoCreationEnabled = true;
     bot.sendMessage(chatId, "❌ Auto creation of ATAs is now DISABLED.");
   }
 });
