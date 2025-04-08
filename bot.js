@@ -1689,7 +1689,7 @@ async function preCreateATAsForToken(mintAddress) {
     
         updatedMessage += `📊 **Live Market Update:**\n`;
         updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n`;
-        updatedMessage += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+        updatedMessage += `💲 **USD:** ${escapeMarkdown(Number(updatedDexData.currentUsdPrice).toFixed(6))}\n`;
         updatedMessage += `💰 **SOL:** ${escapeMarkdown(Number(updatedDexData.currentNativePrice).toFixed(9))}\n`;
         updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(Number(updatedDexData.totalLiquidityUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}\n\n`;
     
