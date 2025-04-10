@@ -1803,21 +1803,8 @@ function formatTimestampToUTCandEST(timestamp) {
   return `${utcTime} UTC | ${estTime} EST`;
 }
 
-// Función principal que intenta primero con el nuevo endpoint de wallet trades
+// Función getSwapDetailsHybrid usando la API de wallet trades de SolanaTracker
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
-    try {
-      // Intentamos obtener la información usando el nuevo método
-      const details = await getSwapDetailsFromWalletTrades(signature, expectedMint, chatId);
-      return details;
-    } catch (error) {
-      console.error("❌ New API approach failed, falling back to Helius V0:", error.message);
-      // Fallback: usamos el método anterior basado en Helius V0
-      return await getSwapDetailsFromHeliusV0(signature, expectedMint, chatId);
-    }
-  }
-  
-  // Nueva función que utiliza la API de wallet trades de SolanaTracker
-  async function getSwapDetailsFromWalletTrades(signature, expectedMint, chatId) {
     // Obtenemos la wallet del usuario a partir del chatId
     const user = users[chatId];
     if (!user || !user.walletPublicKey) {
@@ -1825,66 +1812,85 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     }
     const walletPublicKey = user.walletPublicKey;
   
-    // Construimos la URL del endpoint con la wallet del usuario
+    // Construir la URL del endpoint usando la wallet del usuario
     const apiUrl = `https://data.solanatracker.io/wallet/${walletPublicKey}/trades`;
+    console.log(`API URL: ${apiUrl}`);
+  
     const headers = {
-      "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
+      "x-api-key": "cecd6680-9645-4d00-a86c-f389f87a3f35"
     };
   
-    // Utilizamos Promise.race para imponer un timeout de 2 segundos
-    const response = await Promise.race([
-      axios.get(apiUrl, { headers }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 2000)
-      )
-    ]);
+    // Esperamos 2 segundos antes de enviar la solicitud
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   
+    // Intentar obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos cada uno
+    let attempt = 0;
+    const maxAttempts = 5;
+    let response;
+    let lastError;
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        response = await Promise.race([
+          axios.get(apiUrl, { headers }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 2000)
+          )
+        ]);
+        // Si la solicitud tiene éxito, salimos del bucle
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`Attempt ${attempt} failed: ${err.message}`);
+      }
+    }
+    if (!response) {
+      throw new Error("Failed to fetch wallet trades after 5 attempts: " + lastError.message);
+    }
     if (!response.data || !response.data.trades) {
       throw new Error("Invalid trades data from wallet trades API");
     }
   
+    // Extraer el listado de trades
     const trades = response.data.trades;
-    // Buscamos la transacción cuyo "tx" coincida con la signature dada
+    // Buscar la transacción que coincida con la signature
     const trade = trades.find(t => t.tx === signature);
     if (!trade) {
       throw new Error("Trade not found for this signature");
     }
   
-    // Determinamos si la transacción fue una compra o una venta:
-    // Comparando las direcciones "from" y "to" con la wallet del usuario.
+    // Determinar si la transacción fue una compra o una venta
     let isBuy;
     if (trade.from && trade.from.address === walletPublicKey) {
-      // Si la wallet del usuario aparece en "from", significa que el usuario envió tokens → es una venta.
+      // Si la wallet del usuario aparece en "from", el usuario envió tokens → es una venta
       isBuy = false;
     } else if (trade.to && trade.to.address === walletPublicKey) {
-      // Si aparece en "to", el usuario recibió tokens → es una compra.
+      // Si aparece en "to", el usuario recibió tokens → es una compra
       isBuy = true;
     } else {
-      // Si no se encuentra, por defecto asumimos compra.
+      // Por defecto, asumimos que es compra
       isBuy = true;
     }
   
-    // Ahora, extraemos y asignamos los datos según si es compra (buy) o venta (sell)
-    const fee = 0; // La API de wallet trades no suele proveer fee; lo asignamos en 0.
+    // La API de wallet trades no suele proveer fee; asignamos 0
+    const fee = 0.002;
     let soldAmount, receivedAmount;
     let soldTokenMint, receivedTokenMint;
     let soldTokenName, soldTokenSymbol, receivedTokenName, receivedTokenSymbol;
   
     if (isBuy) {
-      // Para una compra:
-      // - El usuario envía SOL (sale) y recibe el token deseado.
+      // Para una compra: el usuario envía SOL y recibe el token deseado.
       soldAmount = trade.from.amount;      // SOL gastado
       receivedAmount = trade.to.amount;      // Tokens recibidos
-      soldTokenMint = "So11111111111111111111111111111111111111112"; // Mint de SOL (Wrapped SOL)
+      soldTokenMint = "So11111111111111111111111111111111111111112"; // Mint de Wrapped SOL
       soldTokenName = "Wrapped SOL";
       soldTokenSymbol = "SOL";
-      // Usamos expectedMint para identificar el token que se compra.
+      // Usamos expectedMint para identificar el token adquirido.
       receivedTokenMint = expectedMint;
       receivedTokenName = trade.to.token?.name || "Unknown";
       receivedTokenSymbol = trade.to.token?.symbol || "N/A";
     } else {
-      // Para una venta:
-      // - El usuario envía el token y recibe SOL.
+      // Para una venta: el usuario envía el token y recibe SOL.
       soldAmount = trade.from.amount;      // Tokens vendidos
       receivedAmount = trade.to.amount;      // SOL recibido
       soldTokenMint = expectedMint;
@@ -1895,9 +1901,9 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
       receivedTokenSymbol = "SOL";
     }
   
-    // Para el inputAmount podemos usar, por ejemplo, el monto que se envió en "from"
+    // Usamos el monto enviado en "from" como inputAmount
     const inputAmount = trade.from.amount;
-    // Formateamos el timestamp en hora EST
+    // Formatear el timestamp en hora EST
     const estTime = new Date(trade.time).toLocaleString("en-US", {
       timeZone: "America/New_York",
       hour12: false
@@ -1905,15 +1911,15 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
   
     return {
       inputAmount: Number(inputAmount).toFixed(3),
-      soldAmount: soldAmount,
+      soldAmount,
       receivedAmount: receivedAmount.toString(),
       swapFee: fee.toFixed(5),
-      soldTokenMint: soldTokenMint,
-      receivedTokenMint: receivedTokenMint,
-      soldTokenName: soldTokenName,
-      soldTokenSymbol: soldTokenSymbol,
-      receivedTokenName: receivedTokenName,
-      receivedTokenSymbol: receivedTokenSymbol,
+      soldTokenMint,
+      receivedTokenMint,
+      soldTokenName,
+      soldTokenSymbol,
+      receivedTokenName,
+      receivedTokenSymbol,
       dexPlatform: trade.program || "Unknown",
       walletAddress: walletPublicKey,
       timeStamp: estTime
