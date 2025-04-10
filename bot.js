@@ -1876,7 +1876,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     }
     
     // La API de wallet trades usualmente no provee fee, se asigna 0
-    const fee = 0;
+    const fee = 0.002;
     let soldAmount, receivedAmount;
     let soldTokenMint, receivedTokenMint;
     let soldTokenName, soldTokenSymbol, receivedTokenName, receivedTokenSymbol;
@@ -2217,8 +2217,7 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
   `💲 *Token Price:* ${tokenPrice} SOL\n` +
   `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
   `💲 *Sold:* ${soldAmount} Tokens\n` +
-  `💰 *Got:* ${gotSol} SOL (${usdValue})\n` +
-  `🔄 *Sell Fee:* ${sellDetails.swapFee} SOL\n\n` +
+  `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
   `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
   `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
 
@@ -2234,7 +2233,6 @@ await bot.editMessageText(confirmationMessage, {
       "Pair": `${tokenSymbol}/SOL`,
       "Sold": `${soldAmount} Tokens`,
       "Got": `${gotSol} SOL`,
-      "Sell Fee": `${sellDetails.swapFee} SOL`,
       "Token Price": `${tokenPrice} SOL`,
       "Sold Token": tokenSymbol,
       "Sold Token Address": soldTokenMint,
@@ -2344,17 +2342,12 @@ await bot.editMessageText(confirmationMessage, {
     bot.answerCallbackQuery(query.id);
   });
 
-// Este objeto guardará el "before" de cada compra por chat y token
-global.buyReferenceMap = global.buyReferenceMap || {};
-
-async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
-    const solPrice = await getSolPriceUSD();  // Se obtiene el precio actual de SOL en USD
+  async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
+    const solPrice = await getSolPriceUSD(); // Precio actual de SOL en USD
   
-    // Se extraen y formatean los valores recibidos desde swapDetails
     const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
     const receivedTokenMint = swapDetails.receivedTokenMint;
   
-    // Validación de la información recibida: debe existir un token válido
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
       console.error("❌ Error: No se pudo determinar un token recibido válido.");
       await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
@@ -2364,32 +2357,42 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       return;
     }
   
-    // Se obtiene la información estática guardada sobre el token (por ejemplo, nombre y símbolo) mediante getTokenInfo
+    // Obtener la información estática guardada del token (nombre, símbolo, etc.)
     const swapTokenData = getTokenInfo(receivedTokenMint);
     const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
   
-    // Se extraen datos de la transacción: monto de entrada (SOL usado) y la tarifa de swap
-    const inputAmount = parseFloat(swapDetails.inputAmount);
-    const swapFee = parseFloat(swapDetails.swapFee);
-    const spentTotal = (inputAmount + swapFee).toFixed(3);
-    const usdBefore = solPrice ? `USD $${(spentTotal * solPrice).toFixed(2)}` : "N/A";
+    const inputAmount = parseFloat(swapDetails.inputAmount);  
+    // Dado que eliminamos el swapFee, el total gastado es el inputAmount.
+    const spentTotal = inputAmount.toFixed(3);
+    const usdBefore = solPrice ? `USD $${(inputAmount * solPrice).toFixed(2)}` : "N/A";
   
-    // Se calcula el precio por token (monto de SOL por token recibido)
+    // Calcular el precio por token: cuánto SOL se pagó por cada token recibido
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
   
-    // Se construye el mensaje final de confirmación con la información de la transacción
+    // Obtener el timestamp raw para formatearlo en UTC y EST
+    const rawTime = swapDetails.rawTime || Date.now();
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false,
+      timeZone: "UTC"
+    });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false,
+      timeZone: "America/New_York"
+    });
+    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+  
+    // Construir el mensaje de confirmación final
     const confirmationMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
-      `🕒 *Time:* ${swapDetails.timeStamp} (EST)\n\n` +
+      `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
       `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
-      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n` +
-      `🔄 *Swap Fee:* ${swapFee} SOL\n\n` +
+      `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n\n` +
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
-    // Se actualiza el mensaje del usuario con la confirmación final, incluyendo botones para refrescar o vender
+    // Actualizar el mensaje en Telegram con la confirmación final y los botones de acción
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2408,7 +2411,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       }
     });
   
-    // Se guarda la referencia de la compra (por si el usuario desea refrescar la confirmación en el futuro)
+    // Guardar la referencia para refrescar la compra en el futuro
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][receivedTokenMint] = {
       solBeforeBuy: parseFloat(spentTotal),
@@ -2419,18 +2422,17 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       time: Date.now()
     };
   
-    // Se guarda un registro en swaps.json con todos los detalles de la operación
+    // Guardar el registro completo de la operación en swaps.json
     saveSwap(chatId, "Buy", {
       "Swap completed successfully": true,
       "Pair": `SOL/${tokenSymbol}`,
       "Spent": `${spentTotal} SOL`,
       "Got": `${receivedAmount.toFixed(3)} Tokens`,
-      "Swap Fee": `${swapFee} SOL`,
       "Token Price": `${tokenPrice.toFixed(9)} SOL`,
       "Received Token": tokenSymbol,
       "Received Token Address": receivedTokenMint,
       "Wallet": swapDetails.walletAddress,
-      "Time": swapDetails.timeStamp,
+      "Time": formattedTime,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
       "messageText": confirmationMessage
     });
@@ -2506,15 +2508,18 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
       const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
   
       const receivedTokenMint = escapeMarkdown(tokenMint);
-      const timeFormatted = original.time
-        ? new Date(original.time).toLocaleString("en-US", { timeZone: "America/New_York" })
-        : "Unknown";
+      
+      // Obtener y formatear el tiempo en UTC y EST
+      const rawTime = original.time || Date.now();
+      const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+      const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+      const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
       // 📬 Construir el mensaje final (sin datos de Moralis)
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
         `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
-        `🕒 *Time:* ${timeFormatted} (EST)\n\n` +
+        `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
         `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n` +
@@ -2537,7 +2542,7 @@ async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
               { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
             ],
             [
-              { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
             ]
           ]
         }
