@@ -2485,16 +2485,16 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
   
-  // Función actualizada para refrescar la confirmación de compra sin Moralis
+// Función actualizada para refrescar la confirmación de compra sin Moralis
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
   
     try {
-      // Obtenemos información estática del token desde tokens.json
+      // Obtener datos estáticos del token
       const tokenInfo = getTokenInfo(tokenMint);
       tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
   
-      // Obtenemos la referencia de la compra original desde buyReferenceMap
+      // Obtener la compra original a partir de buyReferenceMap
       const original = buyReferenceMap[chatId]?.[tokenMint];
       if (!original || !original.solBeforeBuy) {
         console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
@@ -2502,7 +2502,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
-      // Obtenemos la dirección del par (pairAddress) para el token
+      // Obtener el par (pairAddress) del token
       const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
       if (!pairAddress || pairAddress === "N/A") {
         console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
@@ -2510,26 +2510,38 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
-      // 1️⃣ Obtenemos la cotización desde Jupiter
-      const jupRes = await fetch(
-        `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}&outputMint=So11111111111111111111111111111111111111112&amount=1000000000&slippageBps=500&priorityFeeBps=20`
-      );
-      if (!jupRes.ok) 
+      // 1️⃣ Solicitar la cotización a la API de Jupiter
+      const jupUrl =
+        `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
+        `&outputMint=So11111111111111111111111111111111111111112` +
+        `&amount=1000000000&slippageBps=500&priorityFeeBps=20`;
+      console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
+  
+      const jupRes = await fetch(jupUrl);
+      if (!jupRes.ok) {
         throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+      }
       const jupData = await jupRes.json();
   
-      // Convertir outAmount (valor en USD si es que lo devuelve Jupiter) a SOL
-      const outAmount = parseFloat(jupData.outAmount);
+      // Validar que jupData.outAmount sea numérico
+      const outAmount = Number(jupData.outAmount);
+      if (isNaN(outAmount)) {
+        throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
+      }
       const priceSolNow = outAmount / 1e9;
   
-      // 🧮 Funciones formateadoras
+      // Funciones formateadoras seguras (si no es número, devuelven "N/A")
       const formatDefault = (val) => {
-        return val >= 1 ? val.toFixed(6) : val.toFixed(9).replace(/0+$/, "");
+        const numVal = Number(val);
+        if (isNaN(numVal)) return "N/A";
+        return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
       };
   
       const formatWithZeros = (val) => {
-        if (val >= 1) return val.toFixed(6);
-        const str = val.toFixed(12);
+        const numVal = Number(val);
+        if (isNaN(numVal)) return "N/A";
+        if (numVal >= 1) return numVal.toFixed(6);
+        const str = numVal.toFixed(12);
         const forced = "0.000" + str.slice(2);
         const match = forced.match(/0*([1-9]\d{0,2})/);
         if (!match) return forced;
@@ -2540,29 +2552,25 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       const formattedOriginalPrice = formatDefault(original.tokenPrice);
       const formattedCurrentPrice = formatWithZeros(priceSolNow);
   
-      const currentPriceShown = parseFloat(formattedCurrentPrice);
+      // Calcular el valor actual de la inversión
+      const currentPriceShown = Number(formattedCurrentPrice);
       const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-      const visualPriceSolNow = parseFloat(formatWithZeros(priceSolNow));
+      const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
   
-      // Calcular el cambio porcentual entre el precio actual y el de compra original
+      // Calcular el cambio porcentual
       let changePercent = 0;
-      if (original.tokenPrice > 0) {
-        changePercent = ((visualPriceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
+      if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
+        changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
         if (!isFinite(changePercent)) changePercent = 0;
       }
-      changePercent = changePercent.toFixed(2);
-  
-      // Seleccionar emoji según el cambio porcentual
+      const changePercentStr = changePercent.toFixed(2);
       const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
   
-      // Calcular los valores totales y cambios
-      const currentValueSOL = parseFloat(currentValue);
-      const pnlSol = currentValueSOL - parseFloat(original.solBeforeBuy);
+      // Calcular el PNL (aunque no se usa en el mensaje final, se conserva esta variable para otros usos)
+      const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
       const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
   
-      const receivedTokenMint = escapeMarkdown(tokenMint);
-  
-      // Obtener y formatear el tiempo en formatos UTC y EST
+      // Formatear la hora de la compra en UTC y EST
       const rawTime = original.time || Date.now();
       const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
         hour12: false,
@@ -2574,19 +2582,19 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       });
       const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-      // Construir el mensaje de confirmación (utiliza tokenInfo.dex para mostrar el DEX correcto)
+      // Construir el mensaje final de actualización
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
         `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
         `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
-        `💰 *Got:* ${original.receivedAmount.toFixed(3)} Tokens\n` +
+        `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
         `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
         `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-        `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercent}%)\n` +
+        `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
         `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
-        `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+        `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
         `🔗 *Wallet:* \`${original.walletAddress}\``;
   
       await bot.editMessageText(updatedMessage, {
@@ -2597,11 +2605,11 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
+              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+              { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
             ],
             [
-              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
             ]
           ]
         }
