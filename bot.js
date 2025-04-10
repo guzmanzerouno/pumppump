@@ -1822,7 +1822,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     };
   
     // Esperar 4 segundos antes de enviar la solicitud al API
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    await new Promise(resolve => setTimeout(resolve, 2500));
   
     // Intentamos obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos para cada uno
     let attempt = 0;
