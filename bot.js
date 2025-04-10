@@ -2522,9 +2522,11 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       const outAmount = parseFloat(jupData.outAmount);
       const priceSolNow = outAmount / 1e9;
   
-      // Funciones formateadoras para los números
-      const formatDefault = (val) =>
-        val >= 1 ? val.toFixed(6) : val.toFixed(9).replace(/0+$/, "");
+      // 🧮 Funciones formateadoras
+      const formatDefault = (val) => {
+        return val >= 1 ? val.toFixed(6) : val.toFixed(9).replace(/0+$/, "");
+      };
+  
       const formatWithZeros = (val) => {
         if (val >= 1) return val.toFixed(6);
         const str = val.toFixed(12);
