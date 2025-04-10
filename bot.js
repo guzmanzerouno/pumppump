@@ -1804,6 +1804,7 @@ function formatTimestampToUTCandEST(timestamp) {
 }
 
 // Función getSwapDetailsHybrid usando la API de wallet trades de SolanaTracker
+// Función getSwapDetailsHybrid utilizando la API de wallet trades de SolanaTracker con delay e intentos de reintento
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     // Obtenemos la wallet del usuario a partir del chatId
     const user = users[chatId];
@@ -1812,7 +1813,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     }
     const walletPublicKey = user.walletPublicKey;
   
-    // Construir la URL del endpoint usando la wallet del usuario
+    // Construimos la URL del endpoint usando la wallet del usuario
     const apiUrl = `https://data.solanatracker.io/wallet/${walletPublicKey}/trades`;
     console.log(`API URL: ${apiUrl}`);
   
@@ -1820,10 +1821,10 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
       "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
     };
   
-    // Esperamos 2 segundos antes de enviar la solicitud
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Esperar 4 segundos antes de enviar la solicitud al API
+    await new Promise(resolve => setTimeout(resolve, 4000));
   
-    // Intentar obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos cada uno
+    // Intentamos obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos para cada uno
     let attempt = 0;
     const maxAttempts = 5;
     let response;
@@ -1837,62 +1838,64 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
             setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 2000)
           )
         ]);
-        // Si la solicitud tiene éxito, salimos del bucle
+        // Si la solicitud se ejecuta correctamente, salimos del bucle
         break;
       } catch (err) {
         lastError = err;
         console.warn(`Attempt ${attempt} failed: ${err.message}`);
       }
     }
+    
     if (!response) {
       throw new Error("Failed to fetch wallet trades after 5 attempts: " + lastError.message);
     }
+    
     if (!response.data || !response.data.trades) {
       throw new Error("Invalid trades data from wallet trades API");
     }
-  
-    // Extraer el listado de trades
+    
+    // Se obtienen los trades
     const trades = response.data.trades;
-    // Buscar la transacción que coincida con la signature
+    // Buscamos la transacción cuyo "tx" coincida con la signature dada
     const trade = trades.find(t => t.tx === signature);
     if (!trade) {
       throw new Error("Trade not found for this signature");
     }
-  
-    // Determinar si la transacción fue una compra o una venta
+    
+    // Determinamos si la transacción fue una compra o una venta basándonos en la wallet del usuario
     let isBuy;
     if (trade.from && trade.from.address === walletPublicKey) {
-      // Si la wallet del usuario aparece en "from", el usuario envió tokens → es una venta
+      // Si la wallet del usuario aparece en "from", quiere decir que el usuario envió tokens (venta)
       isBuy = false;
     } else if (trade.to && trade.to.address === walletPublicKey) {
-      // Si aparece en "to", el usuario recibió tokens → es una compra
+      // Si aparece en "to", el usuario recibió tokens (compra)
       isBuy = true;
     } else {
-      // Por defecto, asumimos que es compra
+      // Si no se encuentra en ninguno, asumimos compra por defecto
       isBuy = true;
     }
-  
-    // La API de wallet trades no suele proveer fee; asignamos 0
-    const fee = 0.002;
+    
+    // La API de wallet trades usualmente no provee fee, se asigna 0
+    const fee = 0;
     let soldAmount, receivedAmount;
     let soldTokenMint, receivedTokenMint;
     let soldTokenName, soldTokenSymbol, receivedTokenName, receivedTokenSymbol;
-  
+    
     if (isBuy) {
-      // Para una compra: el usuario envía SOL y recibe el token deseado.
-      soldAmount = trade.from.amount;      // SOL gastado
-      receivedAmount = trade.to.amount;      // Tokens recibidos
+      // En una compra: el usuario envía SOL y recibe el token deseado.
+      soldAmount = trade.from.amount;       // SOL gastado
+      receivedAmount = trade.to.amount;       // Tokens recibidos
       soldTokenMint = "So11111111111111111111111111111111111111112"; // Mint de Wrapped SOL
       soldTokenName = "Wrapped SOL";
       soldTokenSymbol = "SOL";
-      // Usamos expectedMint para identificar el token adquirido.
+      // Usamos expectedMint para identificar el token adquirido
       receivedTokenMint = expectedMint;
       receivedTokenName = trade.to.token?.name || "Unknown";
       receivedTokenSymbol = trade.to.token?.symbol || "N/A";
     } else {
       // Para una venta: el usuario envía el token y recibe SOL.
-      soldAmount = trade.from.amount;      // Tokens vendidos
-      receivedAmount = trade.to.amount;      // SOL recibido
+      soldAmount = trade.from.amount;
+      receivedAmount = trade.to.amount;
       soldTokenMint = expectedMint;
       soldTokenName = trade.from.token?.name || "Unknown";
       soldTokenSymbol = trade.from.token?.symbol || "N/A";
@@ -1900,15 +1903,15 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
       receivedTokenName = "Wrapped SOL";
       receivedTokenSymbol = "SOL";
     }
-  
-    // Usamos el monto enviado en "from" como inputAmount
+    
+    // Utilizamos el monto enviado en "from" para el inputAmount
     const inputAmount = trade.from.amount;
-    // Formatear el timestamp en hora EST
+    // Formateamos el timestamp a hora EST
     const estTime = new Date(trade.time).toLocaleString("en-US", {
       timeZone: "America/New_York",
       hour12: false
     });
-  
+    
     return {
       inputAmount: Number(inputAmount).toFixed(3),
       soldAmount,
