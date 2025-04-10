@@ -2189,45 +2189,90 @@ bot.on("callback_query", async (query) => {
 async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature) {
     const solPrice = await getSolPriceUSD();
   
-    const soldTokenMint = sellDetails.soldTokenMint || "Unknown";
+    // Inicialmente se extrae el token vendido de sellDetails
+    let soldTokenMint = sellDetails.soldTokenMint || "Unknown";
+    // Se intenta obtener la información del token que se compró originalmente desde buyReferenceMap,
+    // de forma que, si por error soldTokenMint es la de SOL, se use el token comprado (por ejemplo, DONNY)
+    if (buyReferenceMap[chatId]) {
+      // Se recorre las claves (los mints de tokens comprados) y se usa el primero
+      // (esto puede ajustarse si se manejan varios tokens por usuario)
+      for (const key in buyReferenceMap[chatId]) {
+        if (key !== "So11111111111111111111111111111111111111112") {
+          soldTokenMint = key;
+          break;
+        }
+      }
+    }
+  
+    // Se obtiene la información estática del token vendido (esperado) usando getTokenInfo
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
     const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
-    const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido
-    const soldAmountFloat = parseFloat(soldAmount); // Asegurarse de que sea número
   
+    // Cantidad de SOL que se recibió en la venta (el usuario recibe SOL a cambio)
+    const gotSol = parseFloat(sellDetails.receivedAmount);
+    const soldAmountFloat = parseFloat(soldAmount);
+  
+    // Cálculo del PNL:
+    // Se compara el SOL recibido en la venta con el SOL “gastado” en la compra (almacenado en buyReferenceMap)
     let winLossDisplay = "N/A";
     if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
       const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
       const pnlSol = gotSol - beforeBuy;
       const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
       const pnlUsd = solPrice ? (pnlSol * solPrice) : null;
-      winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL ` +
-                       `(USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
+      winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
     }
   
     const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
-    // 🔥 Nuevo: Calcular el precio por token
+    // Calcular el precio por token: cuánto SOL se pagó por cada token vendido
     const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
-
-    const confirmationMessage = `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-  `*${tokenSymbol}/SOL* (${escapeMarkdown(sellDetails.dexPlatform || "Unknown DEX")})\n` +
-  `🕒 *Time:* ${sellDetails.timeStamp} (EST)\n\n` +
-  `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-  `💲 *Token Price:* ${tokenPrice} SOL\n` +
-  `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
-  `💲 *Sold:* ${soldAmount} Tokens\n` +
-  `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
-  `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
-  `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-
-await bot.editMessageText(confirmationMessage, {
-  chat_id: chatId,
-  message_id: messageId,
-  parse_mode: "Markdown",
-  disable_web_page_preview: true
-});
   
+    // Formatear el tiempo:
+    // Se utiliza sellDetails.rawTime (si se obtuvo en getSwapDetailsHybrid) o se usa Date.now()
+    const rawTime = sellDetails.rawTime || Date.now();
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false,
+      timeZone: "UTC"
+    });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false,
+      timeZone: "America/New_York"
+    });
+    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+  
+    // Construir el mensaje final de confirmación de venta
+    const confirmationMessage = `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+      `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
+      `🕒 *Time:* ${formattedTime}\n\n` +
+      `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n` +
+      `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
+      `💲 *Sold:* ${soldAmount} Tokens\n` +
+      `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
+      `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
+  
+    // Se actualiza el mensaje en Telegram con el mensaje final de confirmación
+    await bot.editMessageText(confirmationMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
+  
+    // Se guarda la referencia de la operación en buyReferenceMap (para poder refrescarla posteriormente)
+    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+    buyReferenceMap[chatId][soldTokenMint] = {
+      solBeforeBuy: parseFloat(buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy || "0"), // se mantiene el valor original
+      receivedAmount: 0, // opcional, según se necesite
+      tokenPrice: tokenPrice,
+      walletAddress: sellDetails.walletAddress,
+      txSignature,
+      time: Date.now()
+    };
+  
+    // Se guarda el registro completo de la operación en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
@@ -2237,10 +2282,10 @@ await bot.editMessageText(confirmationMessage, {
       "Sold Token": tokenSymbol,
       "Sold Token Address": soldTokenMint,
       "Wallet": sellDetails.walletAddress,
-      "Time": `${sellDetails.timeStamp}`,
+      "Time": formattedTime,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
       "SOL PNL": winLossDisplay,
-      "messageText": confirmationMessage  // 🔥 agregar esto
+      "messageText": confirmationMessage
     });
   
     console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
@@ -2383,7 +2428,7 @@ await bot.editMessageText(confirmationMessage, {
   
     // Construir el mensaje de confirmación final
     const confirmationMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-      `*SOL/${tokenSymbol}* (${escapeMarkdown(swapDetails.dexPlatform || "Unknown DEX")})\n` +
+      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
@@ -2518,7 +2563,7 @@ await bot.editMessageText(confirmationMessage, {
       // 📬 Construir el mensaje final (sin datos de Moralis)
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-        `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
+        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
         `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
