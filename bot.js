@@ -1828,14 +1828,14 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     // Construimos la URL del endpoint con la wallet del usuario
     const apiUrl = `https://data.solanatracker.io/wallet/${walletPublicKey}/trades`;
     const headers = {
-      "x-api-key": "cecd6680-9645-4d00-a86c-f389f87a3f35"
+      "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
     };
   
     // Utilizamos Promise.race para imponer un timeout de 2 segundos
     const response = await Promise.race([
       axios.get(apiUrl, { headers }),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 5000)
+        setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 2000)
       )
     ]);
   
