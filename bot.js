@@ -2485,14 +2485,16 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
   
-// Función actualizada para refrescar la confirmación de compra sin Moralis
+  // Función actualizada para refrescar la confirmación de compra sin Moralis
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
   
     try {
+      // Obtenemos información estática del token desde tokens.json
       const tokenInfo = getTokenInfo(tokenMint);
       tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
   
+      // Obtenemos la referencia de la compra original desde buyReferenceMap
       const original = buyReferenceMap[chatId]?.[tokenMint];
       if (!original || !original.solBeforeBuy) {
         console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
@@ -2500,6 +2502,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
+      // Obtenemos la dirección del par (pairAddress) para el token
       const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
       if (!pairAddress || pairAddress === "N/A") {
         console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
@@ -2511,9 +2514,11 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       const jupRes = await fetch(
         `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}&outputMint=So11111111111111111111111111111111111111112&amount=1000000000&slippageBps=500&priorityFeeBps=20`
       );
-      if (!jupRes.ok) throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+      if (!jupRes.ok) 
+        throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
       const jupData = await jupRes.json();
   
+      // Convertir outAmount (valor en USD si es que lo devuelve Jupiter) a SOL
       const outAmount = parseFloat(jupData.outAmount);
       const priceSolNow = outAmount / 1e9;
   
@@ -2537,9 +2542,9 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   
       const currentPriceShown = parseFloat(formattedCurrentPrice);
       const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-  
       const visualPriceSolNow = parseFloat(formatWithZeros(priceSolNow));
   
+      // Calcular el cambio porcentual entre el precio actual y el de compra original
       let changePercent = 0;
       if (original.tokenPrice > 0) {
         changePercent = ((visualPriceSolNow - original.tokenPrice) / original.tokenPrice) * 100;
@@ -2547,30 +2552,32 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       }
       changePercent = changePercent.toFixed(2);
   
+      // Seleccionar emoji según el cambio porcentual
       const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
   
-      const pnlSol = parseFloat(currentValue) - parseFloat(original.solBeforeBuy);
+      // Calcular los valores totales y cambios
+      const currentValueSOL = parseFloat(currentValue);
+      const pnlSol = currentValueSOL - parseFloat(original.solBeforeBuy);
       const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
   
-      // 8️⃣ Construir mensaje final
-    // - Obtenemos la hora "rawTime" guardada en "original.time" o usamos Date.now() como fallback.
-    const rawTime = original.time || Date.now();
-    // Formato UTC
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
-      hour12: false,
-      timeZone: "UTC"
-    });
-    // Formato EST
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: "America/New_York"
-    });
-    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+      const receivedTokenMint = escapeMarkdown(tokenMint);
   
-      // 📬 Construir el mensaje final (sin datos de Moralis)
+      // Obtener y formatear el tiempo en formatos UTC y EST
+      const rawTime = original.time || Date.now();
+      const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+        hour12: false,
+        timeZone: "UTC"
+      });
+      const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+        hour12: false,
+        timeZone: "America/New_York"
+      });
+      const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+  
+      // Construir el mensaje de confirmación (utiliza tokenInfo.dex para mostrar el DEX correcto)
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+        `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
         `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
@@ -2594,7 +2601,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
               { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
             ],
             [
-              { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
             ]
           ]
         }
