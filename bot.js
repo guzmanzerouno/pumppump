@@ -1876,7 +1876,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     }
     
     // La API de wallet trades usualmente no provee fee, se asigna 0
-    const fee = 0.002;
+    const fee = 0;
     let soldAmount, receivedAmount;
     let soldTokenMint, receivedTokenMint;
     let soldTokenName, soldTokenSymbol, receivedTokenName, receivedTokenSymbol;
