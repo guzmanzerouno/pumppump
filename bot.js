@@ -2585,7 +2585,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       // Construir el mensaje final de actualización
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-        `*SOL/${tokenSymbol}* (${escapeMarkdown(tokenInfo.dex || "Unknown DEX")})\n` +
+        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
         `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
