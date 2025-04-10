@@ -2189,31 +2189,27 @@ bot.on("callback_query", async (query) => {
 async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature) {
     const solPrice = await getSolPriceUSD();
   
-    // Inicialmente se extrae el token vendido de sellDetails
-    let soldTokenMint = sellDetails.soldTokenMint || "Unknown";
-    // Se intenta obtener la información del token que se compró originalmente desde buyReferenceMap,
-    // de forma que, si por error soldTokenMint es la de SOL, se use el token comprado (por ejemplo, DONNY)
-    if (buyReferenceMap[chatId]) {
-      // Se recorre las claves (los mints de tokens comprados) y se usa el primero
-      // (esto puede ajustarse si se manejan varios tokens por usuario)
-      for (const key in buyReferenceMap[chatId]) {
-        if (key !== "So11111111111111111111111111111111111111112") {
-          soldTokenMint = key;
-          break;
-        }
-      }
+    // Usamos directamente soldTokenMint de sellDetails (que debe ser el token comprado originalmente)
+    const soldTokenMint = sellDetails.soldTokenMint;
+    if (!soldTokenMint || soldTokenMint === "Unknown") {
+      console.error("❌ Error: Sold token mint is unknown.");
+      await bot.editMessageText("❌ Error: Sold token mint not found in sell details.", {
+        chat_id: chatId,
+        message_id: messageId
+      });
+      return;
     }
-  
-    // Se obtiene la información estática del token vendido (esperado) usando getTokenInfo
+    
+    // Obtenemos la información del token vendido (por ejemplo, MUSKOBAR) a partir de getTokenInfo
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
     const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
   
-    // Cantidad de SOL que se recibió en la venta (el usuario recibe SOL a cambio)
+    // Cantidad de SOL que se recibió en la venta
     const gotSol = parseFloat(sellDetails.receivedAmount);
     const soldAmountFloat = parseFloat(soldAmount);
   
-    // Cálculo del PNL:
-    // Se compara el SOL recibido en la venta con el SOL “gastado” en la compra (almacenado en buyReferenceMap)
+    // Cálculo del PNL (Profit and Loss):
+    // Se compara el SOL recibido en la venta (gotSol) con el SOL invertido en la compra (almacenado en buyReferenceMap)
     let winLossDisplay = "N/A";
     if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
       const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
@@ -2225,20 +2221,13 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
   
     const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
   
-    // Calcular el precio por token: cuánto SOL se pagó por cada token vendido
+    // Calcular el precio por token (cuánto SOL se pagó por cada token vendido)
     const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
   
-    // Formatear el tiempo:
-    // Se utiliza sellDetails.rawTime (si se obtuvo en getSwapDetailsHybrid) o se usa Date.now()
+    // Formatear el tiempo (se usa sellDetails.rawTime si está disponible)
     const rawTime = sellDetails.rawTime || Date.now();
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
-      hour12: false,
-      timeZone: "UTC"
-    });
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: "America/New_York"
-    });
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
     // Construir el mensaje final de confirmación de venta
@@ -2253,7 +2242,6 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // Se actualiza el mensaje en Telegram con el mensaje final de confirmación
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2261,18 +2249,18 @@ async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignatu
       disable_web_page_preview: true
     });
   
-    // Se guarda la referencia de la operación en buyReferenceMap (para poder refrescarla posteriormente)
+    // Actualizar o guardar la referencia de la operación en swaps.json (y opcionalmente en buyReferenceMap)
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+    // Mantenemos el valor original de solBeforeBuy
     buyReferenceMap[chatId][soldTokenMint] = {
-      solBeforeBuy: parseFloat(buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy || "0"), // se mantiene el valor original
-      receivedAmount: 0, // opcional, según se necesite
+      solBeforeBuy: parseFloat(buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy || "0"),
+      receivedAmount: 0,
       tokenPrice: tokenPrice,
       walletAddress: sellDetails.walletAddress,
       txSignature,
       time: Date.now()
     };
   
-    // Se guarda el registro completo de la operación en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
