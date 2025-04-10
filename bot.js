@@ -1822,7 +1822,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     };
   
     // Esperar 4 segundos antes de enviar la solicitud al API
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    await new Promise(resolve => setTimeout(resolve, 2000));
   
     // Intentamos obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos para cada uno
     let attempt = 0;
@@ -1835,7 +1835,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
         response = await Promise.race([
           axios.get(apiUrl, { headers }),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 2000)
+            setTimeout(() => reject(new Error("Timeout waiting for wallet trades")), 1500)
           )
         ]);
         // Si la solicitud se ejecuta correctamente, salimos del bucle
