@@ -1817,7 +1817,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     console.log(`API URL: ${apiUrl}`);
   
     const headers = {
-      "x-api-key": "cecd6680-9645-4d00-a86c-f389f87a3f35"
+      "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
     };
   
     // Esperamos 2 segundos antes de enviar la solicitud
