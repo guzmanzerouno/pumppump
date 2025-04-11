@@ -1203,7 +1203,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
       console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
   
-      // Obtener decimales (solo para información en logs, ya que "amount" ya está en unidades mínimas)
+      // Obtener decimales (solo para información en logs)
       const tokenDecimals = await getTokenDecimals(mint);
       console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
   
@@ -1211,7 +1211,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       let balance = await getTokenBalance(chatId, mint);
       console.log(`✅ Balance found for ${mint}: ${balance} tokens`);
   
-      // Aquí "amount" ya debe ser el valor correcto en unidades mínimas (ej: "64948483343")
+      // "amount" ya debe estar en unidades mínimas (ej: "64948483343")
       const amountInUnits = amount.toString();
       console.log(`[sellToken] Using amount in units: ${amountInUnits}`);
   
@@ -1251,12 +1251,12 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
-      if (!executeResponse.data || !executeResponse.data.txSignature) {
-        // Mostrar el error devuelto por la API en la consola
+      // Permitir que la firma pueda venir en "txSignature" o en "signature"
+      const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
+      if (!txSignature) {
         console.error("Error executing sell transaction via Ultra API:", executeResponse.data);
         throw new Error("Failed to execute sell transaction via Ultra API: " + JSON.stringify(executeResponse.data));
       }
-      const txSignature = executeResponse.data.txSignature;
       console.log("[sellToken] Sell transaction executed successfully:", txSignature);
       return txSignature;
   
