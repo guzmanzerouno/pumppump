@@ -1203,7 +1203,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
       console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
   
-      // Obtener decimales (solo para información en logs)
+      // Obtener decimales (solo para información en logs, ya que "amount" ya está en unidades mínimas)
       const tokenDecimals = await getTokenDecimals(mint);
       console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
   
@@ -1211,7 +1211,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       let balance = await getTokenBalance(chatId, mint);
       console.log(`✅ Balance found for ${mint}: ${balance} tokens`);
   
-      // Aquí "amount" ya debe ser el valor correcto en unidades mínimas
+      // Aquí "amount" ya debe ser el valor correcto en unidades mínimas (ej: "64948483343")
       const amountInUnits = amount.toString();
       console.log(`[sellToken] Using amount in units: ${amountInUnits}`);
   
@@ -1235,11 +1235,10 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      // Deserializar la transacción, firmarla y volver a serializarla en base64
+      // Deserializar, firmar y volver a serializar la transacción
       const transactionBuffer = Buffer.from(transaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       versionedTransaction.sign([wallet]);
-      // Convertir el Uint8Array resultante en Buffer para obtener la cadena en base64 correcta
       const serializedTx = versionedTransaction.serialize();
       const signedTxBase64 = Buffer.from(serializedTx).toString("base64");
   
@@ -1253,12 +1252,14 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
       if (!executeResponse.data || !executeResponse.data.txSignature) {
-        throw new Error("Failed to execute sell transaction via Ultra API.");
+        // Mostrar el error devuelto por la API en la consola
+        console.error("Error executing sell transaction via Ultra API:", executeResponse.data);
+        throw new Error("Failed to execute sell transaction via Ultra API: " + JSON.stringify(executeResponse.data));
       }
       const txSignature = executeResponse.data.txSignature;
       console.log("[sellToken] Sell transaction executed successfully:", txSignature);
       return txSignature;
-      
+  
     } catch (error) {
       console.error(`❌ Error in sell attempt ${attempt}:`, error.message, error.response?.data || "");
       if (attempt < 3) {
