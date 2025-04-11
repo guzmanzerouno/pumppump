@@ -1232,6 +1232,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
       const { unsignedTransaction, requestId } = orderResponse.data;
       if (!unsignedTransaction || !requestId) {
+        console.error("Invalid order response from Ultra API for sell:", orderResponse.data);
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
