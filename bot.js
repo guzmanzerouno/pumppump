@@ -1203,7 +1203,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
       console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
   
-      // Obtener decimales (solo para información en logs, ya que "amount" ya está en unidades mínimas)
+      // Obtener decimales (solo para información en logs)
       const tokenDecimals = await getTokenDecimals(mint);
       console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
   
@@ -1211,8 +1211,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       let balance = await getTokenBalance(chatId, mint);
       console.log(`✅ Balance found for ${mint}: ${balance} tokens`);
   
-      // Aquí "amount" ya debe ser el valor correcto en unidades mínimas (ej: "64948483343")
-      // No se multiplica nuevamente por 10^decimals:
+      // Aquí "amount" ya debe ser el valor correcto en unidades mínimas
       const amountInUnits = amount.toString();
       console.log(`[sellToken] Using amount in units: ${amountInUnits}`);
   
@@ -1230,18 +1229,19 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API for sell.");
       }
-      // Extraemos la respuesta en base al formato correcto: se espera "transaction" y "requestId"
       const { transaction, requestId } = orderResponse.data;
       if (!transaction || !requestId) {
         console.error("Invalid order response from Ultra API for sell:", orderResponse.data);
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      // Deserializar, firmar y volver a serializar la transacción
+      // Deserializar la transacción, firmarla y volver a serializarla en base64
       const transactionBuffer = Buffer.from(transaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       versionedTransaction.sign([wallet]);
-      const signedTxBase64 = versionedTransaction.serialize().toString("base64");
+      // Convertir el Uint8Array resultante en Buffer para obtener la cadena en base64 correcta
+      const serializedTx = versionedTransaction.serialize();
+      const signedTxBase64 = Buffer.from(serializedTx).toString("base64");
   
       // Ejecutar la transacción usando Ultra Execute
       const executePayload = {
