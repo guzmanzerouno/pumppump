@@ -1230,14 +1230,15 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API for sell.");
       }
-      const { unsignedTransaction, requestId } = orderResponse.data;
-      if (!unsignedTransaction || !requestId) {
+      // Extraemos la respuesta en base al formato correcto: se espera "transaction" y "requestId"
+      const { transaction, requestId } = orderResponse.data;
+      if (!transaction || !requestId) {
         console.error("Invalid order response from Ultra API for sell:", orderResponse.data);
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
       // Deserializar, firmar y volver a serializar la transacción
-      const transactionBuffer = Buffer.from(unsignedTransaction, "base64");
+      const transactionBuffer = Buffer.from(transaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       versionedTransaction.sign([wallet]);
       const signedTxBase64 = versionedTransaction.serialize().toString("base64");
