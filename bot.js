@@ -1069,14 +1069,13 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       const userPublicKey = userKeypair.publicKey;
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-      // Ejecutamos en paralelo la verificación/creación de la ATA y la consulta del balance de SOL.
+      // Verificar/crear la ATA y consultar el balance de SOL en paralelo.
       const [ata, balanceLamports] = await Promise.all([
         ensureAssociatedTokenAccount(userKeypair, mint, connection),
         connection.getBalance(userPublicKey)
       ]);
   
       if (!ata) {
-        // Si ATA no se obtiene, reintentamos después de 3 segundos.
         await new Promise(resolve => setTimeout(resolve, 2000));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
@@ -1087,9 +1086,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       }
   
       // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      // Convertimos el monto en SOL a lamports y lo convertimos a string.
       const orderParams = {
-        inputMint: "So11111111111111111111111111111111111111112", // Mint de SOL (Wrapped SOL)
+        inputMint: "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
         outputMint: mint,
         amount: Math.floor(amountSOL * 1e9).toString(),
         taker: userPublicKey.toBase58(),
@@ -1106,19 +1104,20 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error("Failed to receive order details from Ultra API.");
       }
   
-      // Se espera que la respuesta contenga { unsignedTransaction, requestId }
+      // Validar la respuesta de la API y mostrarla en la consola si es inválida.
       const { unsignedTransaction, requestId } = orderResponse.data;
       if (!unsignedTransaction || !requestId) {
+        console.error("Invalid order response from Ultra API.", orderResponse.data);
         throw new Error("Invalid order response from Ultra API.");
       }
   
-      // Deserializamos la transacción unsigned, la firmamos y la serializamos a base64.
+      // Deserializamos, firmamos y serializamos la transacción.
       const transactionBuffer = Buffer.from(unsignedTransaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       versionedTransaction.sign([userKeypair]);
       const signedTxBase64 = versionedTransaction.serialize().toString("base64");
   
-      // Construimos el payload para ejecutar la transacción, incluyendo el prioritizationFeeLamports.
+      // Ejecutamos la transacción mediante Ultra Execute, incluyendo el prioritizationFeeLamports.
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
@@ -1140,8 +1139,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       const errorMessage = error.message || "";
       console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
       if (attempt < 4) {
-        const delay = 1000; // Delay fijo de 1 segundo para cada reintento.
-        console.log(`[buyToken] Reintentando en ${delay} ms...`);
+        const delay = 1000; // Delay fijo de 1 segundo en cada reintento.
+        console.log(`[buyToken] Retrying in ${delay} ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       } else {
