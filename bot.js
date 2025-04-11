@@ -1064,23 +1064,21 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error("User not registered or missing privateKey.");
       }
   
-      // Se obtiene el keypair del usuario y se establece la conexión (usando el endpoint rápido de Helius)
+      // Obtenemos el keypair del usuario y la conexión a Solana (usando el endpoint rápido de Helius)
       const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-      // Ejecutar de forma concurrente la verificación/creación de la ATA y la consulta del balance
+      // Verificar/crear ATA y obtener el balance de SOL en paralelo
       const [ata, balanceLamports] = await Promise.all([
         ensureAssociatedTokenAccount(userKeypair, mint, connection),
         connection.getBalance(userPublicKey)
       ]);
   
       if (!ata) {
-        // Si no se obtuvo la ATA, reintentar después de 3 segundos
         await new Promise(resolve => setTimeout(resolve, 3000));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-  
       const balance = balanceLamports / 1e9;
       if (balance < amountSOL) {
         throw new Error(`Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
@@ -1088,53 +1086,66 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   
       // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
   
-      // 1. Solicitar detalles de la orden al endpoint Ultra Order
-      const orderPayload = {
-        inputMint: "So11111111111111111111111111111111111111112", // SOL
+      // 1. Solicitar los detalles de la orden (GET) al endpoint Ultra Order.
+      // Convertir el monto a lamports y a string.
+      const orderParams = {
+        inputMint: "So11111111111111111111111111111111111111112",  // SOL
         outputMint: mint,
-        amount: Math.floor(amountSOL * 1e9),
-        userPublicKey: userPublicKey.toBase58(),
-        wrapAndUnwrapSol: true,
-        dynamicSlippage: true
-        // Agrega otros parámetros si son necesarios según la documentación Ultra.
+        amount: Math.floor(amountSOL * 1e9).toString(),
+        taker: userPublicKey.toBase58()  // NOTA: "taker" es la wallet del usuario
       };
   
-      const orderResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/order", orderPayload);
+      // Realizamos la solicitud GET con los parámetros en la URL.
+      const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
+      console.log("[buyToken] Requesting Ultra Order with params:", orderParams);
+      const orderResponse = await axios.get(orderUrl, { params: orderParams, headers: { Accept: "application/json" } });
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API.");
       }
   
-      // 2. Ejecutar la orden mediante el endpoint Ultra Execute
-      const executePayload = {
-        ...orderResponse.data,
-        userPublicKey: userPublicKey.toBase58(),
-        prioritizationFeeLamports: 1500000
-      };
+      // Se espera que orderResponse.data contenga: { unsignedTransaction, requestId }
+      const { unsignedTransaction, requestId } = orderResponse.data;
+      if (!unsignedTransaction || !requestId) {
+        throw new Error("Invalid order response from Ultra API.");
+      }
   
-      const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload);
+      // 2. Deserializar la transacción unsigned, firmarla y serializarla a base64.
+      const transactionBuffer = Buffer.from(unsignedTransaction, "base64");
+      const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+      versionedTransaction.sign([userKeypair]);
+      // Serializamos la transacción firmada
+      const signedTxBase64 = versionedTransaction.serialize().toString("base64");
+  
+      // 3. Ejecutar la transacción mediante el endpoint Ultra Execute
+      const executePayload = {
+        signedTransaction: signedTxBase64,
+        requestId: requestId
+      };
+      console.log("[buyToken] Executing order with payload:", executePayload);
+      const executeResponse = await axios.post(
+        "https://lite-api.jup.ag/ultra/v1/execute",
+        executePayload,
+        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
+      );
       if (!executeResponse.data || !executeResponse.data.swapTransaction) {
         throw new Error("Failed to construct swap transaction via Ultra API.");
       }
   
-      // 3. Decodificar, firmar y enviar la transacción
-      const transactionBuffer = Buffer.from(executeResponse.data.swapTransaction, "base64");
-      const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-      versionedTransaction.sign([userKeypair]);
+      // 4. La respuesta del execute se espera que contenga la transacción final o el txSignature.
+      // En algunos casos, la API ya ejecuta la transacción internamente y devuelve el txSignature.
+      const txSignature = executeResponse.data.txSignature || executeResponse.data.swapTransaction;
+      if (!txSignature) {
+        throw new Error("No transaction signature received from Ultra Execute.");
+      }
   
-      const txId = await connection.sendTransaction(versionedTransaction, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed"
-      });
+      console.log("[buyToken] Transaction sent successfully:", txSignature);
+      return txSignature;
   
-      return txId;
     } catch (error) {
       const errorMessage = error.message || "";
-      if (!errorMessage.includes("Simulation failed")) {
-        console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response?.data || "");
-      }
-      // Backoff exponencial para reintentos (3 intentos como máximo)
+      console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response?.data || "");
       if (attempt < 3) {
-        const delay = 3000 * Math.pow(2, attempt - 1); // 3s, 6s, 12s, ...
+        const delay = 3000 * Math.pow(2, attempt - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       } else {
@@ -1179,98 +1190,83 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-async function executeJupiterSell(chatId, mint, amount, attempt = 1) {
+async function sellToken(chatId, mint, amount, attempt = 1) {
     try {
-      console.log(`🔄 Attempt ${attempt}: Preparing sale of ${amount} tokens for mint: ${mint}`);
-  
       const user = users[chatId];
       if (!user || !user.privateKey) {
-        console.error(`⚠ Private key not found for user: ${JSON.stringify(user || {})}`);
-        return null;
+        throw new Error("User not registered or missing privateKey.");
       }
   
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-      console.log(`🔹 Wallet used for sale: ${wallet.publicKey.toBase58()}`);
+      // Verificar ATA y balance de tokens
+      const [ata] = await Promise.all([
+        ensureAssociatedTokenAccount(wallet, mint, connection)
+        // Puedes agregar aquí obtener el balance de tokens si lo necesitas para validar el monto
+      ]);
   
-      // Asegurar que la ATA existe para el token a vender
-      const ata = await ensureAssociatedTokenAccount(wallet, mint, connection);
       if (!ata) {
-        console.log(`⚠️ ATA not found, waiting for creation... Retrying sale.`);
-        return await executeJupiterSell(chatId, mint, amount, attempt + 1);
-      }
-      console.log(`✅ ATA verified for ${mint}: ${ata.toBase58()}`);
-  
-      // Obtener decimales y balance
-      const tokenDecimals = await getTokenDecimals(mint);
-      console.log(`✅ Token ${mint} has ${tokenDecimals} decimals.`);
-      let balance = await getTokenBalance(chatId, mint);
-      console.log(`✅ Balance found: ${balance} tokens`);
-      const balanceInUnits = Math.floor(balance * Math.pow(10, tokenDecimals));
-      let amountInUnits = Math.floor(amount * Math.pow(10, tokenDecimals));
-      if (amountInUnits > balanceInUnits) {
-        console.warn(`⚠ Adjusting sell amount: Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-        amountInUnits = balanceInUnits;
-      }
-      if (!balanceInUnits || balanceInUnits < amountInUnits || amountInUnits <= 0) {
-        console.error(`❌ Insufficient balance. Trying to sell ${amountInUnits}, but only ${balanceInUnits} available.`);
-        return null;
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        return await sellToken(chatId, mint, amount, attempt + 1);
       }
   
-      console.log("🔹 Fetching Ultra sell quote...");
+      // Convertir el monto a vender a la cantidad mínima (en base a los decimales)
+      const decimals = await getTokenDecimals(mint);
+      const amountInUnits = Math.floor(amount * Math.pow(10, decimals)).toString();
   
-      // Usar Ultra API para cotizar la venta
-      const orderPayload = {
+      // Parámetros para la venta:
+      // inputMint: el token que se vende (mint)
+      // outputMint: SOL (wrapped SOL)
+      // amount: monto en unidades
+      // taker: la wallet del usuario
+      const orderParams = {
         inputMint: mint,
-        outputMint: "So11111111111111111111111111111111111111112", // SOL
+        outputMint: "So11111111111111111111111111111111111111112",
         amount: amountInUnits,
-        userPublicKey: wallet.publicKey.toBase58(),
-        wrapAndUnwrapSol: true,
-        dynamicSlippage: true
+        taker: wallet.publicKey.toBase58()
       };
   
-      const orderResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/order", orderPayload);
+      const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
+      console.log("[sellToken] Requesting Ultra Order for sell with params:", orderParams);
+      const orderResponse = await axios.get(orderUrl, { params: orderParams, headers: { Accept: "application/json" } });
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API for sell.");
       }
-  
-      const executePayload = {
-        ...orderResponse.data,
-        userPublicKey: wallet.publicKey.toBase58(),
-        prioritizationFeeLamports: 1500000
-      };
-  
-      const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload);
-      if (!executeResponse.data || !executeResponse.data.swapTransaction) {
-        throw new Error("Failed to construct swap transaction for sell via Ultra API.");
+      const { unsignedTransaction, requestId } = orderResponse.data;
+      if (!unsignedTransaction || !requestId) {
+        throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      console.log("✅ Sell transaction received from Ultra.");
-  
-      // Decodificar, firmar y enviar la transacción
-      const transactionBuffer = Buffer.from(executeResponse.data.swapTransaction, "base64");
+      // Firmar la transacción
+      const transactionBuffer = Buffer.from(unsignedTransaction, "base64");
       const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       versionedTransaction.sign([wallet]);
+      const signedTxBase64 = versionedTransaction.serialize().toString("base64");
   
-      console.log("🚀 Sending transaction to Solana network...");
-      const txSignature = await connection.sendTransaction(versionedTransaction, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed"
+      // Ejecutar la transacción
+      const executePayload = {
+        signedTransaction: signedTxBase64,
+        requestId: requestId
+      };
+      console.log("[sellToken] Executing sell with payload:", executePayload);
+      const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
+        headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
-  
-      console.log(`✅ Sell transaction executed successfully: ${txSignature}`);
+      if (!executeResponse.data || !executeResponse.data.txSignature) {
+        throw new Error("Failed to execute sell transaction via Ultra API.");
+      }
+      const txSignature = executeResponse.data.txSignature;
+      console.log("[sellToken] Sell transaction executed successfully:", txSignature);
       return txSignature;
     } catch (error) {
-      console.error(`❌ Error in sell attempt ${attempt}:`, error.message);
+      console.error(`❌ Error in sell attempt ${attempt}:`, error.message, error.response?.data || "");
       if (attempt < 3) {
-        console.log(`🔄 Retrying sell (Attempt ${attempt + 1})...`);
         const delay = 3000 * Math.pow(2, attempt - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
-        return await executeJupiterSell(chatId, mint, amount, attempt + 1);
+        return await sellToken(chatId, mint, amount, attempt + 1);
       } else {
-        console.error("❌ Maximum retries reached. Sale failed.");
-        return null;
+        return Promise.reject(error);
       }
     }
   }
@@ -2096,7 +2092,7 @@ bot.on("callback_query", async (query) => {
         while (attempts < 3 && !txSignature) {
           attempts++;
           console.log(`🔄 Attempt ${attempts}/3 to execute sale...`);
-          txSignature = await executeJupiterSell(chatId, expectedTokenMint, amountToSell);
+          txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
           if (!txSignature) {
             await new Promise(res => setTimeout(res, delayBetweenAttempts));
             delayBetweenAttempts *= 1.5;
