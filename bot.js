@@ -1077,7 +1077,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   
       if (!ata) {
         console.error("[buyToken] ATA not found, reattempting...");
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
   
@@ -1087,7 +1087,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       }
   
       // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      // Convertir el monto de SOL a lamports y a string
+      // Convertir el monto de SOL a lamports y a string.
       const orderParams = {
         inputMint: "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
         outputMint: mint,
@@ -1105,39 +1105,51 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API.");
       }
-      // Comprueba si la respuesta incluye la propiedad unsignedTransaction o transaction
-      let unsignedTx, requestId;
-      if (orderResponse.data.unsignedTransaction) {
-        unsignedTx = orderResponse.data.unsignedTransaction;
-        requestId = orderResponse.data.requestId;
-      } else if (orderResponse.data.transaction) {
-        unsignedTx = orderResponse.data.transaction;
-        requestId = orderResponse.data.requestId;
-      }
+      
+      // Revisamos si la respuesta usa la propiedad 'unsignedTransaction' o 'transaction'
+      let unsignedTx = orderResponse.data.unsignedTransaction || orderResponse.data.transaction;
+      const requestId = orderResponse.data.requestId;
       if (!unsignedTx || !requestId) {
         console.error("Invalid order response from Ultra API.", orderResponse.data);
         throw new Error("Invalid order response from Ultra API.");
       }
+      // Se aplica trim para eliminar espacios innecesarios
+      unsignedTx = unsignedTx.trim();
       console.log("[buyToken] Order response data:", orderResponse.data);
+      console.log(`[buyToken] Unsigned Transaction (first 100 chars): ${unsignedTx.substring(0, 100)}... (length: ${unsignedTx.length})`);
   
-      // Deserializar la transacción unsigned, firmarla y serializarla nuevamente a base64
-      const transactionBuffer = Buffer.from(unsignedTx, "base64");
-      const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+      // Deserializar la transacción unsigned, firmarla y serializarla a base64
+      let transactionBuffer;
+      try {
+        transactionBuffer = Buffer.from(unsignedTx, "base64");
+      } catch (err) {
+        console.error("[buyToken] Error decoding unsignedTransaction from Base64:", err);
+        throw err;
+      }
+      let versionedTransaction;
+      try {
+        versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+      } catch (err) {
+        console.error("[buyToken] Error deserializing transaction:", err);
+        throw err;
+      }
       versionedTransaction.sign([userKeypair]);
-      const signedTxBase64 = versionedTransaction.serialize().toString("base64");
-  
-      // Ejecutar la transacción mediante Ultra Execute, agregando prioritizationFeeLamports
+      const signedTx = versionedTransaction.serialize();
+      const signedTxBase64 = Buffer.from(signedTx).toString("base64");
+      console.log(`[buyToken] Signed Transaction (first 100 chars): ${signedTxBase64.substring(0, 100)}... (length: ${signedTxBase64.length})`);
+      
+      // Ejecutar la transacción mediante Ultra Execute, con prioritizationFeeLamports y otros parámetros deseados
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
-        prioritizationFeeLamports: 1500000
+        prioritizationFeeLamports: 1500000 // Puedes modificar este valor según requieras
       };
       console.log("[buyToken] Executing order with payload:", executePayload);
       const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
       console.log("[buyToken] Execute response:", executeResponse.data);
-      // Si la respuesta incluye un campo status, comprobamos que sea "Success"
+      // Verificamos que si se incluye un campo status, su valor sea "Success" y que exista txSignature
       if ((executeResponse.data.status && executeResponse.data.status !== "Success") ||
           !executeResponse.data.txSignature) {
         console.error("Invalid execute response from Ultra API.", executeResponse.data);
@@ -1151,8 +1163,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     } catch (error) {
       const errorMessage = error.message || "";
       console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
-      if (attempt < 4) {
-        const delay = 1000; // Delay fijo de 1 segundo en cada reintento
+      if (attempt < 3) {
+        const delay = 1000; // Delay fijo de 1 segundo
         console.log(`[buyToken] Retrying in ${delay} ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
