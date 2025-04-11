@@ -1064,7 +1064,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error("User not registered or missing privateKey.");
       }
   
-      // Obtención del keypair del usuario y la conexión a Solana (usando el endpoint de Helius)
+      // Obtención del keypair y conexión a Solana (usando Helius)
       const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
@@ -1077,7 +1077,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   
       if (!ata) {
         console.error("[buyToken] ATA not found, reattempting...");
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
   
@@ -1105,20 +1105,20 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       if (!orderResponse.data) {
         throw new Error("Failed to receive order details from Ultra API.");
       }
-      
-      // Revisamos si la respuesta usa la propiedad 'unsignedTransaction' o 'transaction'
+  
+      // Revisar si la respuesta utiliza la propiedad 'unsignedTransaction' o 'transaction'
       let unsignedTx = orderResponse.data.unsignedTransaction || orderResponse.data.transaction;
       const requestId = orderResponse.data.requestId;
       if (!unsignedTx || !requestId) {
         console.error("Invalid order response from Ultra API.", orderResponse.data);
         throw new Error("Invalid order response from Ultra API.");
       }
-      // Se aplica trim para eliminar espacios innecesarios
+      // Limpiar la cadena
       unsignedTx = unsignedTx.trim();
       console.log("[buyToken] Order response data:", orderResponse.data);
       console.log(`[buyToken] Unsigned Transaction (first 100 chars): ${unsignedTx.substring(0, 100)}... (length: ${unsignedTx.length})`);
   
-      // Deserializar la transacción unsigned, firmarla y serializarla a base64
+      // Deserializar, firmar y volver a serializar la transacción
       let transactionBuffer;
       try {
         transactionBuffer = Buffer.from(unsignedTx, "base64");
@@ -1137,26 +1137,30 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       const signedTx = versionedTransaction.serialize();
       const signedTxBase64 = Buffer.from(signedTx).toString("base64");
       console.log(`[buyToken] Signed Transaction (first 100 chars): ${signedTxBase64.substring(0, 100)}... (length: ${signedTxBase64.length})`);
-      
-      // Ejecutar la transacción mediante Ultra Execute, con prioritizationFeeLamports y otros parámetros deseados
+  
+      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports y dynamicSlippage)
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
-        prioritizationFeeLamports: 1500000 // Puedes modificar este valor según requieras
+        prioritizationFeeLamports: 1500000 // Valor configurable
       };
       console.log("[buyToken] Executing order with payload:", executePayload);
       const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
       console.log("[buyToken] Execute response:", executeResponse.data);
-      // Verificamos que si se incluye un campo status, su valor sea "Success" y que exista txSignature
-      if ((executeResponse.data.status && executeResponse.data.status !== "Success") ||
-          !executeResponse.data.txSignature) {
+      
+      // Verificar que el executeResponse tenga status "Success"
+      if (
+        !executeResponse.data ||
+        (executeResponse.data.status && executeResponse.data.status !== "Success") ||
+        (!executeResponse.data.txSignature && !executeResponse.data.signature)
+      ) {
         console.error("Invalid execute response from Ultra API.", executeResponse.data);
         throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(executeResponse.data));
       }
   
-      const txSignature = executeResponse.data.txSignature;
+      const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
       console.log("[buyToken] Transaction sent successfully:", txSignature);
       return txSignature;
   
