@@ -1082,7 +1082,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       ]);
   
       if (!ata) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
   
