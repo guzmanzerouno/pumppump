@@ -2441,6 +2441,9 @@ bot.on("callback_query", async (query) => {
   
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
+
+  // Variable global para controlar el throttling de las solicitudes a la API de Jupiter.
+let lastJupRequestTime = 0;
   
 // Función actualizada para refrescar la confirmación de compra sin Moralis
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
