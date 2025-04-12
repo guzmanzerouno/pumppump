@@ -1139,7 +1139,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
-        prioritizationFeeLamports: 1500000 // Valor configurable
+        prioritizationFeeLamports: 2000000 // Valor configurable
       };
       const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
@@ -1252,7 +1252,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
-        prioritizationFeeLamports: 1500000 // Valor configurable (ej. 0.002 SOL aprox.)
+        prioritizationFeeLamports: 2000000 // Valor configurable (ej. 0.002 SOL aprox.)
       };
   
       const executeResponse = await axios.post(
