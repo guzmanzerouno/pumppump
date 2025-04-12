@@ -1056,7 +1056,7 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
   }
 
-// Función para comprar tokens usando Ultra API de Jupiter
+// Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     try {
       const user = users[chatId];
@@ -1064,15 +1064,21 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error("User not registered or missing privateKey.");
       }
   
-      // Obtención del keypair y conexión a Solana (usando Helius)
+      // Obtención del keypair y de la wallet del usuario
       const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+      // Crear la conexión a Helius usando un endpoint premium y el compromiso "processed"
+      const connection = new Connection(
+        "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", 
+        "processed"
+      );
   
       // Verificar/crear la ATA y obtener el balance de SOL en paralelo
       const [ata, balanceLamports] = await Promise.all([
+        // Se usa la función ensureAssociatedTokenAccount que, actualizada, utiliza commitment "processed"
         ensureAssociatedTokenAccount(userKeypair, mint, connection),
-        connection.getBalance(userPublicKey)
+        connection.getBalance(userPublicKey, "processed")
       ]);
   
       if (!ata) {
@@ -1080,13 +1086,13 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       }
   
-      const balance = balanceLamports / 1e9;
-      if (balance < amountSOL) {
-        throw new Error(`Not enough SOL. Balance: ${balance}, Required: ${amountSOL}`);
+      const balanceSOL = balanceLamports / 1e9;
+      if (balanceSOL < amountSOL) {
+        throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
       }
   
       // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      // Convertir el monto de SOL a lamports y a string.
+      // Convertir el monto de SOL a lamports (número entero) y a string
       const orderParams = {
         inputMint: "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
         outputMint: mint,
@@ -1110,7 +1116,6 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       if (!unsignedTx || !requestId) {
         throw new Error("Invalid order response from Ultra API.");
       }
-      // Limpiar la cadena
       unsignedTx = unsignedTx.trim();
   
       // Deserializar, firmar y volver a serializar la transacción
@@ -1118,19 +1123,19 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       try {
         transactionBuffer = Buffer.from(unsignedTx, "base64");
       } catch (err) {
-        throw err;
+        throw new Error("Error decoding unsigned transaction: " + err.message);
       }
       let versionedTransaction;
       try {
         versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
       } catch (err) {
-        throw err;
+        throw new Error("Error deserializing transaction: " + err.message);
       }
       versionedTransaction.sign([userKeypair]);
       const signedTx = versionedTransaction.serialize();
       const signedTxBase64 = Buffer.from(signedTx).toString("base64");
   
-      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports y dynamicSlippage)
+      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
@@ -1140,7 +1145,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
       });
       
-      // Verificar que el executeResponse tenga status "Success"
+      // Verificar que la respuesta tenga status "Success"
       if (
         !executeResponse.data ||
         (executeResponse.data.status && executeResponse.data.status !== "Success") ||
@@ -1154,6 +1159,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   
     } catch (error) {
       const errorMessage = error.message || "";
+      console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
       if (attempt < 3) {
         const delay = 1000; // Delay fijo de 1 segundo
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -1298,34 +1304,34 @@ async function getTokenDecimals(mint) {
     }
 }
 
-// 🔹 Función para verificar y crear la ATA si no existe
+// 🔹 Función para verificar y crear la ATA si no existe usando commitment "processed"
 async function ensureAssociatedTokenAccount(wallet, mint, connection) {
     try {
-      // Generar la dirección ATA para el mint y la wallet del usuario
+      // Calcular la dirección ATA para el mint y la wallet del usuario.
       const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-      
-      // Consultar si la ATA ya existe en la blockchain
-      const ataInfo = await connection.getAccountInfo(ata);
+  
+      // Consultar si la ATA ya existe en la blockchain usando commitment "processed" para respuesta rápida.
+      const ataInfo = await connection.getAccountInfo(ata, "processed");
       if (ataInfo !== null) {
         return ata;
       }
-      
-      // Si no existe, crear la instrucción para la ATA
+  
+      // Si no existe, se crea la instrucción para la ATA.
       const transaction = new Transaction().add(
         createAssociatedTokenAccountInstruction(
-          wallet.publicKey,     // Payer: quien paga la transacción
-          ata,                  // Dirección de la ATA a crear
-          wallet.publicKey,     // Owner: dueño de la ATA (la misma wallet)
-          new PublicKey(mint)   // Mint del token
+          wallet.publicKey,     // Payer: quien paga la transacción.
+          ata,                  // Dirección de la ATA a crear.
+          wallet.publicKey,     // Owner: dueño de la ATA (la misma wallet).
+          new PublicKey(mint)   // Mint del token.
         )
       );
-      
-      // Firmar y enviar la transacción
-      await sendAndConfirmTransaction(connection, transaction, [wallet]);
-      
+  
+      // Enviar la transacción usando el commitment "processed" para acelerar la confirmación.
+      await sendAndConfirmTransaction(connection, transaction, [wallet], { commitment: "processed" });
+  
       return ata;
     } catch (error) {
-      // Puedes manejar el error aquí o propagarlo
+      // Propagamos el error para que quien llame a esta función pueda manejarlo.
       throw error;
     }
   }
