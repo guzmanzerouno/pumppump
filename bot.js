@@ -2467,18 +2467,30 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
-      // 1️⃣ Solicitar la cotización a la API de Jupiter
-      const jupUrl =
-        `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
-        `&outputMint=So11111111111111111111111111111111111111112` +
-        `&amount=1000000000&slippageBps=500&priorityFeeBps=20`;
-      console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
-  
-      const jupRes = await fetch(jupUrl);
-      if (!jupRes.ok) {
-        throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
-      }
-      const jupData = await jupRes.json();
+      // --- CONTROL DE RATERATE ---
+    // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
+    const now = Date.now();
+    const elapsed = now - lastJupRequestTime;
+    if (elapsed < 1000) {
+      const waitTime = 1000 - elapsed;
+      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next Jupiter request...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    lastJupRequestTime = Date.now();
+    // --- FIN CONTROL ---
+
+    // 1️⃣ Solicitar la cotización a la API de Jupiter
+    const jupUrl =
+      `https://lite-api.jup.ag/ultra/v1/order?inputMint=${tokenMint}` +
+      `&outputMint=So11111111111111111111111111111111111111112` +
+      `&amount=1000000000&dynamicSlippage=true&priorityFeeBps=20`;
+    console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
+
+    const jupRes = await fetch(jupUrl);
+    if (!jupRes.ok) {
+      throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+    }
+    const jupData = await jupRes.json();
   
       // Validar que jupData.outAmount sea numérico
       const outAmount = Number(jupData.outAmount);
