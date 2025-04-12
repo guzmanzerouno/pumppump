@@ -2080,9 +2080,18 @@ bot.on("callback_query", async (query) => {
         console.log(`✅ Balance found for ${expectedTokenMint}: ${balance} tokens`);
   
         if (!balance || balance <= 0) {
-          await bot.editMessageText("⚠️ You don't have enough balance to sell.", { chat_id: chatId, message_id: messageId });
-          return;
-        }
+            await bot.editMessageText("⚠️ You don't have enough balance to sell.", { 
+              chat_id: chatId, 
+              message_id: messageId 
+            });
+            // Programar el borrado automático del mensaje en 30 segundos (30000 ms)
+            setTimeout(() => {
+              bot.deleteMessage(chatId, messageId).catch(err => {
+                console.error("Error deleting message:", err);
+              });
+            }, 30000);
+            return;
+          }
   
         let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
         let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
@@ -2168,7 +2177,7 @@ bot.on("callback_query", async (query) => {
     if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
       const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
       const pnlSol = gotSol - beforeBuy;
-      const emoji = pnlSol >= 0 ? "⬆️" : "⬇️";
+      const emoji = pnlSol >= 0 ? "🟢" : "🔻";
       const pnlUsd = solPrice ? (pnlSol * solPrice) : null;
       winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
     }
@@ -2181,7 +2190,16 @@ bot.on("callback_query", async (query) => {
     const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    const confirmationMessage = `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+    // Nueva conexión para obtener el balance SOL de la wallet del usuario que vende
+    const connectionForBalance = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+    const walletPubKey = new PublicKey(sellDetails.walletAddress);
+    const solBalanceLamports = await connectionForBalance.getBalance(walletPubKey);
+    const walletBalance = solBalanceLamports / 1e9;
+    const walletUsdValue = solPrice ? (walletBalance * solPrice).toFixed(2) : "N/A";
+  
+    // Construir el mensaje final, incluyendo el balance de la wallet
+    const confirmationMessage =
+      `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
@@ -2189,6 +2207,7 @@ bot.on("callback_query", async (query) => {
       `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
       `💲 *Sold:* ${soldAmount} Tokens\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
+      `🪙 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsdValue})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
@@ -2227,7 +2246,6 @@ bot.on("callback_query", async (query) => {
       "messageText": confirmationMessage
     });
   
-    console.log(`✅ Sell confirmation sent for ${soldAmount} ${tokenSymbol}`);
   }
 
   bot.on("callback_query", async (query) => {
