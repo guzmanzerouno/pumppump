@@ -2490,7 +2490,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     // 1️⃣ Solicitar la cotización a la API de Jupiter
     const jupUrl =
-      `https://lite-api.jup.ag/ultra/v1/order?inputMint=${tokenMint}` +
+      `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
       `&outputMint=So11111111111111111111111111111111111111112` +
       `&amount=1000000000&dynamicSlippage=true&priorityFeeBps=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
