@@ -2507,12 +2507,13 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     }
     const jupData = await jupRes.json();
   
-      // Validar que jupData.outAmount sea numérico
-      const outAmount = Number(jupData.outAmount);
-      if (isNaN(outAmount)) {
-        throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
-      }
-      const priceSolNow = outAmount / 1e9;
+      // Validar que jupData.currentPrice sea numérico
+const currentPrice = Number(jupData.currentPrice);
+if (isNaN(currentPrice)) {
+  throw new Error(`Invalid currentPrice from Jupiter: ${jupData.currentPrice}`);
+}
+// currentPrice ya viene en formato decimal (precio en SOL), así que lo usamos directamente.
+const priceSolNow = currentPrice;
   
       // Funciones formateadoras seguras (si no es número, devuelven "N/A")
       const formatDefault = (val) => {
