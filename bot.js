@@ -2476,26 +2476,32 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
-      // --- CONTROL DE RATERATE ---
+     // --- CONTROL DE RATERATE ---
     // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
     if (elapsed < 1000) {
       const waitTime = 1000 - elapsed;
-      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next Jupiter request...`);
+      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
+    // Actualizar la marca de tiempo
     lastJupRequestTime = Date.now();
     // --- FIN CONTROL ---
 
     // 1️⃣ Solicitar la cotización a la API de Jupiter
     const jupUrl =
-      `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
-      `&outputMint=So11111111111111111111111111111111111111112` +
-      `&amount=1000000000&dynamicSlippage=true&priorityFeeBps=20`;
-    console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
+    `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
+    `&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
+  console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
 
     const jupRes = await fetch(jupUrl);
+    if (!jupRes.status === 429) {
+      console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      lastJupRequestTime = Date.now();
+      throw new Error("Rate excess error from SolanaTracker API");
+    }
     if (!jupRes.ok) {
       throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
     }
