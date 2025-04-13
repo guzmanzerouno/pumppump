@@ -1818,7 +1818,7 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
   
     // Intentamos obtener la respuesta con un máximo de 5 intentos y un timeout de 2 segundos para cada uno
     let attempt = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 15;
     let response;
     let lastError;
     while (attempt < maxAttempts) {
