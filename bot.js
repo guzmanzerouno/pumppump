@@ -2454,6 +2454,7 @@ let lastJupRequestTime = 0;
 // Función actualizada para refrescar la confirmación de compra sin Moralis
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     let tokenSymbol = "Unknown";
+  
     try {
       // Obtener datos estáticos del token
       const tokenInfo = getTokenInfo(tokenMint);
@@ -2476,42 +2477,36 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       }
   
       // --- CONTROL DE RATERATE ---
-      // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
-      const now = Date.now();
-      const elapsed = now - lastJupRequestTime;
-      if (elapsed < 1000) {
-        const waitTime = 1000 - elapsed;
-        console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-      // Actualizar la marca de tiempo
-      lastJupRequestTime = Date.now();
-      // --- FIN CONTROL ---
+    // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
+    const now = Date.now();
+    const elapsed = now - lastJupRequestTime;
+    if (elapsed < 1000) {
+      const waitTime = 1000 - elapsed;
+      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next Jupiter request...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    lastJupRequestTime = Date.now();
+    // --- FIN CONTROL ---
+
+    // 1️⃣ Solicitar la cotización a la API de Jupiter
+    const jupUrl =
+      `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
+      `&outputMint=So11111111111111111111111111111111111111112` +
+      `&amount=1000000000&dynamicSlippage=true&priorityFeeBps=20`;
+    console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
+
+    const jupRes = await fetch(jupUrl);
+    if (!jupRes.ok) {
+      throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+    }
+    const jupData = await jupRes.json();
   
-      // 1️⃣ Solicitar la cotización a la API de SolanaTracker (swap‑v2 endpoint)
-      const trackerUrl =
-        `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
-        `&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
-      console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${trackerUrl}`);
-  
-      const trackerRes = await fetch(trackerUrl);
-      // Si se obtiene un 429, esperar 2500 ms extra y lanzar un error para reintentar
-      if (trackerRes.status === 429) {
-        console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
-        await new Promise(resolve => setTimeout(resolve, 2500));
-        lastJupRequestTime = Date.now();
-        throw new Error("Rate excess error from SolanaTracker API");
+      // Validar que jupData.outAmount sea numérico
+      const outAmount = Number(jupData.outAmount);
+      if (isNaN(outAmount)) {
+        throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
       }
-      if (!trackerRes.ok) {
-        throw new Error(`Error fetching SolanaTracker rate: ${trackerRes.statusText}`);
-      }
-      const trackerData = await trackerRes.json();
-  
-      // Validar que trackerData.currentPrice sea numérico
-      const priceSolNow = Number(trackerData.currentPrice);
-      if (isNaN(priceSolNow)) {
-        throw new Error(`Invalid currentPrice from tracker data: ${trackerData.currentPrice}`);
-      }
+      const priceSolNow = outAmount / 1e9;
   
       // Funciones formateadoras seguras (si no es número, devuelven "N/A")
       const formatDefault = (val) => {
@@ -2549,7 +2544,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       const changePercentStr = changePercent.toFixed(2);
       const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
   
-      // Calcular el PNL
+      // Calcular el PNL (aunque no se usa en el mensaje final, se conserva esta variable para otros usos)
       const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
       const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
   
@@ -2568,7 +2563,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       // Construir el mensaje final de actualización
       const updatedMessage =
         `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-        `*SOL/${tokenSymbol}* (SolanaTracker rate)\n` +
+        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
         `🕒 *Time:* ${formattedTime}\n\n` +
         `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
         `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
@@ -2588,7 +2583,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "🔄 Refresh Info", callback_data: `refresh_${tokenMint}` },
+              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
               { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
             ],
             [
