@@ -2526,12 +2526,15 @@ const priceSolNow = currentPrice;
         const numVal = Number(val);
         if (isNaN(numVal)) return "N/A";
         if (numVal >= 1) {
-          // Formatear con 6 decimales si el valor es mayor o igual a 1
+          // Formatea valores >= 1 con 6 decimales.
           return numVal.toFixed(6);
         }
-        // Para valores menores a 1, se usa un formato fijo de 9 decimales
-        // y luego se elimina cualquier cero final innecesario.
-        return parseFloat(numVal.toFixed(9)).toString();
+        // Para valores menores a 1, se formatea usando toLocaleString para forzar el uso de la notación decimal.
+        return numVal.toLocaleString("en-US", {
+          minimumFractionDigits: 9,
+          maximumFractionDigits: 9,
+          useGrouping: false // sin separación por comas
+        });
       };
   
       const formattedOriginalPrice = formatDefault(original.tokenPrice);
