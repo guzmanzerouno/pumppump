@@ -2476,70 +2476,77 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         return;
       }
   
-      // --- CONTROL DE RATERATE ---
+    // --- CONTROL DE RATERATE ---
     // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
     if (elapsed < 1000) {
       const waitTime = 1000 - elapsed;
-      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next Jupiter request...`);
+      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
+    // Actualizar la marca de tiempo
     lastJupRequestTime = Date.now();
     // --- FIN CONTROL ---
 
-    // 1️⃣ Solicitar la cotización a la API de Jupiter
+    // 1️⃣ Solicitar la cotización a la API de SolanaTracker (swap‑v2 endpoint)
     const jupUrl =
-      `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
-      `&outputMint=So11111111111111111111111111111111111111112` +
-      `&amount=1000000000&dynamicSlippage=true&priorityFeeBps=20`;
-    console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
+      `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
+      `&to=So11111111111111111111111111111111111111112` +
+      `&amount=1&slippage=20`;
+    console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${trackerUrl}`);
 
-    const jupRes = await fetch(jupUrl);
-    if (!jupRes.ok) {
-      throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+    const trackerRes = await fetch(trackerUrl);
+    // Si se obtiene un 429, esperar 2500 ms extra y lanzar un error para reintentar
+    if (trackerRes.status === 429) {
+      console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      lastJupRequestTime = Date.now();
+      throw new Error("Rate excess error from SolanaTracker API");
     }
-    const jupData = await jupRes.json();
-  
-      // Validar que jupData.outAmount sea numérico
-      const outAmount = Number(jupData.outAmount);
-      if (isNaN(outAmount)) {
-        throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
-      }
-      const priceSolNow = outAmount / 1e9;
-  
-      // Funciones formateadoras seguras (si no es número, devuelven "N/A")
-      const formatDefault = (val) => {
-        const numVal = Number(val);
-        if (isNaN(numVal)) return "N/A";
-        return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
-      };
-  
-      const formatWithZeros = (val) => {
-        const numVal = Number(val);
-        if (isNaN(numVal)) return "N/A";
-        if (numVal >= 1) return numVal.toFixed(6);
-        const str = numVal.toFixed(12);
-        const forced = "0.000" + str.slice(2);
-        const match = forced.match(/0*([1-9]\d{0,2})/);
-        if (!match) return forced;
-        const idx = forced.indexOf(match[1]);
-        return forced.slice(0, idx + match[1].length + 1);
-      };
-  
-      const formattedOriginalPrice = formatDefault(original.tokenPrice);
-      const formattedCurrentPrice = formatWithZeros(priceSolNow);
-  
-      // Calcular el valor actual de la inversión
-      const currentPriceShown = Number(formattedCurrentPrice);
-      const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-      const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-  
-      // Calcular el cambio porcentual
-      let changePercent = 0;
-      if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
-        changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
-        if (!isFinite(changePercent)) changePercent = 0;
+    if (!trackerRes.ok) {
+      throw new Error(`Error fetching SolanaTracker rate: ${trackerRes.statusText}`);
+    }
+    const trackerData = await trackerRes.json();
+
+    // Validar que trackerData.currentPrice sea numérico
+    const priceSolNow = Number(trackerData.currentPrice);
+    if (isNaN(priceSolNow)) {
+      throw new Error(`Invalid currentPrice from tracker data: ${trackerData.currentPrice}`);
+    }
+
+    // Funciones formateadoras seguras (si no es número, devuelven "N/A")
+    const formatDefault = (val) => {
+      const numVal = Number(val);
+      if (isNaN(numVal)) return "N/A";
+      return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
+    };
+
+    const formatWithZeros = (val) => {
+      const numVal = Number(val);
+      if (isNaN(numVal)) return "N/A";
+      if (numVal >= 1) return numVal.toFixed(6);
+      const str = numVal.toFixed(12);
+      const forced = "0.000" + str.slice(2);
+      const match = forced.match(/0*([1-9]\d{0,2})/);
+      if (!match) return forced;
+      const idx = forced.indexOf(match[1]);
+      return forced.slice(0, idx + match[1].length + 1);
+    };
+
+    const formattedOriginalPrice = formatDefault(original.tokenPrice);
+    const formattedCurrentPrice = formatWithZeros(priceSolNow);
+
+    // Calcular el valor actual de la inversión
+    const currentPriceShown = Number(formattedCurrentPrice);
+    const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
+    const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
+
+    // Calcular el cambio porcentual
+    let changePercent = 0;
+    if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
+      changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
+      if (!isFinite(changePercent)) changePercent = 0;
       }
       const changePercentStr = changePercent.toFixed(2);
       const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
