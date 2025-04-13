@@ -2525,13 +2525,13 @@ const priceSolNow = currentPrice;
       const formatWithZeros = (val) => {
         const numVal = Number(val);
         if (isNaN(numVal)) return "N/A";
-        if (numVal >= 1) return numVal.toFixed(6);
-        const str = numVal.toFixed(12);
-        const forced = "0.000" + str.slice(2);
-        const match = forced.match(/0*([1-9]\d{0,2})/);
-        if (!match) return forced;
-        const idx = forced.indexOf(match[1]);
-        return forced.slice(0, idx + match[1].length + 1);
+        if (numVal >= 1) {
+          // Formatear con 6 decimales si el valor es mayor o igual a 1
+          return numVal.toFixed(6);
+        }
+        // Para valores menores a 1, se usa un formato fijo de 9 decimales
+        // y luego se elimina cualquier cero final innecesario.
+        return parseFloat(numVal.toFixed(9)).toString();
       };
   
       const formattedOriginalPrice = formatDefault(original.tokenPrice);
