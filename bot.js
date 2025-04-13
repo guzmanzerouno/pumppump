@@ -2051,120 +2051,177 @@ function getTimestampEST() {
 
 // CALLBACK QUERY PARA OPERACIONES DE VENTA
 bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
-    const data = query.data;
-  
-    if (data.startsWith("sell_")) {
-      const parts = data.split("_");
-      const expectedTokenMint = parts[1]; // Mint del token que se quiere vender (debe venir en el callback)
-      const sellType = parts[2];          // Por ejemplo, "50" o "max"
-  
-      console.log(`🔍 Debug - User before selling (${expectedTokenMint}):`, JSON.stringify(users[chatId], null, 2));
-  
-      if (!users[chatId] || !users[chatId].privateKey) {
-        console.error(`⚠ Private key not found for user: ${JSON.stringify(users[chatId])}`);
-        bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data.startsWith("sell_")) {
+    const parts = data.split("_");
+    const expectedTokenMint = parts[1]; // Mint del token que se quiere vender
+    const sellType = parts[2];          // Por ejemplo, "50" o "max"
+
+    console.log(
+      `🔍 Debug - User before selling (${expectedTokenMint}):`,
+      JSON.stringify(users[chatId], null, 2)
+    );
+
+    if (!users[chatId] || !users[chatId].privateKey) {
+      console.error(
+        `⚠ Private key not found for user: ${JSON.stringify(users[chatId])}`
+      );
+      bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
+      return;
+    }
+
+    // Intentar recuperar el mensaje "Waiting for sell" previamente guardado
+    let waitingMsgId = null;
+    if (
+      buyReferenceMap[chatId] &&
+      buyReferenceMap[chatId][expectedTokenMint] &&
+      buyReferenceMap[chatId][expectedTokenMint].sellMessageId
+    ) {
+      waitingMsgId = buyReferenceMap[chatId][expectedTokenMint].sellMessageId;
+    } else {
+      // Si no existe, se envía un mensaje nuevo "⏳ Waiting for sell..."
+      const waitingMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", {
+        parse_mode: "Markdown",
+      });
+      waitingMsgId = waitingMsg.message_id;
+      // Guardar el ID en la referencia de compra
+      if (!buyReferenceMap[chatId]) {
+        buyReferenceMap[chatId] = {};
+      }
+      if (!buyReferenceMap[chatId][expectedTokenMint]) {
+        buyReferenceMap[chatId][expectedTokenMint] = {};
+      }
+      buyReferenceMap[chatId][expectedTokenMint].sellMessageId = waitingMsgId;
+    }
+
+    // Actualizar el mensaje de "Waiting for sell" (por ejemplo, mostrando "Processing sale...")
+    await bot.editMessageText(
+      `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
+      { chat_id: chatId, message_id: waitingMsgId }
+    );
+
+    try {
+      const wallet = Keypair.fromSecretKey(
+        new Uint8Array(bs58.decode(users[chatId].privateKey))
+      );
+      const connection = new Connection(
+        "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+        "confirmed"
+      );
+
+      // Aseguramos la existencia de la ATA
+      const ata = await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
+      if (!ata)
+        throw new Error(`❌ Failed to create or retrieve the ATA for ${expectedTokenMint}`);
+      console.log(`✅ ATA verified for selling: ${ata.toBase58()}`);
+
+      const decimals = await getTokenDecimals(expectedTokenMint);
+      console.log(`✅ Token ${expectedTokenMint} has ${decimals} decimals.`);
+
+      let balance = await getTokenBalance(chatId, expectedTokenMint);
+      console.log(`✅ Balance found for ${expectedTokenMint}: ${balance} tokens`);
+
+      if (!balance || balance <= 0) {
+        await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
+          chat_id: chatId,
+          message_id: waitingMsgId,
+        });
+        // Programar el borrado automático del mensaje en 30 segundos
+        setTimeout(() => {
+          bot.deleteMessage(chatId, waitingMsgId).catch(err =>
+            console.error("Error deleting message:", err)
+          );
+        }, 30000);
         return;
       }
-  
-      const initialMsg = await bot.sendMessage(chatId, `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`);
-      const messageId = initialMsg.message_id;
-  
-      try {
-        const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-  
-        // Aseguramos la existencia de la ATA
-        const ata = await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
-        if (!ata) throw new Error(`❌ Failed to create or retrieve the ATA for ${expectedTokenMint}`);
-        console.log(`✅ ATA verified for selling: ${ata.toBase58()}`);
-  
-        const decimals = await getTokenDecimals(expectedTokenMint);
-        console.log(`✅ Token ${expectedTokenMint} has ${decimals} decimals.`);
-  
-        let balance = await getTokenBalance(chatId, expectedTokenMint);
-        console.log(`✅ Balance found for ${expectedTokenMint}: ${balance} tokens`);
-  
-        if (!balance || balance <= 0) {
-            await bot.editMessageText("⚠️ You don't have enough balance to sell.", { 
-              chat_id: chatId, 
-              message_id: messageId 
-            });
-            // Programar el borrado automático del mensaje en 30 segundos (30000 ms)
-            setTimeout(() => {
-              bot.deleteMessage(chatId, messageId).catch(err => {
-                console.error("Error deleting message:", err);
-              });
-            }, 30000);
-            return;
-          }
-  
-        let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
-        let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
-        let soldAmount = sellType === "50" ? (balance / 2).toFixed(9) : balance.toFixed(3);
-        console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
-  
-        if (amountToSell < 1) {
-          await bot.editMessageText("⚠️ The amount to sell is too low.", { chat_id: chatId, message_id: messageId });
-          return;
-        }
-  
-        let txSignature = null;
-        let attempts = 0;
-        let delayBetweenAttempts = 5000;
-        while (attempts < 3 && !txSignature) {
-          attempts++;
-          console.log(`🔄 Attempt ${attempts}/3 to execute sale...`);
-          txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
-          if (!txSignature) {
-            await new Promise(res => setTimeout(res, delayBetweenAttempts));
-            delayBetweenAttempts *= 1.5;
-          }
-        }
-  
-        if (!txSignature) {
-          await bot.editMessageText("❌ The sale could not be completed after multiple attempts.", { chat_id: chatId, message_id: messageId });
-          return;
-        }
-  
-        await bot.editMessageText(
-          `✅ *Sell order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details...*`,
-          { chat_id: chatId, message_id: messageId, parse_mode: "Markdown", disable_web_page_preview: true }
-        );
-  
-        console.log("⏳ Waiting for Solana to confirm the transaction...");
-        let sellDetails = null;
-        attempts = 0;
-        delayBetweenAttempts = 5000;
-  
-        while (attempts < 5 && !sellDetails) {
-          attempts++;
-          console.log(`⏳ Fetching transaction details from Helius for: ${txSignature} (Attempt ${attempts})`);
-          sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
-          if (!sellDetails) {
-            await new Promise(res => setTimeout(res, delayBetweenAttempts));
-            delayBetweenAttempts *= 1.2;
-          }
-        }
-  
-        if (!sellDetails) {
-          await bot.editMessageText(
-            `⚠️ Sell details could not be retrieved after 5 attempts. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
-            { chat_id: chatId, message_id: messageId, parse_mode: "Markdown", disable_web_page_preview: true }
-          );
-          return;
-        }
-  
-        // Llamar a confirmSell pasando el mint esperado explicitamente
-        await confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature, expectedTokenMint);
-      } catch (error) {
-        console.error("❌ Error in sell process:", error);
-        await bot.editMessageText("❌ The sale could not be completed.", { chat_id: chatId, message_id: messageId });
+
+      let balanceInLamports = Math.floor(balance * Math.pow(10, decimals));
+      let amountToSell = sellType === "50" ? Math.floor(balanceInLamports / 2) : balanceInLamports;
+      let soldAmount =
+        sellType === "50" ? (balance / 2).toFixed(9) : balance.toFixed(3);
+      console.log(`🔹 Selling amount in lamports: ${amountToSell}`);
+
+      if (amountToSell < 1) {
+        await bot.editMessageText("⚠️ The amount to sell is too low.", {
+          chat_id: chatId,
+          message_id: waitingMsgId,
+        });
+        return;
       }
+
+      let txSignature = null;
+      let attempts = 0;
+      let delayBetweenAttempts = 5000;
+      while (attempts < 3 && !txSignature) {
+        attempts++;
+        console.log(`🔄 Attempt ${attempts}/3 to execute sale...`);
+        txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
+        if (!txSignature) {
+          await new Promise((res) => setTimeout(res, delayBetweenAttempts));
+          delayBetweenAttempts *= 1.5;
+        }
+      }
+
+      if (!txSignature) {
+        await bot.editMessageText("❌ The sale could not be completed after multiple attempts.", {
+          chat_id: chatId,
+          message_id: waitingMsgId,
+        });
+        return;
+      }
+
+      // Actualizamos el mensaje de "Waiting for sell" indicando que se confirmó la orden y que se están obteniendo detalles
+      await bot.editMessageText(
+        `✅ *Sell order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ Fetching sell details...`,
+        {
+          chat_id: chatId,
+          message_id: waitingMsgId,
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+        }
+      );
+
+      console.log("⏳ Waiting for Solana to confirm the transaction...");
+      let sellDetails = null;
+      attempts = 0;
+      delayBetweenAttempts = 5000;
+      while (attempts < 5 && !sellDetails) {
+        attempts++;
+        console.log(`⏳ Fetching transaction details for: ${txSignature} (Attempt ${attempts})`);
+        sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
+        if (!sellDetails) {
+          await new Promise((res) => setTimeout(res, delayBetweenAttempts));
+          delayBetweenAttempts *= 1.2;
+        }
+      }
+
+      if (!sellDetails) {
+        await bot.editMessageText(
+          `⚠️ Sell details could not be retrieved after 5 attempts. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+          {
+            chat_id: chatId,
+            message_id: waitingMsgId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true,
+          }
+        );
+        return;
+      }
+
+      // Llamar a la función confirmSell para actualizar el mensaje con los detalles finales de la venta.
+      await confirmSell(chatId, sellDetails, soldAmount, waitingMsgId, txSignature, expectedTokenMint);
+    } catch (error) {
+      console.error("❌ Error in sell process:", error);
+      await bot.editMessageText("❌ The sale could not be completed.", {
+        chat_id: chatId,
+        message_id: waitingMsgId,
+      });
     }
-  
-    bot.answerCallbackQuery(query.id);
-  });
+  }
+  bot.answerCallbackQuery(query.id);
+});
 
   async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature, expectedTokenMint) {
     const solPrice = await getSolPriceUSD();
@@ -2365,19 +2422,19 @@ bot.on("callback_query", async (query) => {
       return;
     }
   
-    // Obtener la información estática guardada del token (nombre, símbolo, etc.)
+    // Obtener la información estática del token (nombre, símbolo, etc.)
     const swapTokenData = getTokenInfo(receivedTokenMint);
     const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
   
-    const inputAmount = parseFloat(swapDetails.inputAmount);  
+    const inputAmount = parseFloat(swapDetails.inputAmount);
     // Dado que eliminamos el swapFee, el total gastado es el inputAmount.
     const spentTotal = inputAmount.toFixed(3);
     const usdBefore = solPrice ? `USD $${(inputAmount * solPrice).toFixed(2)}` : "N/A";
   
-    // Calcular el precio por token: cuánto SOL se pagó por cada token recibido
+    // Calcular el precio por token: cuánto SOL se pagó por cada token recibido.
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
   
-    // Obtener el timestamp raw para formatearlo en UTC y EST
+    // Obtener el timestamp y formatearlo en UTC y EST.
     const rawTime = swapDetails.rawTime || Date.now();
     const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
       hour12: false,
@@ -2389,7 +2446,7 @@ bot.on("callback_query", async (query) => {
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Construir el mensaje de confirmación final
+    // --- CONSTRUIR EL MENSAJE DE CONFIRMACIÓN DE COMPRA ---
     const confirmationMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
@@ -2400,7 +2457,7 @@ bot.on("callback_query", async (query) => {
       `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
-    // Actualizar el mensaje en Telegram con la confirmación final y los botones de acción
+    // Actualizar el mensaje de compra con la información del swap
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2419,15 +2476,22 @@ bot.on("callback_query", async (query) => {
       }
     });
   
-    // Guardar la referencia para refrescar la compra en el futuro
-    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+    // --- ENVIAR UN SEGUNDO MENSAJE PARA "WAITING FOR SELL" ---
+    // Este mensaje se envía al finalizar la compra y se guarda su ID para futuras actualizaciones en el proceso de venta.
+    const waitingSellMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
+  
+    // Guardar la referencia de compra, incluyendo el mensaje de "Waiting for sell"
+    if (!buyReferenceMap[chatId]) {
+      buyReferenceMap[chatId] = {};
+    }
     buyReferenceMap[chatId][receivedTokenMint] = {
       solBeforeBuy: parseFloat(spentTotal),
       receivedAmount: receivedAmount,
       tokenPrice: tokenPrice,
       walletAddress: swapDetails.walletAddress,
       txSignature,
-      time: Date.now()
+      time: Date.now(),
+      sellMessageId: waitingSellMsg.message_id // <-- Se guarda el ID del mensaje "Waiting for sell"
     };
   
     // Guardar el registro completo de la operación en swaps.json
