@@ -2566,8 +2566,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     // Control de cooldown para evitar refrescos muy seguidos (bloqueo de 1 segundo por cada combinación chat+token)
     const refreshKey = `${chatId}_${tokenMint}`;
-    if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1250)) {
-      console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1.25 second.`);
+    if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1000)) {
+      console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1 second.`);
       // Opcional: se responde al callback indicando el bloqueo sin ejecutar el refresh
       return;
     }
