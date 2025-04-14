@@ -2579,12 +2579,12 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
 
-    // Realizar la solicitud mediante Axios usando el proxyAgent
+    // Realizar la solicitud mediante Axios usando el proxyAgent y con timeout de 5s
     const jupRes = await axios.get(jupUrl, {
       httpsAgent: proxyAgent,
       timeout: 5000,
     });
-    
+
     if (jupRes.status === 429) {
       console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
@@ -2601,7 +2601,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     if (isNaN(currentPrice)) {
       throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
     }
-    // currentPrice ya viene en formato decimal (precio en SOL), así que lo usamos directamente.
+    // currentPrice ya viene en formato decimal (precio en SOL), lo usamos directamente.
     const priceSolNow = currentPrice;
 
     // Funciones formateadoras seguras
@@ -2642,7 +2642,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const changePercentStr = changePercent.toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
 
-    // Calcular el PNL (aunque no se usa en el mensaje final, se conserva esta variable para otros usos)
+    // Calcular el PNL (se conserva para otros usos)
     const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
@@ -2688,44 +2688,12 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
-    // Imprimir el error completo (incluyendo la pila) en la consola
-    console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
-    await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
-  }
-}
-
-async function getSolPriceUSD() {
-  try {
-    const response = await axios.get("https://quote-api.jup.ag/v6/quote", {
-      params: {
-        inputMint: "So11111111111111111111111111111111111111112", // SOL
-        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-        amount: 100000000, // 0.1 SOL (100M lamports)
-        slippageBps: 50
-      }
-    });
-
-    const data = response.data;
-
-    if (!data || !data.outAmount) {
-      console.error("❌ No se encontró 'outAmount' en la respuesta.");
-      return null;
+    if (error.message && error.message.includes("message is not modified")) {
+      console.log("⏸ Message not modified, skipping update.");
+    } else {
+      console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
+      await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
     }
-
-    const solInLamports = 100000000; // 0.1 SOL
-    const usdcDecimals = 6;
-
-    // Convertimos el outAmount (USDC con 6 decimales) a USD
-    const usdcAmount = parseFloat(data.outAmount) / Math.pow(10, usdcDecimals);
-    const solAmount = solInLamports / 1e9; // Convertimos lamports a SOL
-
-    const solPrice = usdcAmount / solAmount; // Precio de 1 SOL en USD
-
-    return solPrice;
-
-  } catch (error) {
-    console.error("❌ Error al obtener el precio de SOL desde Jupiter:", error.message);
-    return null;
   }
 }
 
