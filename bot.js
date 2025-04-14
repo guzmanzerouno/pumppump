@@ -2679,36 +2679,38 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    await bot.editMessageText(updatedMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-          ],
-          [
-            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
+      await bot.editMessageText(updatedMessage, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+              { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+            ],
+            [
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
+            ]
           ]
-        ]
+        }
+      });
+  
+      console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
+    } catch (error) {
+      // Filtrar para no notificar al bot (solo loggear) los errores 429 o 407
+      if (error.message && error.message.includes("message is not modified")) {
+        console.log("⏸ Message not modified, skipping update.");
+        return;
+      } else if (error.message && (error.message.includes("429") || error.message.includes("407"))) {
+        console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
+      } else {
+        console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
+        await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
       }
-    });
-
-    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-  } catch (error) {
-    // Filtrar para no notificar al bot (solo loggear) los errores con códigos 429 y 407
-    if (error.message && (error.message.includes("429") || error.message.includes("407"))) {
-      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
-      // Omitir notificación en Telegram para estos errores
-    } else {
-      console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
-      await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
     }
   }
-}
 
 async function getSolPriceUSD() {
   try {
