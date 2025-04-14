@@ -2547,8 +2547,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
-    if (elapsed < 1000) {
-      const waitTime = 1000 - elapsed;
+    if (elapsed < 600) {
+      const waitTime = 600 - elapsed;
       console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
