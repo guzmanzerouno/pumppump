@@ -2517,7 +2517,7 @@ bot.on("callback_query", async (query) => {
   }
 
 // Define la URL del proxy en el formato: protocol://username:password@host:port
-const proxyUrl = "http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1:i75am5xil518@brd.superproxy.io:33335";
+const proxyUrl = "http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1-country-us:i75am5xil518@brd.superproxy.io:33335";
 // Crea el agente proxy
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
@@ -2578,13 +2578,13 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     // Construir la URL para la API de SolanaTracker
     const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
-    
+
+    // Realizar la solicitud mediante Axios usando el proxyAgent
     const jupRes = await axios.get(jupUrl, {
       httpsAgent: proxyAgent,
       timeout: 5000,
     });
     
-    // Ahora puedes verificar jupRes.status, jupRes.data, etc.
     if (jupRes.status === 429) {
       console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
@@ -2615,7 +2615,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
       if (numVal >= 1) {
-        // Formatea valores >= 1 con 6 decimales.
         return numVal.toFixed(6);
       }
       // Para valores menores a 1, forzamos la notación decimal con 9 dígitos
@@ -2643,20 +2642,14 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const changePercentStr = changePercent.toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
 
-    // Calcular el PNL
+    // Calcular el PNL (aunque no se usa en el mensaje final, se conserva esta variable para otros usos)
     const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
     // Formatear la hora de la compra en UTC y EST
     const rawTime = original.time || Date.now();
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
-      hour12: false,
-      timeZone: "UTC"
-    });
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: "America/New_York"
-    });
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
 
     // Construir el mensaje final de actualización
@@ -2695,13 +2688,9 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
 
     console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
-    const errorMessage = error?.response?.body?.description || error.message;
-    if (errorMessage.includes("message is not modified")) {
-      console.log(`⏸ Message not modified for ${tokenSymbol}, skipping.`);
-      return;
-    }
-    console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
-    await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
+    // Imprimir el error completo (incluyendo la pila) en la consola
+    console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
+    await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
   }
 }
 
