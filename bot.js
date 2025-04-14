@@ -2662,19 +2662,20 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
     const rawTime = original.time || Date.now();
-    const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", {
-      hour12: false,
-      timeZone: "UTC"
-    });
-    const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: "America/New_York"
-    });
+    const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
 
+    // Calcular "Age" (tiempo transcurrido desde la transacción)
+    const ageMs = Date.now() - rawTime;
+    const ageMinutes = Math.floor(ageMs / 60000);
+    const ageSeconds = Math.floor((ageMs % 60000) / 1000);
+    const age = `${ageMinutes}m ${ageSeconds}s`;
+
+    // Construir el mensaje final de actualización
     const updatedMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+      `*SOL/${tokenSymbol}* ⏳ **Age:** ${escapeMarkdown(age)} (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
@@ -2686,23 +2687,24 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-      await bot.editMessageText(updatedMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-            ],
-            [
-              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-            ]
+    // Actualizar el mensaje en Telegram con la confirmación final
+    await bot.editMessageText(updatedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+          ],
+          [
+            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
           ]
-        }
-      });
+        ]
+      }
+    });
   
       console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
     } catch (error) {
