@@ -2442,7 +2442,7 @@ bot.on("callback_query", async (query) => {
     // Calcular el precio por token: cuánto SOL se pagó por cada token recibido.
     const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
   
-    // Obtener el timestamp y formatearlo en UTC y EST.
+    // Obtener el timestamp de la transacción y formatearlo en UTC y EST.
     const rawTime = swapDetails.rawTime || Date.now();
     const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
       hour12: false,
@@ -2454,15 +2454,22 @@ bot.on("callback_query", async (query) => {
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
+    // Calcular la "Age": tiempo transcurrido desde rawTime hasta ahora.
+    const ageMs = Date.now() - rawTime;
+    const minutes = Math.floor(ageMs / 60000);
+    const seconds = Math.floor((ageMs % 60000) / 1000);
+    const age = `${minutes}m ${seconds}s`;
+  
     // --- CONSTRUIR EL MENSAJE DE CONFIRMACIÓN DE COMPRA ---
-    const confirmationMessage = `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+    const confirmationMessage =
+      `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+      `*SOL/${tokenSymbol}* ⏳ **Age:** ${escapeMarkdown(age)} (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
       `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
       `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
+      `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(receivedTokenMint)}\`\n` +
       `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
     // Actualizar el mensaje de compra con la información del swap
@@ -2488,7 +2495,7 @@ bot.on("callback_query", async (query) => {
     // Este mensaje se envía al finalizar la compra y se guarda su ID para futuras actualizaciones en el proceso de venta.
     const waitingSellMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
   
-    // Guardar la referencia de compra, incluyendo el mensaje de "Waiting for sell"
+    // Guardar la referencia para refrescar la compra en el futuro, incluyendo el ID del mensaje "Waiting for sell"
     if (!buyReferenceMap[chatId]) {
       buyReferenceMap[chatId] = {};
     }
@@ -2499,7 +2506,7 @@ bot.on("callback_query", async (query) => {
       walletAddress: swapDetails.walletAddress,
       txSignature,
       time: Date.now(),
-      sellMessageId: waitingSellMsg.message_id // <-- Se guarda el ID del mensaje "Waiting for sell"
+      sellMessageId: waitingSellMsg.message_id // Se guarda el ID del mensaje "Waiting for sell"
     };
   
     // Guardar el registro completo de la operación en swaps.json
