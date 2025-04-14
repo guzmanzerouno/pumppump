@@ -2516,46 +2516,42 @@ bot.on("callback_query", async (query) => {
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
 
-// Cambiamos la variable a "let" para poder actualizarla.
+// Configuración inicial del proxy con un session por defecto.
 let proxyAgent = new HttpsProxyAgent("http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1:i75am5xil518@brd.superproxy.io:33335");
 
-// Contador para llevar el número de solicitudes de refresh
+// Variable global para contar las solicitudes de refresh.
 let refreshRequestCount = 0;
 
-/**
- * Función que actualiza la configuración del proxy generando un nuevo session id.
- */
+// Función para actualizar el proxy generando un nuevo session ID.
 function updateProxyAgent() {
-  // Genera un nuevo session ID (por ejemplo, 8 caracteres aleatorios)
-  const sessionId = Math.random().toString(36).substring(2, 10);  
-  // Concatena el session ID al username según el formato que recomiende Bright Data.
+  // Genera un session ID aleatorio (8 caracteres, por ejemplo)
+  const sessionId = Math.random().toString(36).substring(2, 10);
+  // En Bright Data (antes Luminati) se recomienda incluir el session en el username.
   const newUsername = `brd-customer-hl_7a7f0241-zone-datacenter_proxy${sessionId}`;
-  // Construye la URL del proxy con la nueva sesión.
   const newProxyUrl = `http://${newUsername}:i75am5xil518@brd.superproxy.io:33335`;
-  console.log(`Actualizando el proxy a la nueva sesión: ${newUsername}`);
-  // Actualiza el agente proxy global.
+  console.log(`Actualizando sesión de proxy: ${newUsername}`);
   proxyAgent = new HttpsProxyAgent(newProxyUrl);
-  // Reinicia el contador de solicitudes
-  refreshRequestCount = 0;
+  refreshRequestCount = 0; // reiniciamos el contador
 }
 
 let lastJupRequestTime = 0;
 
+// La función refreshBuyConfirmationV2 actualizada:
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   let tokenSymbol = "Unknown";
-
+  
   try {
-    // Incrementar el contador de solicitudes y actualizar el proxy cada 20 solicitudes.
+    // Incrementa el contador global y, cada 20 solicitudes, rota el proxy.
     refreshRequestCount++;
     if (refreshRequestCount >= 20) {
       console.log("Se alcanzaron 20 solicitudes, actualizando sesión del proxy...");
       updateProxyAgent();
     }
-
+  
     // Obtener datos estáticos del token
     const tokenInfo = getTokenInfo(tokenMint);
     tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
-
+  
     // Obtener la compra original a partir de buyReferenceMap
     const original = buyReferenceMap[chatId]?.[tokenMint];
     if (!original || !original.solBeforeBuy) {
@@ -2563,7 +2559,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
       return;
     }
-
+  
     // Obtener el par (pairAddress) del token
     const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
     if (!pairAddress || pairAddress === "N/A") {
@@ -2571,55 +2567,57 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
       return;
     }
-
+  
     // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
     if (elapsed < 600) {
       const waitTime = 600 - elapsed;
       console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     lastJupRequestTime = Date.now();
     // --- FIN CONTROL ---
-
+  
     // Construir la URL para la API de SolanaTracker
     const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
-
+  
     // Realizar la solicitud mediante Axios usando el proxyAgent
     const jupRes = await axios.get(jupUrl, {
       httpsAgent: proxyAgent,
       timeout: 5000,
     });
-
-    // Si recibimos error 429, actualizamos la sesión del proxy sin notificar a Telegram (solo en consola)
-    if (jupRes.status === 429) {
-      console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Actualizando sesión del proxy y esperando 2500 ms...`);
+    
+    // Si se recibe error 429 (o por ejemplo 407), actualizar el proxy sin notificar a Telegram (solo log)
+    if (jupRes.status === 429 || jupRes.status === 407) {
+      console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status} ("Too Many Requests" o similar). Actualizando sesión del proxy...`);
       updateProxyAgent();
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      // Esperamos un tiempo antes de volver
+      await new Promise(resolve => setTimeout(resolve, 2500));
       lastJupRequestTime = Date.now();
       throw new Error("Rate excess error from SolanaTracker API");
     }
+  
     if (jupRes.status !== 200) {
       throw new Error(`Error fetching SolanaTracker rate: ${jupRes.statusText}`);
     }
     const jupData = jupRes.data;
-
+  
     // Validar que jupData.currentPrice sea numérico
     const currentPrice = Number(jupData.currentPrice);
     if (isNaN(currentPrice)) {
       throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
     }
     const priceSolNow = currentPrice;
-
+  
     // Funciones formateadoras seguras
     const formatDefault = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
       return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
     };
-
+  
     const formatWithZeros = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
@@ -2632,15 +2630,15 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         useGrouping: false,
       });
     };
-
+  
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
-
+  
     // Calcular el valor actual de la inversión
     const currentPriceShown = Number(formattedCurrentPrice);
     const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
     const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-
+  
     // Calcular el cambio porcentual
     let changePercent = 0;
     if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
@@ -2649,17 +2647,17 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     }
     const changePercentStr = changePercent.toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-
+  
     // Calcular el PNL
     const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
-
-    // Formatear la hora de la compra en UTC y EST
+  
+    // Formatear la hora en UTC y EST
     const rawTime = original.time || Date.now();
     const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
     const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-
+  
     // Construir el mensaje final de actualización
     const updatedMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
@@ -2674,7 +2672,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
       `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
-
+  
     try {
       await bot.editMessageText(updatedMessage, {
         chat_id: chatId,
@@ -2693,7 +2691,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
           ]
         }
       });
-
+  
       console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
     } catch (editError) {
       if (editError.message && editError.message.includes("message is not modified")) {
