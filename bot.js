@@ -24,6 +24,10 @@ const SWAPS_FILE = "swaps.json";
 const buyReferenceMap = {};
 let refreshRiskCount = {};
 global.ADMIN_CHAT_ID = global.ADMIN_CHAT_ID || 472101348;
+const proxyHost = "brd.superproxy.io";
+const proxyPort = "33335";
+const baseUsername = "brd-customer-hl_7a7f0241-zone-datacenter_proxy1";
+const proxyPassword = "i75am5xil518";
 
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
@@ -2516,42 +2520,45 @@ bot.on("callback_query", async (query) => {
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
 
-// Configuración inicial del proxy con un session por defecto.
-let proxyAgent = new HttpsProxyAgent("http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1:i75am5xil518@brd.superproxy.io:33335");
-
-// Variable global para contar las solicitudes de refresh.
+// Variables para controlar la sesión y el contador de refrescos
 let refreshRequestCount = 0;
+let proxyAgent = createProxyAgentWithSession(baseUsername);  // Inicializamos con la sesión base
 
-// Función para actualizar el proxy generando un nuevo session ID.
-function updateProxyAgent() {
-  // Genera un session ID aleatorio (8 caracteres, por ejemplo)
-  const sessionId = Math.random().toString(36).substring(2, 10);
-  // En Bright Data (antes Luminati) se recomienda incluir el session en el username.
-  const newUsername = `brd-customer-hl_7a7f0241-zone-datacenter_proxy${sessionId}`;
-  const newProxyUrl = `http://${newUsername}:i75am5xil518@brd.superproxy.io:33335`;
-  console.log(`Actualizando sesión de proxy: ${newUsername}`);
-  proxyAgent = new HttpsProxyAgent(newProxyUrl);
-  refreshRequestCount = 0; // reiniciamos el contador
+// Función para generar un nuevo session ID y crear un agente proxy
+function createProxyAgentWithSession(usernameSuffix) {
+  // Si se pasa un usernameSuffix, se añade al username base.
+  const username = usernameSuffix ? `${baseUsername}-session-${usernameSuffix}` : baseUsername;
+  const proxyUrl = `http://${username}:${proxyPassword}@${proxyHost}:${proxyPort}`;
+  // Crea el agente proxy
+  return new HttpsProxyAgent(proxyUrl);
+}
+
+// Función para "regenerar" la sesión del proxy: genera un nuevo session ID y actualiza el proxyAgent
+function regenerateProxySession() {
+  // Por ejemplo, usar la marca de tiempo para generar un identificador único
+  const newSessionId = Date.now();  
+  proxyAgent = createProxyAgentWithSession(newSessionId);
+  console.log(`Actualizando sesión de proxy: ${baseUsername}-session-${newSessionId}`);
 }
 
 let lastJupRequestTime = 0;
 
-// La función refreshBuyConfirmationV2 actualizada:
+// --- Función refreshBuyConfirmationV2 actualizada ---
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   let tokenSymbol = "Unknown";
-  
+
   try {
-    // Incrementa el contador global y, cada 20 solicitudes, rota el proxy.
+    // Incrementar el contador de refrescos
     refreshRequestCount++;
-    if (refreshRequestCount >= 20) {
-      console.log("Se alcanzaron 20 solicitudes, actualizando sesión del proxy...");
-      updateProxyAgent();
+    // Cada 20 refresh se regenera la sesión del proxy
+    if (refreshRequestCount % 20 === 0) {
+      regenerateProxySession();
     }
-  
+
     // Obtener datos estáticos del token
     const tokenInfo = getTokenInfo(tokenMint);
     tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
-  
+
     // Obtener la compra original a partir de buyReferenceMap
     const original = buyReferenceMap[chatId]?.[tokenMint];
     if (!original || !original.solBeforeBuy) {
@@ -2559,7 +2566,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
       return;
     }
-  
+
     // Obtener el par (pairAddress) del token
     const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
     if (!pairAddress || pairAddress === "N/A") {
@@ -2567,7 +2574,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
       return;
     }
-  
+
     // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
@@ -2578,46 +2585,44 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     }
     lastJupRequestTime = Date.now();
     // --- FIN CONTROL ---
-  
+
     // Construir la URL para la API de SolanaTracker
     const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
-  
-    // Realizar la solicitud mediante Axios usando el proxyAgent
+
+    // Realizar la solicitud mediante Axios usando el proxyAgent y un timeout
     const jupRes = await axios.get(jupUrl, {
       httpsAgent: proxyAgent,
       timeout: 5000,
     });
     
-    // Si se recibe error 429 (o por ejemplo 407), actualizar el proxy sin notificar a Telegram (solo log)
+    // Si se recibe un error 429 o 407, lo registramos en la consola y (aquí) lanzamos el error
     if (jupRes.status === 429 || jupRes.status === 407) {
-      console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status} ("Too Many Requests" o similar). Actualizando sesión del proxy...`);
-      updateProxyAgent();
-      // Esperamos un tiempo antes de volver
+      console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status}. Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
       lastJupRequestTime = Date.now();
-      throw new Error("Rate excess error from SolanaTracker API");
+      // No se notifica al bot: se registra y se lanza el error para que el caller lo maneje (o se logee).
+      throw new Error(`Rate excess error from SolanaTracker API (status ${jupRes.status})`);
     }
-  
     if (jupRes.status !== 200) {
       throw new Error(`Error fetching SolanaTracker rate: ${jupRes.statusText}`);
     }
     const jupData = jupRes.data;
-  
+
     // Validar que jupData.currentPrice sea numérico
     const currentPrice = Number(jupData.currentPrice);
     if (isNaN(currentPrice)) {
       throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
     }
     const priceSolNow = currentPrice;
-  
-    // Funciones formateadoras seguras
+
+    // Funciones formateadoras
     const formatDefault = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
       return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
     };
-  
+
     const formatWithZeros = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
@@ -2627,19 +2632,17 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return numVal.toLocaleString("en-US", {
         minimumFractionDigits: 9,
         maximumFractionDigits: 9,
-        useGrouping: false,
+        useGrouping: false
       });
     };
-  
+
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
-  
-    // Calcular el valor actual de la inversión
+
     const currentPriceShown = Number(formattedCurrentPrice);
     const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
     const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-  
-    // Calcular el cambio porcentual
+
     let changePercent = 0;
     if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
       changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
@@ -2647,18 +2650,21 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     }
     const changePercentStr = changePercent.toFixed(2);
     const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-  
-    // Calcular el PNL
+
     const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
-  
-    // Formatear la hora en UTC y EST
+
     const rawTime = original.time || Date.now();
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
-    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-  
-    // Construir el mensaje final de actualización
+    const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false,
+      timeZone: "UTC"
+    });
+    const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false,
+      timeZone: "America/New_York"
+    });
+    const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
+
     const updatedMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
       `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
@@ -2672,38 +2678,31 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
       `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
-  
-    try {
-      await bot.editMessageText(updatedMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-            ],
-            [
-              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-            ]
+
+    await bot.editMessageText(updatedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+          ],
+          [
+            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
           ]
-        }
-      });
-  
-      console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-    } catch (editError) {
-      if (editError.message && editError.message.includes("message is not modified")) {
-        console.log("⏸ Message not modified, skipping update.");
-      } else {
-        console.error("❌ Error in refreshBuyConfirmationV2:", editError.stack || editError);
-        await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${editError.message}`);
+        ]
       }
-    }
+    });
+
+    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
-    if (error.message && error.message.includes("message is not modified")) {
-      console.log("⏸ Message not modified, skipping update.");
+    // Filtrar para no notificar al bot (solo loggear) los errores con códigos 429 y 407
+    if (error.message && (error.message.includes("429") || error.message.includes("407"))) {
+      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
+      // Omitir notificación en Telegram para estos errores
     } else {
       console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
       await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
