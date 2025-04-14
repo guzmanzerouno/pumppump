@@ -2521,6 +2521,23 @@ const proxyUrl = "http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1:i75am5x
 // Crea el agente proxy
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
+async function checkProxyIP() {
+  try {
+    const response = await axios.get("https://api.ipify.org/?format=json", {
+      httpsAgent: proxyAgent,
+      timeout: 5000, // tiempo máximo de espera de 5 segundos
+    });
+    console.log("IP pública usada por el proxy:", response.data.ip);
+    return response.data.ip;
+  } catch (error) {
+    console.error("Error comprobando la IP mediante el proxy:", error.message);
+    throw error;
+  }
+}
+
+// Llama a la función para verificar la IP a través del proxy
+checkProxyIP();
+
 let lastJupRequestTime = 0;
 
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
@@ -2559,18 +2576,15 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     // --- FIN CONTROL ---
 
     // Construir la URL para la API de SolanaTracker
-    const jupUrl =
-      `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
-      `&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
+    const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
     console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
-
-    // Realizar la solicitud usando Axios, pasando el agente proxy
+    
     const jupRes = await axios.get(jupUrl, {
-      headers: { Accept: "application/json" },
-      httpsAgent: proxyAgent
+      httpsAgent: proxyAgent,
+      timeout: 5000,
     });
-
-    // Si se recibe el código 429, esperar 2500 ms y lanzar error
+    
+    // Ahora puedes verificar jupRes.status, jupRes.data, etc.
     if (jupRes.status === 429) {
       console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
@@ -2578,9 +2592,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       throw new Error("Rate excess error from SolanaTracker API");
     }
     if (jupRes.status !== 200) {
-      throw new Error(`Error fetching tracker rate: ${jupRes.statusText}`);
+      throw new Error(`Error fetching SolanaTracker rate: ${jupRes.statusText}`);
     }
-
     const jupData = jupRes.data;
 
     // Validar que jupData.currentPrice sea numérico
