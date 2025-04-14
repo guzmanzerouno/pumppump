@@ -2166,7 +2166,9 @@ bot.on("callback_query", async (query) => {
       }
 
       if (!txSignature) {
-        await bot.editMessageText("❌ The sale could not be completed after multiple attempts.", {
+        // En este caso mostramos el error en la consola para conocer más detalles
+        console.error("❌ The sale could not be completed after multiple attempts. txSignature is undefined.");
+        await bot.editMessageText("❌ The sale could not be completed after multiple attempts. Please check server logs for details.", {
           chat_id: chatId,
           message_id: waitingMsgId,
         });
@@ -2214,8 +2216,9 @@ bot.on("callback_query", async (query) => {
       // Llamar a la función confirmSell para actualizar el mensaje con los detalles finales de la venta.
       await confirmSell(chatId, sellDetails, soldAmount, waitingMsgId, txSignature, expectedTokenMint);
     } catch (error) {
-      console.error("❌ Error in sell process:", error);
-      await bot.editMessageText("❌ The sale could not be completed.", {
+      // Imprimir el error completo en la consola, incluyendo su stack, para mayor detalle
+      console.error("❌ Error in sell process:", error.stack || error);
+      await bot.editMessageText(`❌ The sale could not be completed. Error details: ${error.message}`, {
         chat_id: chatId,
         message_id: waitingMsgId,
       });
