@@ -1,4 +1,5 @@
 import axios from "axios";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
@@ -2512,36 +2513,38 @@ bot.on("callback_query", async (query) => {
     console.log(`✅ Swap confirmed and reference saved for ${tokenSymbol}`);
   }
 
-  // Variable global para controlar el throttling de las solicitudes a la API de Jupiter.
+// Define la URL del proxy en el formato: protocol://username:password@host:port
+const proxyUrl = "http://brd-customer-hl_7a7f0241-zone-datacenter_proxy1:i75am5xil518@brd.superproxy.io:33335";
+// Crea el agente proxy
+const proxyAgent = new HttpsProxyAgent(proxyUrl);
+
 let lastJupRequestTime = 0;
-  
-// Función actualizada para refrescar la confirmación de compra sin Moralis
+
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
-    let tokenSymbol = "Unknown";
-  
-    try {
-      // Obtener datos estáticos del token
-      const tokenInfo = getTokenInfo(tokenMint);
-      tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
-  
-      // Obtener la compra original a partir de buyReferenceMap
-      const original = buyReferenceMap[chatId]?.[tokenMint];
-      if (!original || !original.solBeforeBuy) {
-        console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
-        await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
-        return;
-      }
-  
-      // Obtener el par (pairAddress) del token
-      const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
-      if (!pairAddress || pairAddress === "N/A") {
-        console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
-        await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
-        return;
-      }
-  
-     // --- CONTROL DE RATERATE ---
-    // Esperar que hayan transcurrido al menos 1000 ms (1 segundo) desde la última solicitud
+  let tokenSymbol = "Unknown";
+
+  try {
+    // Obtener datos estáticos del token
+    const tokenInfo = getTokenInfo(tokenMint);
+    tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
+
+    // Obtener la compra original a partir de buyReferenceMap
+    const original = buyReferenceMap[chatId]?.[tokenMint];
+    if (!original || !original.solBeforeBuy) {
+      console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
+      await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
+      return;
+    }
+
+    // Obtener el par (pairAddress) del token
+    const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
+    if (!pairAddress || pairAddress === "N/A") {
+      console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
+      await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
+      return;
+    }
+
+    // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
     if (elapsed < 1000) {
@@ -2549,135 +2552,142 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
-    // Actualizar la marca de tiempo
     lastJupRequestTime = Date.now();
     // --- FIN CONTROL ---
 
-    // 1️⃣ Solicitar la cotización a la API de Jupiter
+    // Construir la URL para la API de SolanaTracker
     const jupUrl =
-    `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
-    `&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
-  console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
+      `https://swap-v2.solanatracker.io/rate?from=${tokenMint}` +
+      `&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
+    console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
 
-    const jupRes = await fetch(jupUrl);
-    if (!jupRes.status === 429) {
+    // Realizar la solicitud usando Axios, pasando el agente proxy
+    const jupRes = await axios.get(jupUrl, {
+      headers: { Accept: "application/json" },
+      httpsAgent: proxyAgent
+    });
+
+    // Si se recibe el código 429, esperar 2500 ms y lanzar error
+    if (jupRes.status === 429) {
       console.log(`[refreshBuyConfirmationV2] Rate limit hit (429). Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
       lastJupRequestTime = Date.now();
       throw new Error("Rate excess error from SolanaTracker API");
     }
-    if (!jupRes.ok) {
-      throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+    if (jupRes.status !== 200) {
+      throw new Error(`Error fetching tracker rate: ${jupRes.statusText}`);
     }
-    const jupData = await jupRes.json();
-  
-      // Validar que jupData.currentPrice sea numérico
-const currentPrice = Number(jupData.currentPrice);
-if (isNaN(currentPrice)) {
-  throw new Error(`Invalid currentPrice from Jupiter: ${jupData.currentPrice}`);
-}
-// currentPrice ya viene en formato decimal (precio en SOL), así que lo usamos directamente.
-const priceSolNow = currentPrice;
-  
-      // Funciones formateadoras seguras (si no es número, devuelven "N/A")
-      const formatDefault = (val) => {
-        const numVal = Number(val);
-        if (isNaN(numVal)) return "N/A";
-        return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
-      };
-  
-      const formatWithZeros = (val) => {
-        const numVal = Number(val);
-        if (isNaN(numVal)) return "N/A";
-        if (numVal >= 1) {
-          // Formatea valores >= 1 con 6 decimales.
-          return numVal.toFixed(6);
-        }
-        // Para valores menores a 1, se formatea usando toLocaleString para forzar el uso de la notación decimal.
-        return numVal.toLocaleString("en-US", {
-          minimumFractionDigits: 9,
-          maximumFractionDigits: 9,
-          useGrouping: false // sin separación por comas
-        });
-      };
-  
-      const formattedOriginalPrice = formatDefault(original.tokenPrice);
-      const formattedCurrentPrice = formatWithZeros(priceSolNow);
-  
-      // Calcular el valor actual de la inversión
-      const currentPriceShown = Number(formattedCurrentPrice);
-      const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-      const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-  
-      // Calcular el cambio porcentual
-      let changePercent = 0;
-      if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
-        changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
-        if (!isFinite(changePercent)) changePercent = 0;
+
+    const jupData = jupRes.data;
+
+    // Validar que jupData.currentPrice sea numérico
+    const currentPrice = Number(jupData.currentPrice);
+    if (isNaN(currentPrice)) {
+      throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
+    }
+    // currentPrice ya viene en formato decimal (precio en SOL), así que lo usamos directamente.
+    const priceSolNow = currentPrice;
+
+    // Funciones formateadoras seguras
+    const formatDefault = (val) => {
+      const numVal = Number(val);
+      if (isNaN(numVal)) return "N/A";
+      return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
+    };
+
+    const formatWithZeros = (val) => {
+      const numVal = Number(val);
+      if (isNaN(numVal)) return "N/A";
+      if (numVal >= 1) {
+        // Formatea valores >= 1 con 6 decimales.
+        return numVal.toFixed(6);
       }
-      const changePercentStr = changePercent.toFixed(2);
-      const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-  
-      // Calcular el PNL (aunque no se usa en el mensaje final, se conserva esta variable para otros usos)
-      const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
-      const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
-  
-      // Formatear la hora de la compra en UTC y EST
-      const rawTime = original.time || Date.now();
-      const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
-        hour12: false,
-        timeZone: "UTC"
+      // Para valores menores a 1, forzamos la notación decimal con 9 dígitos
+      return numVal.toLocaleString("en-US", {
+        minimumFractionDigits: 9,
+        maximumFractionDigits: 9,
+        useGrouping: false
       });
-      const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
-        hour12: false,
-        timeZone: "America/New_York"
-      });
-      const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-  
-      // Construir el mensaje final de actualización
-      const updatedMessage =
-        `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
-        `🕒 *Time:* ${formattedTime}\n\n` +
-        `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-        `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
-        `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
-        `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
-        `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-        `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
-        `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
-        `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
-        `🔗 *Wallet:* \`${original.walletAddress}\``;
-  
-      await bot.editMessageText(updatedMessage, {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-              { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-            ],
-            [
-              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-            ]
+    };
+
+    const formattedOriginalPrice = formatDefault(original.tokenPrice);
+    const formattedCurrentPrice = formatWithZeros(priceSolNow);
+
+    // Calcular el valor actual de la inversión
+    const currentPriceShown = Number(formattedCurrentPrice);
+    const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
+    const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
+
+    // Calcular el cambio porcentual
+    let changePercent = 0;
+    if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
+      changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
+      if (!isFinite(changePercent)) changePercent = 0;
+    }
+    const changePercentStr = changePercent.toFixed(2);
+    const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
+
+    // Calcular el PNL
+    const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
+    const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
+
+    // Formatear la hora de la compra en UTC y EST
+    const rawTime = original.time || Date.now();
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false,
+      timeZone: "UTC"
+    });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false,
+      timeZone: "America/New_York"
+    });
+    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+
+    // Construir el mensaje final de actualización
+    const updatedMessage =
+      `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
+      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+      `🕒 *Time:* ${formattedTime}\n\n` +
+      `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
+      `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
+      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
+      `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
+      `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
+      `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
+      `🔗 *Wallet:* \`${original.walletAddress}\``;
+
+    // Actualizar el mensaje en Telegram con la confirmación final
+    await bot.editMessageText(updatedMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+          ],
+          [
+            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
           ]
-        }
-      });
-  
-      console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-    } catch (error) {
-      const errorMessage = error?.response?.body?.description || error.message;
-      if (errorMessage.includes("message is not modified")) {
-        console.log(`⏸ Message not modified for ${tokenSymbol}, skipping.`);
-        return;
+        ]
       }
-      console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
-      await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
+    });
+
+    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
+  } catch (error) {
+    const errorMessage = error?.response?.body?.description || error.message;
+    if (errorMessage.includes("message is not modified")) {
+      console.log(`⏸ Message not modified for ${tokenSymbol}, skipping.`);
+      return;
     }
+    console.error("❌ Error in refreshBuyConfirmationV2:", errorMessage);
+    await bot.sendMessage(chatId, "❌ Error while refreshing token info.");
   }
+}
 
 async function getSolPriceUSD() {
   try {
