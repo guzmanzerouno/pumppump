@@ -2548,19 +2548,30 @@ function regenerateProxySession() {
   console.log(`Actualizando sesión de proxy: ${baseUsername}-session-${newSessionId}`);
 }
 
+// Variables globales para el control de refresh y rotación de sesión
 let lastJupRequestTime = 0;
+const lastRefreshTime = {}; // Objeto para almacenar el cooldown por chat+token
 
 // --- Función refreshBuyConfirmationV2 actualizada ---
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   let tokenSymbol = "Unknown";
 
   try {
-    // Incrementar el contador de refrescos
+    // Incrementar el contador de refrescos y, cada 20, rotar la sesión del proxy
     refreshRequestCount++;
-    // Cada 20 refresh se regenera la sesión del proxy
     if (refreshRequestCount % 20 === 0) {
+      console.log("[refreshBuyConfirmationV2] Rotating proxy session...");
       regenerateProxySession();
     }
+
+    // Control de cooldown para evitar refrescos muy seguidos (bloqueo de 1 segundo por cada combinación chat+token)
+    const refreshKey = `${chatId}_${tokenMint}`;
+    if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1000)) {
+      console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1 second.`);
+      // Opcional: se responde al callback indicando el bloqueo sin ejecutar el refresh
+      return;
+    }
+    lastRefreshTime[refreshKey] = Date.now();
 
     // Obtener datos estáticos del token
     const tokenInfo = getTokenInfo(tokenMint);
@@ -2585,8 +2596,8 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
-    if (elapsed < 1000) {
-      const waitTime = 1000 - elapsed;
+    if (elapsed < 600) {
+      const waitTime = 600 - elapsed;
       console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
@@ -2603,12 +2614,11 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       timeout: 5000,
     });
     
-    // Si se recibe un error 429 o 407, lo registramos en la consola y (aquí) lanzamos el error
+    // Si se recibe un error 429 o 407, se espera y se lanza error (solo se loguea, no se notifica al usuario)
     if (jupRes.status === 429 || jupRes.status === 407) {
       console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status}. Waiting 2500 ms before retrying...`);
       await new Promise(resolve => setTimeout(resolve, 2500));
       lastJupRequestTime = Date.now();
-      // No se notifica al bot: se registra y se lanza el error para que el caller lo maneje (o se logee).
       throw new Error(`Rate excess error from SolanaTracker API (status ${jupRes.status})`);
     }
     if (jupRes.status !== 200) {
@@ -2621,9 +2631,10 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     if (isNaN(currentPrice)) {
       throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
     }
+    // currentPrice ya viene en formato decimal (precio en SOL)
     const priceSolNow = currentPrice;
 
-    // Funciones formateadoras
+    // Funciones formateadoras seguras
     const formatDefault = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
@@ -2636,6 +2647,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       if (numVal >= 1) {
         return numVal.toFixed(6);
       }
+      // Forzar la notación decimal con 9 dígitos
       return numVal.toLocaleString("en-US", {
         minimumFractionDigits: 9,
         maximumFractionDigits: 9,
@@ -2661,6 +2673,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
     const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
 
+    // Formatear la hora de la transacción en UTC y EST
     const rawTime = original.time || Date.now();
     const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
     const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
@@ -2705,21 +2718,24 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
         ]
       }
     });
-  
-      console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-    } catch (error) {
-      // Filtrar para no notificar al bot (solo loggear) los errores 429 o 407
-      if (error.message && error.message.includes("message is not modified")) {
-        console.log("⏸ Message not modified, skipping update.");
-        return;
-      } else if (error.message && (error.message.includes("429") || error.message.includes("407"))) {
-        console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
-      } else {
-        console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
-        await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
-      }
+
+    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
+  } catch (error) {
+    // Filtrar para no notificar al usuario errores relacionados a rate (429 o 407) o cuando el mensaje no se modifique
+    const errMsg = error.message || "";
+    if (errMsg.includes("message is not modified")) {
+      console.log("⏸ Message not modified, skipping update.");
+      return;
+    } else if (errMsg.includes("429") || errMsg.includes("407")) {
+      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
+      // No se notifica al usuario sobre este error específico
+      return;
+    } else {
+      console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
+      await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
     }
   }
+}
 
 async function getSolPriceUSD() {
   try {
