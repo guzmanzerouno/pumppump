@@ -2771,6 +2771,21 @@ bot.onText(/^check (.+)/, async (msg, match) => {
     }
 });
 
+// Comando /ip: consulta la IP pública a través del proxy y la devuelve al usuario.
+bot.onText(/^\/ip$/, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    const response = await axios.get("https://api.ipify.org/?format=json", {
+      httpsAgent: proxyAgent,
+      timeout: 5000, // 5 segundos de tiempo de espera
+    });
+    // response.data debería tener el formato { ip: "..." }
+    bot.sendMessage(chatId, `IP pública mediante proxy: ${JSON.stringify(response.data)}`);
+  } catch (error) {
+    bot.sendMessage(chatId, `Error comprobando la IP: ${error.message}`);
+  }
+});
+
 // 🔥 Cargar suscriptores al iniciar
 loadUsers();
 
