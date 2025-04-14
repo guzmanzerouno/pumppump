@@ -2539,10 +2539,6 @@ function updateProxyAgent() {
   refreshRequestCount = 0;
 }
 
-
-// Llama a la función para verificar la IP a través del proxy
-checkProxyIP();
-
 let lastJupRequestTime = 0;
 
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
