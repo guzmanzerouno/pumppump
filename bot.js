@@ -1624,7 +1624,7 @@ async function preCreateATAsForToken(mintAddress) {
       if (data.startsWith("refresh_buy_")) {
         const tokenMint = data.split("_")[2];
         await refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-        await bot.answerCallbackQuery(query.id, { text: "✅ Compra actualizada." });
+        await bot.answerCallbackQuery(query.id, { text: "✅ Purchase updated." });
         return;
       }
   
@@ -1637,14 +1637,14 @@ async function preCreateATAsForToken(mintAddress) {
         // Se obtienen los datos guardados (estáticos) en tokens.json
         const originalTokenData = getTokenInfo(mint);
         if (!originalTokenData) {
-          await bot.answerCallbackQuery(query.id, { text: "Token no encontrado." });
+          await bot.answerCallbackQuery(query.id, { text: "Token not found." });
           return;
         }
   
         // Se obtiene el pairAddress almacenado en el token
         const pairAddress = originalTokenData.pair || originalTokenData.pairAddress;
         if (!pairAddress) {
-          await bot.answerCallbackQuery(query.id, { text: "Par no disponible." });
+          await bot.answerCallbackQuery(query.id, { text: "Pair not available." });
           return;
         }
   
@@ -1677,11 +1677,11 @@ async function preCreateATAsForToken(mintAddress) {
         try {
           updatedDexData = await getDexScreenerData(pairAddress);
         } catch (err) {
-          await bot.answerCallbackQuery(query.id, { text: "Error al actualizar datos." });
+          await bot.answerCallbackQuery(query.id, { text: "Error updating data." });
           return;
         }
         if (!updatedDexData) {
-          await bot.answerCallbackQuery(query.id, { text: "No se pudieron obtener datos actualizados." });
+          await bot.answerCallbackQuery(query.id, { text: "Could not fetch updated data." });
           return;
         }
   
@@ -1773,13 +1773,13 @@ async function preCreateATAsForToken(mintAddress) {
           });
         }
   
-        await bot.answerCallbackQuery(query.id, { text: "Datos actualizados." });
+        await bot.answerCallbackQuery(query.id, { text: "Data updated." });
       } else {
         await bot.answerCallbackQuery(query.id);
       }
     } catch (err) {
       console.error("❌ Error en callback_query:", err);
-      await bot.answerCallbackQuery(query.id, { text: "Ocurrió un error." });
+      await bot.answerCallbackQuery(query.id, { text: "An error occurred." });
     }
   });
 
@@ -2691,7 +2691,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
     // --- COMPARAR CON EL ÚLTIMO CONTENIDO PUBLICADO ---
-    // Si el contenido actual es idéntico al último contenido enviado para este message_id, se omite la edición.
     if (lastMessageContent[messageId] && lastMessageContent[messageId] === updatedMessage) {
       console.log("⏸ New content is identical to the current content. Skipping edit.");
       return;
@@ -2722,13 +2721,13 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
     const errMsg = error.message || "";
-    // Filtrar errores específicos de rate o mensaje sin modificación
+    // Filtrar errores para no notificar al usuario:
     if (errMsg.includes("message is not modified")) {
       console.log("⏸ Message not modified, skipping update.");
       return;
-    } else if (errMsg.includes("429") || errMsg.includes("407")) {
-      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy related):", error.stack || error);
-      // No se notifica al usuario sobre este error específico
+    } else if (errMsg.includes("429") || errMsg.includes("407") || errMsg.includes("502")) {
+      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy/502 related):", error.stack || error);
+      // No notificar al usuario para estos errores específicos
       return;
     } else {
       console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
