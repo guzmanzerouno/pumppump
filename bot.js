@@ -2676,8 +2676,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
 
-    // Nota: Se ha removido la parte que añadía el "Age" para evitar que el mensaje cambie constantemente.
-
     // Construir el mensaje final de actualización (sin la variación de "Age")
     const updatedMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
@@ -2699,6 +2697,22 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return;
     }
 
+    // Definir el teclado inline a usar: Si ya se inició una venta (se detecta sellMessageId), remover el botón "Refresh"
+    let inlineKeyboard = [];
+    if (buyReferenceMap[chatId] && buyReferenceMap[chatId][tokenMint] && buyReferenceMap[chatId][tokenMint].sellMessageId) {
+      inlineKeyboard.push([
+        { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+      ]);
+    } else {
+      inlineKeyboard.push([
+        { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
+        { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
+      ]);
+    }
+    inlineKeyboard.push([
+      { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
+    ]);
+
     // Realizar la actualización del mensaje en Telegram
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
@@ -2706,15 +2720,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       parse_mode: "Markdown",
       disable_web_page_preview: true,
       reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-          ],
-          [
-            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-          ]
-        ]
+        inline_keyboard: inlineKeyboard
       }
     });
 
@@ -2724,13 +2730,12 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
     const errMsg = error.message || "";
-    // Filtrar errores para no notificar al usuario:
+    // Filtrar para no notificar al usuario errores relacionados a rate/proxy/502 o mensaje no modificado
     if (errMsg.includes("message is not modified")) {
       console.log("⏸ Message not modified, skipping update.");
       return;
     } else if (errMsg.includes("429") || errMsg.includes("407") || errMsg.includes("502")) {
       console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy/502 related):", error.stack || error);
-      // No notificar al usuario para estos errores específicos
       return;
     } else {
       console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
