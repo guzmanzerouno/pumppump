@@ -1063,120 +1063,92 @@ function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
 
 // Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-    try {
-      const user = users[chatId];
-      if (!user || !user.privateKey) {
-        throw new Error("User not registered or missing privateKey.");
-      }
-  
-      // Obtención del keypair y de la wallet del usuario
-      const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const userPublicKey = userKeypair.publicKey;
-  
-      // Crear la conexión a Helius usando un endpoint premium y el compromiso "processed"
-      const connection = new Connection(
-        "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", 
-        "processed"
-      );
-  
-      // Verificar/crear la ATA y obtener el balance de SOL en paralelo
-      const [ata, balanceLamports] = await Promise.all([
-        // Se usa la función ensureAssociatedTokenAccount que, actualizada, utiliza commitment "processed"
-        ensureAssociatedTokenAccount(userKeypair, mint, connection),
-        connection.getBalance(userPublicKey, "processed")
-      ]);
-  
-      if (!ata) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return await buyToken(chatId, mint, amountSOL, attempt + 1);
-      }
-  
-      const balanceSOL = balanceLamports / 1e9;
-      if (balanceSOL < amountSOL) {
-        throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
-      }
-  
-      // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      // Convertir el monto de SOL a lamports (número entero) y a string
-      const orderParams = {
-        inputMint: "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
-        outputMint: mint,
-        amount: Math.floor(amountSOL * 1e9).toString(),
-        taker: userPublicKey.toBase58(),
-        dynamicSlippage: true
-      };
-  
-      const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
-      const orderResponse = await axios.get(orderUrl, {
-        params: orderParams,
-        headers: { Accept: "application/json" }
-      });
-      if (!orderResponse.data) {
-        throw new Error("Failed to receive order details from Ultra API.");
-      }
-  
-      // Revisar si la respuesta utiliza la propiedad 'unsignedTransaction' o 'transaction'
-      let unsignedTx = orderResponse.data.unsignedTransaction || orderResponse.data.transaction;
-      const requestId = orderResponse.data.requestId;
-      if (!unsignedTx || !requestId) {
-        throw new Error("Invalid order response from Ultra API.");
-      }
-      unsignedTx = unsignedTx.trim();
-  
-      // Deserializar, firmar y volver a serializar la transacción
-      let transactionBuffer;
-      try {
-        transactionBuffer = Buffer.from(unsignedTx, "base64");
-      } catch (err) {
-        throw new Error("Error decoding unsigned transaction: " + err.message);
-      }
-      let versionedTransaction;
-      try {
-        versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-      } catch (err) {
-        throw new Error("Error deserializing transaction: " + err.message);
-      }
-      versionedTransaction.sign([userKeypair]);
-      const signedTx = versionedTransaction.serialize();
-      const signedTxBase64 = Buffer.from(signedTx).toString("base64");
-  
-      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
-const executePayload = {
-  signedTransaction: signedTxBase64,
-  requestId: requestId,
-  prioritizationFeeLamports: 2000000 // Valor configurable
-};
-const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
-  headers: { "Content-Type": "application/json", Accept: "application/json" }
-});
+  try {
+    const user = users[chatId];
+    if (!user || !user.privateKey) {
+      throw new Error("User not registered or missing privateKey.");
+    }
 
-// Agregar log para ver la respuesta completa en la consola
-console.log("[buyToken] Execute response:", JSON.stringify(executeResponse.data, null, 2));
+    const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const userPublicKey = userKeypair.publicKey;
 
-// Verificar que la respuesta tenga status "Success"
-if (
-  !executeResponse.data ||
-  (executeResponse.data.status && executeResponse.data.status !== "Success") ||
-  (!executeResponse.data.txSignature && !executeResponse.data.signature)
-) {
-  throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(executeResponse.data));
-}
+    const connection = new Connection(
+      "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", 
+      "processed"
+    );
 
-const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
-return txSignature;
-  
-    } catch (error) {
-      const errorMessage = error.message || "";
-      console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
-      if (attempt < 3) {
-        const delay = 1000; // Delay fijo de 1 segundo
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await buyToken(chatId, mint, amountSOL, attempt + 1);
-      } else {
-        return Promise.reject(error);
-      }
+    // Revisión rápida del balance
+    const balanceLamports = await connection.getBalance(userPublicKey, "processed");
+    const balanceSOL = balanceLamports / 1e9;
+    if (balanceSOL < amountSOL) {
+      throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
+    }
+
+    // ⚡ Crear la orden de swap con creación automática de ATA
+    const orderUrl = "https://lite-api.jup.ag/ultra/v1/createAndSwap";
+    const orderResponse = await axios.post(orderUrl, {
+      inputMint: "So11111111111111111111111111111111111111112", // SOL
+      outputMint: mint,
+      amount: Math.floor(amountSOL * 1e9).toString(),
+      taker: userPublicKey.toBase58(),
+      createAssociatedTokenAccount: true,
+      dynamicSlippage: true
+    }, {
+      headers: { "Content-Type": "application/json", Accept: "application/json" }
+    });
+
+    if (!orderResponse.data) {
+      throw new Error("Failed to receive order details from createAndSwap API.");
+    }
+
+    let unsignedTx = orderResponse.data.unsignedTransaction || orderResponse.data.transaction;
+    const requestId = orderResponse.data.requestId;
+    if (!unsignedTx || !requestId) {
+      throw new Error("Invalid order response from Ultra API.");
+    }
+
+    // Firmar y enviar
+    const txBuffer = Buffer.from(unsignedTx.trim(), "base64");
+    const versionedTx = VersionedTransaction.deserialize(txBuffer);
+    versionedTx.sign([userKeypair]);
+    const signedTx = versionedTx.serialize();
+    const signedTxBase64 = Buffer.from(signedTx).toString("base64");
+
+    const executePayload = {
+      signedTransaction: signedTxBase64,
+      requestId: requestId,
+      prioritizationFeeLamports: 2000000
+    };
+    const executeResponse = await axios.post(
+      "https://lite-api.jup.ag/ultra/v1/execute",
+      executePayload,
+      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
+    );
+
+    console.log("[buyToken] Execute response:", JSON.stringify(executeResponse.data, null, 2));
+
+    if (
+      !executeResponse.data ||
+      (executeResponse.data.status && executeResponse.data.status !== "Success") ||
+      (!executeResponse.data.txSignature && !executeResponse.data.signature)
+    ) {
+      throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(executeResponse.data));
+    }
+
+    const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
+    return txSignature;
+
+  } catch (error) {
+    const errorMessage = error.message || "";
+    console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
+    if (attempt < 3) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return await buyToken(chatId, mint, amountSOL, attempt + 1);
+    } else {
+      return Promise.reject(error);
     }
   }
+}
 
 async function getTokenBalance(chatId, mint) {
     try {
@@ -1311,38 +1283,6 @@ async function getTokenDecimals(mint) {
         return 6; // Devuelve 6 como fallback
     }
 }
-
-// 🔹 Función para verificar y crear la ATA si no existe usando commitment "processed"
-async function ensureAssociatedTokenAccount(wallet, mint, connection) {
-    try {
-      // Calcular la dirección ATA para el mint y la wallet del usuario.
-      const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-  
-      // Consultar si la ATA ya existe en la blockchain usando commitment "processed" para respuesta rápida.
-      const ataInfo = await connection.getAccountInfo(ata, "processed");
-      if (ataInfo !== null) {
-        return ata;
-      }
-  
-      // Si no existe, se crea la instrucción para la ATA.
-      const transaction = new Transaction().add(
-        createAssociatedTokenAccountInstruction(
-          wallet.publicKey,     // Payer: quien paga la transacción.
-          ata,                  // Dirección de la ATA a crear.
-          wallet.publicKey,     // Owner: dueño de la ATA (la misma wallet).
-          new PublicKey(mint)   // Mint del token.
-        )
-      );
-  
-      // Enviar la transacción usando el commitment "processed" para acelerar la confirmación.
-      await sendAndConfirmTransaction(connection, transaction, [wallet], { commitment: "processed" });
-  
-      return ata;
-    } catch (error) {
-      // Propagamos el error para que quien llame a esta función pueda manejarlo.
-      throw error;
-    }
-  }
 
 // 🔥 Cargar swaps desde el archivo JSON
 function loadSwaps() {
@@ -2118,12 +2058,6 @@ bot.on("callback_query", async (query) => {
         "https://ros-5f117e-fast-mainnet.helius-rpc.com",
         "confirmed"
       );
-
-      // Aseguramos la existencia de la ATA
-      const ata = await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
-      if (!ata)
-        throw new Error(`❌ Failed to create or retrieve the ATA for ${expectedTokenMint}`);
-      console.log(`✅ ATA verified for selling: ${ata.toBase58()}`);
 
       const decimals = await getTokenDecimals(expectedTokenMint);
       console.log(`✅ Token ${expectedTokenMint} has ${decimals} decimals.`);
