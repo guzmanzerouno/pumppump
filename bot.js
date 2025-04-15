@@ -2454,16 +2454,10 @@ bot.on("callback_query", async (query) => {
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Calcular la "Age": tiempo transcurrido desde rawTime hasta ahora.
-    const ageMs = Date.now() - rawTime;
-    const minutes = Math.floor(ageMs / 60000);
-    const seconds = Math.floor((ageMs % 60000) / 1000);
-    const age = `${minutes}m ${seconds}s`;
-  
     // --- CONSTRUIR EL MENSAJE DE CONFIRMACIÓN DE COMPRA ---
     const confirmationMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-      `*SOL/${tokenSymbol}* ⏳ **Age:** ${escapeMarkdown(age)} (Jupiter Aggregator v6)\n` +
+      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
@@ -2551,11 +2545,12 @@ function regenerateProxySession() {
 // Variables globales para el control de refresh y rotación de sesión
 let lastJupRequestTime = 0;
 const lastRefreshTime = {}; // Objeto para almacenar el cooldown por chat+token
+const lastMessageContent = {};
 
 // --- Función refreshBuyConfirmationV2 actualizada ---
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
   let tokenSymbol = "Unknown";
-
+  
   try {
     // Incrementar el contador de refrescos y, cada 20, rotar la sesión del proxy
     refreshRequestCount++;
@@ -2568,7 +2563,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const refreshKey = `${chatId}_${tokenMint}`;
     if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1000)) {
       console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1 second.`);
-      // Opcional: se responde al callback indicando el bloqueo sin ejecutar el refresh
       return;
     }
     lastRefreshTime[refreshKey] = Date.now();
@@ -2613,7 +2607,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       httpsAgent: proxyAgent,
       timeout: 5000,
     });
-    
+
     // Si se recibe un error 429 o 407, se espera y se lanza error (solo se loguea, no se notifica al usuario)
     if (jupRes.status === 429 || jupRes.status === 407) {
       console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status}. Waiting 2500 ms before retrying...`);
@@ -2679,16 +2673,12 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
 
-    // Calcular "Age" (tiempo transcurrido desde la transacción)
-    const ageMs = Date.now() - rawTime;
-    const ageMinutes = Math.floor(ageMs / 60000);
-    const ageSeconds = Math.floor((ageMs % 60000) / 1000);
-    const age = `${ageMinutes}m ${ageSeconds}s`;
+    // Nota: Se ha removido la parte que añadía el "Age" para evitar que el mensaje cambie constantemente.
 
-    // Construir el mensaje final de actualización
+    // Construir el mensaje final de actualización (sin la variación de "Age")
     const updatedMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-      `*SOL/${tokenSymbol}* ⏳ **Age:** ${escapeMarkdown(age)} (Jupiter Aggregator v6)\n` +
+      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
@@ -2700,7 +2690,14 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
       `🔗 *Wallet:* \`${original.walletAddress}\``;
 
-    // Actualizar el mensaje en Telegram con la confirmación final
+    // --- COMPARAR CON EL ÚLTIMO CONTENIDO PUBLICADO ---
+    // Si el contenido actual es idéntico al último contenido enviado para este message_id, se omite la edición.
+    if (lastMessageContent[messageId] && lastMessageContent[messageId] === updatedMessage) {
+      console.log("⏸ New content is identical to the current content. Skipping edit.");
+      return;
+    }
+
+    // Realizar la actualización del mensaje en Telegram
     await bot.editMessageText(updatedMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2719,10 +2716,13 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       }
     });
 
+    // Almacenar el nuevo contenido para futuras comparaciones
+    lastMessageContent[messageId] = updatedMessage;
+
     console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
   } catch (error) {
-    // Filtrar para no notificar al usuario errores relacionados a rate (429 o 407) o cuando el mensaje no se modifique
     const errMsg = error.message || "";
+    // Filtrar errores específicos de rate o mensaje sin modificación
     if (errMsg.includes("message is not modified")) {
       console.log("⏸ Message not modified, skipping update.");
       return;
