@@ -1141,26 +1141,29 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       const signedTxBase64 = Buffer.from(signedTx).toString("base64");
   
       // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
-      const executePayload = {
-        signedTransaction: signedTxBase64,
-        requestId: requestId,
-        prioritizationFeeLamports: 2000000 // Valor configurable
-      };
-      const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
-        headers: { "Content-Type": "application/json", Accept: "application/json" }
-      });
-      
-      // Verificar que la respuesta tenga status "Success"
-      if (
-        !executeResponse.data ||
-        (executeResponse.data.status && executeResponse.data.status !== "Success") ||
-        (!executeResponse.data.txSignature && !executeResponse.data.signature)
-      ) {
-        throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(executeResponse.data));
-      }
-  
-      const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
-      return txSignature;
+const executePayload = {
+  signedTransaction: signedTxBase64,
+  requestId: requestId,
+  prioritizationFeeLamports: 2000000 // Valor configurable
+};
+const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
+  headers: { "Content-Type": "application/json", Accept: "application/json" }
+});
+
+// Agregar log para ver la respuesta completa en la consola
+console.log("[buyToken] Execute response:", JSON.stringify(executeResponse.data, null, 2));
+
+// Verificar que la respuesta tenga status "Success"
+if (
+  !executeResponse.data ||
+  (executeResponse.data.status && executeResponse.data.status !== "Success") ||
+  (!executeResponse.data.txSignature && !executeResponse.data.signature)
+) {
+  throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(executeResponse.data));
+}
+
+const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
+return txSignature;
   
     } catch (error) {
       const errorMessage = error.message || "";
