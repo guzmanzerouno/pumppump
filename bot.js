@@ -2844,8 +2844,8 @@ async function closeAllATAs(telegramId) {
       let instructions = [];
       for (const { pubkey, account } of parsedTokenAccounts.value) {
         const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Si la cuenta está vacía (uiAmount es 0) y su saldo en tokens es 0, se puede cerrar.
-        if (tokenAmountInfo.uiAmount === 0) {
+        // Verificamos que la cuenta esté completamente vacía: comprobamos que el campo 'amount' sea "0"
+        if (tokenAmountInfo.amount === "0") {
           console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
           // La instrucción createCloseAccountInstruction cierra la cuenta y envía el depósito de alquiler al owner.
           instructions.push(
