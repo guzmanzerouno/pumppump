@@ -2873,6 +2873,30 @@ async function closeAllATAs(telegramId) {
     }
   }
 
+  // Ejemplo de función para cerrar una ATA
+async function closeAssociatedTokenAccount(wallet, mint, connection) {
+    try {
+      // Calcular la dirección ATA
+      const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+  
+      // Crear la instrucción de cierre
+      const closeIx = createCloseAccountInstruction(
+        ata,           // ATA a cerrar
+        wallet.publicKey, // Dirección donde se devolverá el depósito de alquiler (usualmente el owner)
+        wallet.publicKey  // El owner de la cuenta ATA
+      );
+  
+      // Crear y enviar la transacción
+      const transaction = new Transaction().add(closeIx);
+      const signature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
+      console.log(`✅ ATA ${ata.toBase58()} cerrada. Signature: ${signature}`);
+      return signature;
+    } catch (error) {
+      console.error("❌ Error al cerrar la ATA:", error);
+      throw error;
+    }
+  }
+
   bot.onText(/\/close_ata/, async (msg) => {
     const chatId = msg.chat.id;
     try {
