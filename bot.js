@@ -5,7 +5,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
-import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -2817,6 +2817,72 @@ getSolPriceUSD().then(price => {
     console.log('⚠️ No se pudo obtener el precio de SOL.');
   }
 });
+
+/**
+ * Cierra todas las cuentas ATA vacías asociadas a la wallet del usuario.
+ * @param {string} telegramId - El ID de Telegram del usuario.
+ */
+async function closeAllATAs(telegramId) {
+    try {
+      // Asegúrate de haber cargado tus usuarios desde el archivo (users.json)
+      const user = users[telegramId];
+      if (!user || !user.walletPublicKey || !user.privateKey) {
+        console.error("User not found or missing wallet credentials.");
+        return;
+      }
+  
+      // Crear el keypair y la conexión
+      const walletKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+      // Obtener todas las cuentas de tokens asociadas a la wallet
+      const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        new PublicKey(user.walletPublicKey),
+        { programId: TOKEN_PROGRAM_ID }
+      );
+  
+      let instructions = [];
+      for (const { pubkey, account } of parsedTokenAccounts.value) {
+        const tokenAmountInfo = account.data.parsed.info.tokenAmount;
+        // Si la cuenta está vacía (uiAmount es 0) y su saldo en tokens es 0, se puede cerrar.
+        if (tokenAmountInfo.uiAmount === 0) {
+          console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
+          // La instrucción closeAccount cierra la cuenta y envía el depósito de alquiler al owner.
+          instructions.push(
+            closeAccountInstruction(
+              pubkey, // La ATA a cerrar
+              new PublicKey(user.walletPublicKey), // El dueño de la cuenta
+              new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
+            )
+          );
+        }
+      }
+  
+      if (instructions.length === 0) {
+        console.log("No se encontraron ATA vacías para cerrar.");
+        return;
+      }
+  
+      // Crear y enviar la transacción con las instrucciones de cierre
+      const transaction = new Transaction().add(...instructions);
+      const signature = await sendAndConfirmTransaction(connection, transaction, [walletKeypair]);
+      console.log(`✅ Cierre de ATA completado. Signature: ${signature}`);
+      // Aquí podrías notificar al usuario (o al admin) que la operación se completó, si lo deseas.
+    } catch (error) {
+      console.error("❌ Error cerrando ATA:", error);
+    }
+  }
+
+  bot.onText(/\/close_ata/, async (msg) => {
+    const chatId = msg.chat.id;
+    try {
+      await closeAllATAs(chatId);
+      bot.sendMessage(chatId, "✅ Se han cerrado las ATA vacías y se ha devuelto el depósito.");
+    } catch (error) {
+      console.error("❌ Error en /close_ata:", error);
+      bot.sendMessage(chatId, "❌ Error al cerrar las ATA.");
+    }
+  });
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
