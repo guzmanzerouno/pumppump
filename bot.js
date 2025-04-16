@@ -2831,6 +2831,11 @@ async function closeAllATAs(telegramId) {
         return;
       }
   
+      // Lista de direcciones ATA que se desean excluir (en base58)
+      const exclusionList = [
+        "J65HtePF5TvPud7gyoqrGSy3hz2U8FTfYLy4RCho5K8x"
+      ];
+  
       // Crear el keypair y la conexión
       const walletKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
