@@ -2844,18 +2844,20 @@ async function closeAllATAs(telegramId) {
       let instructions = [];
       for (const { pubkey, account } of parsedTokenAccounts.value) {
         const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Verificamos que la cuenta esté completamente vacía: comprobamos que el campo 'amount' sea "0"
-        if (tokenAmountInfo.amount === "0") {
-          console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
-          // La instrucción createCloseAccountInstruction cierra la cuenta y envía el depósito de alquiler al owner.
-          instructions.push(
-            createCloseAccountInstruction(
-              pubkey, // La ATA a cerrar
-              new PublicKey(user.walletPublicKey), // El dueño de la cuenta
-              new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
-            )
-          );
-        }
+if (Number(tokenAmountInfo.amount) === 0) {
+  console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
+  instructions.push(
+    createCloseAccountInstruction(
+      pubkey, // La ATA a cerrar
+      new PublicKey(user.walletPublicKey), // El dueño de la cuenta
+      new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
+    )
+  );
+} else {
+  console.log(
+    `No se cerrará ATA ${pubkey.toBase58()} porque tiene un saldo residual: ${tokenAmountInfo.amount}`
+  );
+}
       }
   
       if (instructions.length === 0) {
