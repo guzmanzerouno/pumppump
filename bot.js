@@ -2847,9 +2847,9 @@ async function closeAllATAs(telegramId) {
         // Si la cuenta está vacía (uiAmount es 0) y su saldo en tokens es 0, se puede cerrar.
         if (tokenAmountInfo.uiAmount === 0) {
           console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
-          // La instrucción closeAccount cierra la cuenta y envía el depósito de alquiler al owner.
+          // La instrucción createCloseAccountInstruction cierra la cuenta y envía el depósito de alquiler al owner.
           instructions.push(
-            closeAccountInstruction(
+            createCloseAccountInstruction(
               pubkey, // La ATA a cerrar
               new PublicKey(user.walletPublicKey), // El dueño de la cuenta
               new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
@@ -2872,18 +2872,18 @@ async function closeAllATAs(telegramId) {
       console.error("❌ Error cerrando ATA:", error);
     }
   }
-
+  
   // Ejemplo de función para cerrar una ATA
-async function closeAssociatedTokenAccount(wallet, mint, connection) {
+  async function closeAssociatedTokenAccount(wallet, mint, connection) {
     try {
       // Calcular la dirección ATA
       const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
   
       // Crear la instrucción de cierre
       const closeIx = createCloseAccountInstruction(
-        ata,           // ATA a cerrar
-        wallet.publicKey, // Dirección donde se devolverá el depósito de alquiler (usualmente el owner)
-        wallet.publicKey  // El owner de la cuenta ATA
+        ata,                // ATA a cerrar
+        wallet.publicKey,   // Dirección donde se devolverá el depósito de alquiler (usualmente el owner)
+        wallet.publicKey    // El owner de la cuenta ATA
       );
   
       // Crear y enviar la transacción
