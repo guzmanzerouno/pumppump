@@ -2831,6 +2831,21 @@ async function closeAllATAs(telegramId) {
         return;
       }
   
+      // Lista de direcciones ATA que se desean excluir (en base58)
+      const exclusionList = [
+        "2tRQQVw6fqapX19eFUrWLMvjPAzMT7y7Qduw9qooSfpq",
+        "6Rabd6xTgxbyCsFr94T41yh1yQeNK7Ws9gWWL4fmREZN",
+        "9Rhd6qnDWNDoFPxZmYhpqRGJgLHoY58BYkTetW8mftQV",
+        "9b7weAScnNPgba3eLLqhM5sojSeTssV4iLg66KDXbjjZ",
+        "AtT7Dotw3yzqHMbVw2ogffq739t4hJo33TjNwjG59nDC",
+        "DdjEPVATUrU6f8QLqmexefYLAFn2Xt53VAR7zPKnbBbn",
+        "FGZ4zTWJpVg5zy5yw3mSDJNLXx5NtNP8wwfFBRu9s4Xy",
+        "GsBtyS1qYBNVzJfAHJaFHakGdoZgKr2FKkrsbkZS1HkV",
+        "HprLR6RycY3iJ4QKc9y8ZZRhWTGshTCCS61CffQnhj4j",
+        "Hvy5Mc7PJZTVPYxeh3iFd1HnTG5ekMSaRmVFeqL5moJi",
+        "J65HtePF5TvPud7gyoqrGSy3hz2U8FTfYLy4RCho5K8d"
+      ];
+  
       // Crear el keypair y la conexión
       const walletKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
@@ -2843,10 +2858,18 @@ async function closeAllATAs(telegramId) {
   
       let instructions = [];
       for (const { pubkey, account } of parsedTokenAccounts.value) {
+        const ataAddress = pubkey.toBase58();
+        
+        // Si la cuenta está en la lista de exclusión, se omite
+        if (exclusionList.includes(ataAddress)) {
+          console.log(`Excluida ATA ${ataAddress} de cierre (en lista de exclusión).`);
+          continue;
+        }
+        
         const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Solo si el campo "amount" (representa el saldo bruto) es exactamente "0"
+        // Solo si el campo "amount" (saldo bruto) es exactamente 0 (convertido a número)
         if (Number(tokenAmountInfo.amount) === 0) {
-          console.log(`Preparando a cerrar ATA: ${pubkey.toBase58()}`);
+          console.log(`Preparando a cerrar ATA: ${ataAddress}`);
           instructions.push(
             createCloseAccountInstruction(
               pubkey, // La ATA a cerrar
@@ -2855,14 +2878,12 @@ async function closeAllATAs(telegramId) {
             )
           );
         } else {
-          console.log(
-            `No se cerrará ATA ${pubkey.toBase58()} porque tiene un saldo residual: ${tokenAmountInfo.amount}`
-          );
+          console.log(`No se cerrará ATA ${ataAddress} porque tiene un saldo residual: ${tokenAmountInfo.amount}`);
         }
       }
   
       if (instructions.length === 0) {
-        console.log("No se encontraron ATA vacías para cerrar.");
+        console.log("No se encontraron ATA vacías (o todas están en la lista de exclusión) para cerrar.");
         return;
       }
   
