@@ -2819,7 +2819,7 @@ getSolPriceUSD().then(price => {
 });
 
 /**
- * Cierra todas las cuentas ATA vacías asociadas a la wallet del usuario.
+ * Cierra hasta 20 de las cuentas ATA vacías asociadas a la wallet del usuario.
  * @param {string} telegramId - El ID de Telegram del usuario.
  */
 async function closeAllATAs(telegramId) {
@@ -2857,17 +2857,19 @@ async function closeAllATAs(telegramId) {
       );
   
       let instructions = [];
+      const batchLimit = 20; // Limite de 20 cuentas por batch
+      let count = 0;
       for (const { pubkey, account } of parsedTokenAccounts.value) {
         const ataAddress = pubkey.toBase58();
-        
+  
         // Si la cuenta está en la lista de exclusión, se omite
         if (exclusionList.includes(ataAddress)) {
           console.log(`Excluida ATA ${ataAddress} de cierre (en lista de exclusión).`);
           continue;
         }
-        
+  
         const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Solo si el campo "amount" (saldo bruto) es exactamente 0 (convertido a número)
+        // Solo se procede si el campo "amount" (saldo bruto) es exactamente 0
         if (Number(tokenAmountInfo.amount) === 0) {
           console.log(`Preparando a cerrar ATA: ${ataAddress}`);
           instructions.push(
@@ -2877,6 +2879,9 @@ async function closeAllATAs(telegramId) {
               new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
             )
           );
+          count++;
+          // Si ya se alcanzaron las 20 instrucciones, salimos del bucle.
+          if (count === batchLimit) break;
         } else {
           console.log(`No se cerrará ATA ${ataAddress} porque tiene un saldo residual: ${tokenAmountInfo.amount}`);
         }
@@ -2890,14 +2895,14 @@ async function closeAllATAs(telegramId) {
       // Crear y enviar la transacción con las instrucciones de cierre
       const transaction = new Transaction().add(...instructions);
       const signature = await sendAndConfirmTransaction(connection, transaction, [walletKeypair]);
-      console.log(`✅ Cierre de ATA completado. Signature: ${signature}`);
+      console.log(`✅ Cierre de ATA completado (batch de ${instructions.length}). Signature: ${signature}`);
       // Aquí podrías notificar al usuario (o al admin) que la operación se completó, si lo deseas.
     } catch (error) {
       console.error("❌ Error cerrando ATA:", error);
     }
   }
   
-  // Ejemplo de función para cerrar una ATA
+  // Ejemplo de función para cerrar una ATA individual
   async function closeAssociatedTokenAccount(wallet, mint, connection) {
     try {
       // Calcular la dirección ATA
