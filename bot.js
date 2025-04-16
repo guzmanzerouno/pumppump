@@ -5,7 +5,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
-import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
 
@@ -1220,12 +1220,12 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-      // Nota: Se omite la verificación del ATA, ya que para transacciones de 5 a 10 minutos se asume que no han cambiado.
+      // Nota: Se omite la verificación del ATA, asumiendo que no han cambiado en transacciones de 5 a 10 minutos.
       // Además, "amount" ya se espera que esté en unidades mínimas (ej. "64948483343").
   
       const amountInUnits = amount.toString();
   
-      // Construir parámetros para la solicitud de orden a la API Ultra de Jupiter
+      // Construir parámetros para la solicitud de orden a la API Ultra de Jupiter.
       const orderParams = {
         inputMint: mint,
         outputMint: "So11111111111111111111111111111111111111112", // Wrapped SOL
@@ -1248,28 +1248,36 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       if (!txData || !requestId) {
         throw new Error("Invalid order response from Ultra API for sell.");
       }
+      txData = txData.trim();
   
-      // Deserializar, firmar y volver a serializar la transacción
-      const transactionBuffer = Buffer.from(txData.trim(), "base64");
-      const versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+      // Deserializar, firmar y volver a serializar la transacción.
+      let transactionBuffer;
+      try {
+        transactionBuffer = Buffer.from(txData, "base64");
+      } catch (err) {
+        throw new Error("Error decoding unsigned transaction: " + err.message);
+      }
+      let versionedTransaction;
+      try {
+        versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
+      } catch (err) {
+        throw new Error("Error deserializing transaction: " + err.message);
+      }
       versionedTransaction.sign([wallet]);
-      const serializedTx = versionedTransaction.serialize();
-      const signedTxBase64 = Buffer.from(serializedTx).toString("base64");
+      const signedTx = versionedTransaction.serialize();
+      const signedTxBase64 = Buffer.from(signedTx).toString("base64");
   
-      // Ejecutar la transacción mediante el endpoint Ultra Execute
+      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
         prioritizationFeeLamports: 2000000 // Valor configurable (ej. 0.002 SOL aprox.)
       };
+      const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
+        headers: { "Content-Type": "application/json", Accept: "application/json" }
+      });
   
-      const executeResponse = await axios.post(
-        "https://lite-api.jup.ag/ultra/v1/execute",
-        executePayload,
-        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
-      );
-  
-      // Validar que la respuesta tenga status "Success" (si está incluido) y que se obtenga una firma.
+      // Verificar que la respuesta tenga status "Success" y que se obtenga una firma.
       if (
         !executeResponse.data ||
         (executeResponse.data.status && executeResponse.data.status !== "Success") ||
@@ -1279,10 +1287,38 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
   
       const txSignatureFinal = executeResponse.data.txSignature || executeResponse.data.signature;
+  
+      // Intentar cerrar el ATA (Close ATA)
+      // Asumimos que se vendieron todos los tokens y el ATA está vacío.
+      try {
+        const ataAddress = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+        // Consultar la cuenta para asegurarse que está vacía (opcional)
+        const ataInfo = await connection.getParsedAccountInfo(ataAddress, "confirmed");
+        if (ataInfo.value && ataInfo.value.data && ataInfo.value.data.parsed) {
+          const tokenAmount = ataInfo.value.data.parsed.info.tokenAmount.uiAmount || 0;
+          if (tokenAmount === 0) {
+            const closeTx = new Transaction().add(
+              createCloseAccountInstruction(
+                ataAddress,       // Cuenta a cerrar
+                wallet.publicKey, // Destino para recibir los lamports restantes
+                wallet.publicKey, // Dueño de la cuenta
+                []                // Multisig (vacío)
+              )
+            );
+            const closeTxSignature = await sendAndConfirmTransaction(connection, closeTx, [wallet]);
+            console.log("ATA closed for mint", mint, "tx:", closeTxSignature);
+          } else {
+            console.log("ATA for mint", mint, "has non-zero balance (" + tokenAmount + "), not closing.");
+          }
+        }
+      } catch (closeError) {
+        console.error("Error closing ATA for mint", mint, ":", closeError);
+      }
+  
       return txSignatureFinal;
   
     } catch (error) {
-      // Se reintenta la venta hasta 4 intentos, con delay de 1s, 2s, 4s respectivamente.
+      // Se reintenta la venta hasta 4 intentos, con delays exponenciales.
       if (attempt < 4) {
         const delay = 1000 * Math.pow(2, attempt - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
