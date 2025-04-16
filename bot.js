@@ -1570,8 +1570,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-        { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` },
-        { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+        { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
       ],
       [
         { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
@@ -1777,8 +1776,7 @@ async function preCreateATAsForToken(mintAddress) {
           inline_keyboard: [
             [
                 { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-                { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` },
-                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+                { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
               ],
               [
                 { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
