@@ -82,7 +82,7 @@ bot.onText(/\/ata (on|off)/, async (msg, match) => {
     await Promise.all(usersToProcess.map(async ([chatId, user]) => {
       try {
         const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection(HELIUS_RPC_URL, 'confirmed');
+        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", "confirmed");
         const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo === null) {
