@@ -2845,7 +2845,7 @@ async function closeAllATAs(telegramId) {
       );
   
       let instructions = [];
-      const batchLimit = 20; // Limite de 20 cuentas por batch
+      const batchLimit = 100; // Limite de 20 cuentas por batch
       let count = 0;
       for (const { pubkey, account } of parsedTokenAccounts.value) {
         const ataAddress = pubkey.toBase58();
