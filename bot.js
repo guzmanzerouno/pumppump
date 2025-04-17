@@ -38,19 +38,71 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 // ==========================================
 let ataAutoCreationEnabled = false;
 
-// Comando para activar/desactivar el auto-creado de ATA
+// ─────────────────────────────────────────────
+// Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
+// ─────────────────────────────────────────────
 bot.onText(/\/ata (on|off)/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const command = match[1].toLowerCase();
-
-  if (command === 'on') {
-    ataAutoCreationEnabled = true;
-    bot.sendMessage(chatId, "✅ Auto creation of ATAs is now ENABLED.");
-  } else if (command === 'off') {
-    ataAutoCreationEnabled = false;
-    bot.sendMessage(chatId, "❌ Auto creation of ATAs is now DISABLED.");
+    const chatId = msg.chat.id;
+    const command = match[1].toLowerCase(); // "on" o "off"
+  
+    if (!users[chatId]) users[chatId] = {};
+  
+    if (command === 'off') {
+      try {
+        await closeAllATAs(chatId);
+        await bot.sendMessage(chatId, "✅ Auto‑creation disabled and your empty ATAs have been closed (rent returned).");
+      } catch (err) {
+        console.error("❌ Error cerrando ATAs al apagar:", err);
+        await bot.sendMessage(chatId, "❌ Auto‑creation disabled, but error closing ATAs. Check logs.");
+      }
+    }
+  
+    users[chatId].ataAutoCreationEnabled = (command === 'on');
+    saveUsers();
+  
+    const statusText = command === 'on'
+      ? '✅ Auto‑creation of ATAs is now *ENABLED* for you.'
+      : '❌ Auto‑creation of ATAs is now *DISABLED* for you.';
+    await bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown' });
+  });
+  
+  // ─────────────────────────────────────────────
+  // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
+  // ─────────────────────────────────────────────
+  async function preCreateATAsForToken(mintAddress) {
+    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
+  
+    const usersToProcess = Object.entries(users)
+      .filter(([, user]) =>
+        user.subscribed &&
+        user.privateKey &&
+        user.ataAutoCreationEnabled
+      );
+  
+    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
+      try {
+        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+        const connection = new Connection(HELIUS_RPC_URL, 'confirmed');
+        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (ataInfo === null) {
+          console.log(`Creando ATA para usuario ${chatId}: ${ata.toBase58()}`);
+          const tx = new Transaction().add(
+            createAssociatedTokenAccountInstruction(
+              keypair.publicKey,
+              ata,
+              keypair.publicKey,
+              new PublicKey(mintAddress)
+            )
+          );
+          const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+          console.log(`✅ ATA creada para ${chatId}. TX: ${sig}`);
+        }
+      } catch (err) {
+        console.error(`❌ Error al crear ATA para ${chatId}:`, err);
+      }
+    }));
   }
-});
 
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
@@ -1488,9 +1540,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
     saveProcessedMints();
   
     // Llamar a la pre-creación de ATA en modo fire-and-forget si está activada
-    if (ataAutoCreationEnabled) {
-        preCreateATAsForToken(mintData.mintAddress)
-          .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
+    preCreateATAsForToken(mintData.mintAddress)
+    .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
       }
   
     const alertMessages = {};
@@ -1608,46 +1659,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
         console.error(`❌ Error enviando mensaje a ${userId}:`, error);
       }
     }
-  }
-
-// ====================================================
-// Función para pre-crear el ATA para un token nuevo (versión concurrente)
-// ====================================================
-async function preCreateATAsForToken(mintAddress) {
-    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
-    
-    // Filtramos los usuarios que están suscritos y tienen clave privada
-    const usersToProcess = Object.entries(users).filter(([chatId, user]) => 
-      user.subscribed && user.privateKey
-    );
-  
-    // Ejecutamos en paralelo usando Promise.all
-    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
-      try {
-        const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", "confirmed");
-  
-        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), userKeypair.publicKey);
-        const ataInfo = await connection.getAccountInfo(ata);
-        if (ataInfo === null) {
-          console.log(`No se encontró ATA para el usuario ${chatId} para el token ${mintAddress}. Creándola...`);
-          const transaction = new Transaction().add(
-            createAssociatedTokenAccountInstruction(
-              userKeypair.publicKey,     // Payer
-              ata,                       // ATA a crear
-              userKeypair.publicKey,     // Owner
-              new PublicKey(mintAddress) // Mint del token
-            )
-          );
-          const txSignature = await sendAndConfirmTransaction(connection, transaction, [userKeypair]);
-          console.log(`ATA creada para el usuario ${chatId}. TX: ${txSignature}`);
-        } else {
-          console.log(`El usuario ${chatId} ya tiene ATA para el token ${mintAddress}: ${ata.toBase58()}`);
-        }
-      } catch (error) {
-        console.error(`❌ Error al crear ATA para el usuario ${chatId}:`, error.message);
-      }
-    }));
   }
 
   bot.on("callback_query", async (query) => {
@@ -2918,7 +2929,7 @@ async function closeAllATAs(telegramId) {
     const chatId = msg.chat.id;
     try {
       await closeAllATAs(chatId);
-      bot.sendMessage(chatId, "✅ Se han cerrado las ATA vacías y se ha devuelto el depósito.");
+      bot.sendMessage(chatId, "✅ ATAs have been closed (rent returned).");
     } catch (error) {
       console.error("❌ Error en /close_ata:", error);
       bot.sendMessage(chatId, "❌ Error al cerrar las ATA.");
