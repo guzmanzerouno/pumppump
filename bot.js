@@ -1543,19 +1543,79 @@ async function analyzeTransaction(signature, forceCheck = false) {
     preCreateATAsForToken(mintData.mintAddress)
       .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
   
-    // ─── Auto‑Buy en modo fire‑and‑forget ───
-    Object.entries(users).forEach(async ([chatId, user]) => {
+    // ─── Auto‑Buy One‑Shot ───
+    for (const [chatId, user] of Object.entries(users)) {
       if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
+        const amountSOL = user.autoBuyAmount;
+        const mint = mintData.mintAddress;
+  
+        // _Desactivar auto‑buy_
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
         try {
-          console.log(`🚀 Auto‑Buy para ${chatId}: ${user.autoBuyAmount} SOL en mint ${mintData.mintAddress}`);
-          const txSig = await buyToken(chatId, mintData.mintAddress, user.autoBuyAmount);
-          console.log(`✅ Auto‑Buy enviado (${txSig}) a ${chatId}`);
-        } catch (e) {
-          console.error(`❌ Error Auto‑Buy para ${chatId}:`, e.message);
+          // 1) Mensaje inicial
+          const sent = await bot.sendMessage(
+            chatId,
+            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+          );
+          const messageId = sent.message_id;
+  
+          // 2) Ejecutar la compra
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(
+              `❌ Auto‑Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id: messageId }
+            );
+            continue;
+          }
+  
+          // 3) Confirmación de envío de la orden
+          await bot.editMessageText(
+            `✅ *Purchase order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details…*`,
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+  
+          // 4) Obtener detalles del swap
+          let swapDetails = null;
+          let attempt = 0, delay = 3000, maxAttempts = 5;
+          while (attempt < maxAttempts && !swapDetails) {
+            attempt++;
+            swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+            if (!swapDetails) await new Promise(r => setTimeout(r, delay *= 1.5));
+          }
+  
+          if (!swapDetails) {
+            await bot.editMessageText(
+              `⚠️ Swap details could not be retrieved after ${maxAttempts} attempts.\n[View tx](https://solscan.io/tx/${txSignature})`,
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "Markdown",
+                disable_web_page_preview: true
+              }
+            );
+            continue;
+          }
+  
+          // 5) Mensaje final con confirmBuy (incluye botón “Sell” y resto)
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+  
+        } catch (err) {
+          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
+          // Opción: notificar al usuario
+          bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
         }
       }
-    });
+    }
   
+    // ——— Resto del flujo manual de análisis ———
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
@@ -1676,25 +1736,37 @@ async function analyzeTransaction(signature, forceCheck = false) {
 
   bot.onText(/\/autobuy (on|off)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const cmd = match[1];
+    const cmd    = match[1];
+  
     if (!users[chatId]) users[chatId] = {};
     if (cmd === 'off') {
       users[chatId].autoBuyEnabled = false;
       saveUsers();
       return bot.sendMessage(chatId, "❌ Auto‑Buy disabled.");
     }
-    // on: preguntar monto
+  
+    // on: preguntar monto con emoji 💰 y "Sol" al final
     const keyboard = [
-      [0.1,0.2,0.3].map(x=>({ text:`${x} SOL`, callback_data:`autobuy_amt_${x}` })),
-      [0.5,1.0,2.0].map(x=>({ text:`${x} SOL`, callback_data:`autobuy_amt_${x}` }))
+      [0.1, 0.2, 0.3].map(x => ({
+        text: `💰 ${x} Sol`,
+        callback_data: `autobuy_amt_${x}`
+      })),
+      [0.5, 1.0, 2.0].map(x => ({
+        text: `💰 ${x} Sol`,
+        callback_data: `autobuy_amt_${x}`
+      }))
     ];
-    await bot.sendMessage(chatId, "How much SOL would you like to auto‑buy?", {
-      reply_markup:{ inline_keyboard: keyboard }
-    });
+  
+    await bot.sendMessage(
+      chatId,
+      "How much SOL would you like to auto‑buy?",
+      { reply_markup: { inline_keyboard: keyboard } }
+    );
   });
 
-  // ————————————————
+// ————————————————
 // 1) Capturar la selección de monto para Auto‑Buy
+// (debe ir antes que los handlers de buy_, sell_, refresh_)
 // ————————————————
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
@@ -1704,19 +1776,24 @@ bot.on('callback_query', async (query) => {
     if (data.startsWith('autobuy_amt_')) {
       const amount = parseFloat(data.replace('autobuy_amt_',''));
       if (!users[chatId]) users[chatId] = {};
+  
       users[chatId].autoBuyEnabled = true;
       users[chatId].autoBuyAmount  = amount;
       saveUsers();   // ← Persiste en users.json
   
-      await bot.answerCallbackQuery(query.id, { text: `✅ Auto-Buy enabled: ${amount} SOL` });
+      // Respondemos al botón y actualizamos el texto
+      await bot.answerCallbackQuery(query.id, { text: `✅ Auto‑Buy enabled: ${amount} SOL` });
       return bot.editMessageText(
-        `Auto‑Buy configurado para ${amount} SOL`,
-        { chat_id: chatId, message_id: query.message.message_id }
+        `✅ Auto‑Buy set to *${amount} SOL*`,
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: "Markdown"
+        }
       );
     }
   
-    // Si no es autobuy_amt_, devolvemos el control para que pase a los otros listeners
-    await bot.answerCallbackQuery(query.id);
+    // Si no era Auto‑Buy, no hacemos nada aquí y dejamos que otros handlers lo procesen.
   });
 
   bot.on("callback_query", async (query) => {
