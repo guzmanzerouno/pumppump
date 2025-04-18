@@ -1539,11 +1539,23 @@ async function analyzeTransaction(signature, forceCheck = false) {
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Pre-creación de ATAs en modo fire-and-forget (la función interna filtra por ataAutoCreationEnabled por usuario)
+    // Pre‑creación de ATAs en modo fire‑and‑forget
     preCreateATAsForToken(mintData.mintAddress)
-      .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
+      .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
   
-    // ——— Resto del flujo de análisis ———
+    // ─── Auto‑Buy en modo fire‑and‑forget ───
+    Object.entries(users).forEach(async ([chatId, user]) => {
+      if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
+        try {
+          console.log(`🚀 Auto‑Buy para ${chatId}: ${user.autoBuyAmount} SOL en mint ${mintData.mintAddress}`);
+          const txSig = await buyToken(chatId, mintData.mintAddress, user.autoBuyAmount);
+          console.log(`✅ Auto‑Buy enviado (${txSig}) a ${chatId}`);
+        } catch (e) {
+          console.error(`❌ Error Auto‑Buy para ${chatId}:`, e.message);
+        }
+      }
+    });
+  
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
@@ -1661,6 +1673,51 @@ async function analyzeTransaction(signature, forceCheck = false) {
       }
     }
   }
+
+  bot.onText(/\/autobuy (on|off)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const cmd = match[1];
+    if (!users[chatId]) users[chatId] = {};
+    if (cmd === 'off') {
+      users[chatId].autoBuyEnabled = false;
+      saveUsers();
+      return bot.sendMessage(chatId, "❌ Auto‑Buy disabled.");
+    }
+    // on: preguntar monto
+    const keyboard = [
+      [0.1,0.2,0.3].map(x=>({ text:`${x} SOL`, callback_data:`autobuy_amt_${x}` })),
+      [0.5,1.0,2.0].map(x=>({ text:`${x} SOL`, callback_data:`autobuy_amt_${x}` }))
+    ];
+    await bot.sendMessage(chatId, "How much SOL would you like to auto‑buy?", {
+      reply_markup:{ inline_keyboard: keyboard }
+    });
+  });
+
+  // ————————————————
+// 1) Capturar la selección de monto para Auto‑Buy
+// ————————————————
+bot.on('callback_query', async (query) => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    // Si viene de un botón 'autobuy_amt_X'
+    if (data.startsWith('autobuy_amt_')) {
+      const amount = parseFloat(data.replace('autobuy_amt_',''));
+      if (!users[chatId]) users[chatId] = {};
+      users[chatId].autoBuyEnabled = true;
+      users[chatId].autoBuyAmount  = amount;
+      saveUsers();   // ← Persiste en users.json
+  
+      await bot.answerCallbackQuery(query.id, { text: `✅ Auto-Buy enabled: ${amount} SOL` });
+      return bot.editMessageText(
+        `Auto‑Buy configurado para ${amount} SOL`,
+        { chat_id: chatId, message_id: query.message.message_id }
+      );
+    }
+  
+    // Si no es autobuy_amt_, devolvemos el control para que pase a los otros listeners
+    await bot.answerCallbackQuery(query.id);
+  });
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
