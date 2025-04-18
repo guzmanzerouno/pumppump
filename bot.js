@@ -2782,8 +2782,11 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     // --- FIN CONTROL ---
 
     // Construir la URL para la API de SolanaTracker
-    const jupUrl = `https://swap-v2.solanatracker.io/rate?from=${tokenMint}&to=So11111111111111111111111111111111111111112&amount=1&slippage=20`;
-    console.log(`[refreshBuyConfirmationV2] Fetching SolanaTracker rate from: ${jupUrl}`);
+    const jupUrl =
+        `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
+        `&outputMint=So11111111111111111111111111111111111111112` +
+        `&amount=1000000000&slippageBps=500&priorityFeeBps=30`;
+      console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
 
     // Realizar la solicitud mediante Axios usando el proxyAgent y un timeout
     const jupRes = await axios.get(jupUrl, {
@@ -2803,15 +2806,14 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     }
     const jupData = jupRes.data;
 
-    // Validar que jupData.currentPrice sea numérico
-    const currentPrice = Number(jupData.currentPrice);
-    if (isNaN(currentPrice)) {
-      throw new Error(`Invalid currentPrice from SolanaTracker: ${jupData.currentPrice}`);
+    // Validar que jupData.outAmount sea numérico
+    const outAmount = Number(jupData.outAmount);
+    if (isNaN(outAmount)) {
+      throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
     }
-    // currentPrice ya viene en formato decimal (precio en SOL)
-    const priceSolNow = currentPrice;
+    const priceSolNow = outAmount / 1e9;
 
-    // Funciones formateadoras seguras
+    // Funciones formateadoras seguras (si no es número, devuelven "N/A")
     const formatDefault = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
@@ -2821,24 +2823,24 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
     const formatWithZeros = (val) => {
       const numVal = Number(val);
       if (isNaN(numVal)) return "N/A";
-      if (numVal >= 1) {
-        return numVal.toFixed(6);
-      }
-      // Forzar la notación decimal con 9 dígitos
-      return numVal.toLocaleString("en-US", {
-        minimumFractionDigits: 9,
-        maximumFractionDigits: 9,
-        useGrouping: false
-      });
+      if (numVal >= 1) return numVal.toFixed(6);
+      const str = numVal.toFixed(12);
+      const forced = "0.000" + str.slice(2);
+      const match = forced.match(/0*([1-9]\d{0,2})/);
+      if (!match) return forced;
+      const idx = forced.indexOf(match[1]);
+      return forced.slice(0, idx + match[1].length + 1);
     };
 
     const formattedOriginalPrice = formatDefault(original.tokenPrice);
     const formattedCurrentPrice = formatWithZeros(priceSolNow);
 
+    // Calcular el valor actual de la inversión
     const currentPriceShown = Number(formattedCurrentPrice);
     const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
     const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
 
+    // Calcular el cambio porcentual
     let changePercent = 0;
     if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
       changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
@@ -2991,7 +2993,7 @@ async function closeAllATAs(telegramId) {
       );
   
       let instructions = [];
-      const batchLimit = 25; // Limite de 20 cuentas por batch
+      const batchLimit = 50; // Limite de 20 cuentas por batch
       let count = 0;
       for (const { pubkey, account } of parsedTokenAccounts.value) {
         const ataAddress = pubkey.toBase58();
