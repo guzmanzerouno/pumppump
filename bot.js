@@ -1580,6 +1580,39 @@ async function analyzeTransaction(signature, forceCheck = false) {
             continue;
           }
   
+          // 3) Confirmación de envío de la orden
+          await bot.editMessageText(
+            `✅ *Purchase order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details…*`,
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+  
+          // 4) Obtener detalles del swap
+          let swapDetails = null;
+          let attempt = 0, delay = 3000, maxAttempts = 5;
+          while (attempt < maxAttempts && !swapDetails) {
+            attempt++;
+            swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+            if (!swapDetails) await new Promise(r => setTimeout(r, delay *= 1.5));
+          }
+  
+          if (!swapDetails) {
+            await bot.editMessageText(
+              `⚠️ Swap details could not be retrieved after ${maxAttempts} attempts.\n[View tx](https://solscan.io/tx/${txSignature})`,
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: "Markdown",
+                disable_web_page_preview: true
+              }
+            );
+            continue;
+          }
+  
           // 5) Mensaje final con confirmBuy (incluye botón “Sell” y resto)
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
@@ -2156,6 +2189,44 @@ bot.on("callback_query", async (query) => {
           return bot.answerCallbackQuery(query.id);
         }
   
+        // Confirmar orden en Solana y pedir detalles
+        await bot.editMessageText(
+          `✅ *Sell order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ Fetching sell details...`,
+          {
+            chat_id: chatId,
+            message_id: waitingMsgId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true,
+          }
+        );
+  
+        // Esperar y obtener detalles vía getSwapDetailsHybrid
+        let sellDetails = null;
+        attempts = 0;
+        delayMs  = 5000;
+        while (attempts < 5 && !sellDetails) {
+          attempts++;
+          console.log(`⏳ Fetching transaction details (Attempt ${attempts}): ${txSignature}`);
+          sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
+          if (!sellDetails) {
+            await new Promise(res => setTimeout(res, delayMs));
+            delayMs *= 1.2;
+          }
+        }
+  
+        if (!sellDetails) {
+          await bot.editMessageText(
+            `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id: waitingMsgId,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true,
+            }
+          );
+          return bot.answerCallbackQuery(query.id);
+        }
+  
         // Finalmente, actualizar con confirmSell
         await confirmSell(chatId, sellDetails, soldAmount, waitingMsgId, txSignature, expectedTokenMint);
   
@@ -2299,6 +2370,33 @@ bot.on("callback_query", async (query) => {
             chat_id: chatId,
             message_id: messageId
           });
+          await bot.answerCallbackQuery(query.id);
+          return;
+        }
+  
+        await bot.editMessageText(
+          `✅ *Purchase order confirmed on Solana!*\n` +
+          `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+          `⏳ *Fetching swap details...*`,
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true
+          }
+        );
+  
+        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+        if (!swapDetails) {
+          await bot.editMessageText(
+            `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
           await bot.answerCallbackQuery(query.id);
           return;
         }
