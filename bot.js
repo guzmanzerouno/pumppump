@@ -1289,14 +1289,13 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-      // Nota: Se omite la verificación del ATA, asumiendo que no han cambiado en transacciones de 5 a 10 minutos.
-      // Además, "amount" ya se espera que esté en unidades mínimas (ej. "64948483343").
+      // Nota: Se omite la verificación del ATA...
       const amountInUnits = amount.toString();
   
       // Construir parámetros para la solicitud de orden a la API Ultra de Jupiter.
       const orderParams = {
         inputMint: mint,
-        outputMint: "So11111111111111111111111111111111111111112", // Wrapped SOL
+        outputMint: "So11111111111111111111111111111111111111112",
         amount: amountInUnits,
         taker: wallet.publicKey.toBase58(),
         slippageBps: 500
@@ -1334,11 +1333,11 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const signedTx = versionedTransaction.serialize();
       const signedTxBase64 = Buffer.from(signedTx).toString("base64");
   
-      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
+      // Ejecutar la transacción mediante Ultra Execute
       const executePayload = {
-        signedTransaction: signedTxBase64,
-        requestId: requestId,
-        prioritizationFeeLamports: 3500000 // Valor configurable (ej. 0.002 SOL aprox.)
+        signedTransaction:   signedTxBase64,
+        requestId:           requestId,
+        prioritizationFeeLamports: 3500000
       };
       const executeResponse = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
@@ -1348,7 +1347,6 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         }
       );
   
-      // Verificar que la respuesta tenga status "Success" y que se obtenga una firma.
       if (
         !executeResponse.data ||
         (executeResponse.data.status && executeResponse.data.status !== "Success") ||
@@ -1360,18 +1358,18 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         );
       }
   
-      // Extraer la firma final de la transacción
+      // Extraer la firma final
       const txSignatureFinal = executeResponse.data.txSignature || executeResponse.data.signature;
   
-      // ── GUARDAR EN buyReferenceMap PARA LA VENTA ──
-      buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = {
-        txSignature: txSignatureFinal,
+      // ── MERGE de la respuesta de venta sin borrar solBeforeBuy ──
+      if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
+      if (!buyReferenceMap[chatId][mint]) buyReferenceMap[chatId][mint] = {};
+      Object.assign(buyReferenceMap[chatId][mint], {
+        txSignature:     txSignatureFinal,
         executeResponse: executeResponse.data
-      };
+      });
   
       // Intentar cerrar el ATA (Close ATA)
-      // Asumimos que se vendieron todos los tokens y el ATA está vacío.
       try {
         const ataAddress = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
         const ataInfo = await connection.getParsedAccountInfo(ataAddress, "confirmed");
@@ -1380,10 +1378,10 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
           if (tokenAmount === 0) {
             const closeTx = new Transaction().add(
               createCloseAccountInstruction(
-                ataAddress,       // Cuenta a cerrar
-                wallet.publicKey, // Destino para recibir los lamports restantes
-                wallet.publicKey, // Dueño de la cuenta
-                []                // Multisig (vacío)
+                ataAddress,
+                wallet.publicKey,
+                wallet.publicKey,
+                []
               )
             );
             const closeTxSignature = await sendAndConfirmTransaction(connection, closeTx, [wallet]);
@@ -1397,9 +1395,8 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
   
       return txSignatureFinal;
-  
     } catch (error) {
-      // Se reintenta la venta hasta 6 intentos, con delays exponenciales.
+      // Reintentos con backoff exponencial
       if (attempt < 6) {
         const delay = 1000 * Math.pow(2, attempt - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
