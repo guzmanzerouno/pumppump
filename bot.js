@@ -1554,53 +1554,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     preCreateATAsForToken(mintData.mintAddress)
       .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
   
-    // ─── Auto‑Buy One‑Shot ───
-    for (const [chatId, user] of Object.entries(users)) {
-      if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
-        const amountSOL = user.autoBuyAmount;
-        const mint      = mintData.mintAddress;
-  
-        // Desactivar auto‑buy
-        user.autoBuyEnabled = false;
-        saveUsers();
-  
-        try {
-          // 1) Mensaje inicial
-          const sent      = await bot.sendMessage(
-            chatId,
-            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
-          );
-          const messageId = sent.message_id;
-  
-          // 2) Ejecutar la compra
-          const txSignature = await buyToken(chatId, mint, amountSOL);
-          if (!txSignature) {
-            await bot.editMessageText(
-              `❌ Auto‑Buy failed for ${mint}.`,
-              { chat_id: chatId, message_id: messageId }
-            );
-            continue;
-          }
-  
-          // → ya no editamos el mensaje con “order confirmed”
-          // → ya no hacemos el bucle manual de retry
-  
-          // 3) Obtener detalles de una sola vez y confirmar
-          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
-          await confirmBuy(chatId, swapDetails, messageId, txSignature);
-  
-        } catch (err) {
-          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
-          bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
-        }
-      }
-    }
-  
     // ——— Resto del flujo manual de análisis ———
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
-      if (user && user.subscribed && user.privateKey) {
+      if (user?.subscribed && user.privateKey) {
         try {
           const msg = await bot.sendMessage(
             userId,
@@ -1608,29 +1566,60 @@ async function analyzeTransaction(signature, forceCheck = false) {
             { parse_mode: "Markdown" }
           );
           alertMessages[userId] = msg.message_id;
-          setTimeout(() => {
-            bot.deleteMessage(userId, msg.message_id).catch(() => {});
-          }, 80000);
+          setTimeout(() => bot.deleteMessage(userId, msg.message_id).catch(() => {}), 60_000);
         } catch (_) {}
       }
     }
   
+    // 3) Obtener datos en SolanaTracker → Moralis → RugCheck
     const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
     if (!pairAddress) return;
+  
     const dexData = await getDexScreenerData(pairAddress);
     if (!dexData) {
       for (const userId in alertMessages) {
-        try {
-          await bot.editMessageText(
-            "⚠️ Token discarded due to insufficient info for analysis.",
-            { chat_id: userId, message_id: alertMessages[userId], parse_mode: "Markdown" }
-          );
-        } catch (_) {}
+        await bot.editMessageText(
+          "⚠️ Token discarded due to insufficient info for analysis.",
+          { chat_id: userId, message_id: alertMessages[userId], parse_mode: "Markdown" }
+        ).catch(() => {});
       }
       return;
     }
+  
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
+  
+    // ——— AUTO‑BUY TRIGGERED NOW THAT DEX DATA IS AVAILABLE ———
+    for (const [chatId, user] of Object.entries(users)) {
+      if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
+        const amountSOL = user.autoBuyAmount;
+        const mint      = mintData.mintAddress;
+        // Desactivar auto‑buy inmediatamente
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
+        try {
+          // Send initial message
+          const sent      = await bot.sendMessage(chatId, `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`);
+          const messageId = sent.message_id;
+          // Execute purchase
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(`❌ Auto‑Buy failed for ${mint}.`, { chat_id: chatId, message_id: messageId });
+            continue;
+          }
+          // Fetch swap details and confirm
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+  
+        } catch (err) {
+          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
+        }
+      }
+    }
+  
+    // ——— Continuar con tu flujo de notificaciones ———
     const priceChange24h = dexData.priceChange24h !== "N/A"
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
       : "N/A";
@@ -1639,11 +1628,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const migrationTimestamp = mintData.date || Date.now();
     const age = calculateAge(migrationTimestamp);
     const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
-    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
-    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
-    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
-    
+    const buys24h   = Number(dexData.buys24h)   || 0;
+    const sells24h  = Number(dexData.sells24h)  || 0;
+    const buyers24h = Number(dexData.buyers24h) || 0;
+    const sellers24h= Number(dexData.sellers24h)|| 0;
+  
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
   
     let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
@@ -1651,11 +1640,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
     message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
     message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
-    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n`;
+    message += `🟩 Buys 24h: ${buys24h} 🟥 Sells 24h: ${sells24h}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${buyers24h} 👤 Sellers: ${sellers24h}\n\n`;
     message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
     message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
@@ -1663,7 +1652,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
     message += `📆 **Created:** ${createdDate}\n\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-    
+  
     await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
   }
   
