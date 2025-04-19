@@ -2370,54 +2370,85 @@ bot.on("callback_query", async (query) => {
   async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature, expectedTokenMint) {
     const solPrice = await getSolPriceUSD();
   
-    // Forzamos el uso del mint que esperamos (expectedTokenMint)
+    // Forzamos el uso del mint que esperamos
     const soldTokenMint = expectedTokenMint;
   
-    // Obtenemos la información del token vendido de forma estática
+    // Info estática del token
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
-    const tokenSymbol = typeof soldTokenData.symbol === "string" ? escapeMarkdown(soldTokenData.symbol) : "Unknown";
+    const tokenSymbol = typeof soldTokenData.symbol === "string"
+      ? escapeMarkdown(soldTokenData.symbol)
+      : "Unknown";
   
-    const gotSol = parseFloat(sellDetails.receivedAmount); // SOL recibido por la venta
-    const soldAmountFloat = parseFloat(soldAmount);
+    // SOL recibido por la venta y cantidad de tokens vendidos
+    const gotSol = parseFloat(sellDetails.receivedAmount);
+    const soldAmtFloat = parseFloat(soldAmount);
   
+    // --- CÁLCULO DE PNL PROPORCIONAL ---
     let winLossDisplay = "N/A";
-    if (buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy) {
-      const beforeBuy = parseFloat(buyReferenceMap[chatId][soldTokenMint].solBeforeBuy);
-      const pnlSol = gotSol - beforeBuy;
+    const ref = buyReferenceMap[chatId]?.[soldTokenMint];
+    if (ref?.solBeforeBuy != null && ref?.receivedAmount != null) {
+      // SOL gastado originalmente y tokens recibidos entonces
+      const solInvested = parseFloat(ref.solBeforeBuy);
+      const tokensBought = parseFloat(ref.receivedAmount);
+      // coste unitario por token
+      const costPerToken = solInvested / tokensBought;
+      // coste proporcional para los tokens que vendemos ahora
+      const costUsed = costPerToken * soldAmtFloat;
+      // PNL en SOL
+      const pnlSol = gotSol - costUsed;
       const emoji = pnlSol >= 0 ? "🟢" : "🔻";
-      const pnlUsd = solPrice ? (pnlSol * solPrice) : null;
-      winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`;
+      // PNL en USD
+      const pnlUsd = solPrice != null ? pnlSol * solPrice : null;
+      winLossDisplay = `${emoji}${pnlSol.toFixed(3)} SOL` +
+        (pnlUsd != null
+          ? ` (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`
+          : ""
+        );
     }
   
-    const usdValue = solPrice ? `USD $${(gotSol * solPrice).toFixed(2)}` : "N/A";
-    const tokenPrice = soldAmountFloat > 0 ? (gotSol / soldAmountFloat).toFixed(9) : "N/A";
+    // Valor total recibido en USD
+    const usdValue = solPrice != null
+      ? `USD $${(gotSol * solPrice).toFixed(2)}`
+      : "N/A";
   
+    // Precio por token (SOL/token)
+    const tokenPrice = soldAmtFloat > 0
+      ? (gotSol / soldAmtFloat).toFixed(9)
+      : "N/A";
+  
+    // Formateo de hora
     const rawTime = sellDetails.rawTime || Date.now();
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false, timeZone: "UTC"
+    });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false, timeZone: "America/New_York"
+    });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Nueva conexión para obtener el balance SOL de la wallet del usuario que vende
+    // Obtener balance actual de SOL
     const connectionForBalance = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
     const walletPubKey = new PublicKey(sellDetails.walletAddress);
     const solBalanceLamports = await connectionForBalance.getBalance(walletPubKey);
     const walletBalance = solBalanceLamports / 1e9;
-    const walletUsdValue = solPrice ? (walletBalance * solPrice).toFixed(2) : "N/A";
+    const walletUsdValue = solPrice
+      ? (walletBalance * solPrice).toFixed(2)
+      : "N/A";
   
-    // Construir el mensaje final, incluyendo el balance de la wallet
+    // Construir el mensaje final
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${tokenPrice} SOL\n` +
       `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
-      `💲 *Sold:* ${soldAmount} Tokens\n` +
+      `💲 *Sold:* ${soldAmount} ${tokenSymbol}\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
       `🪙 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsdValue})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
+    // Editar el mismo mensaje en Telegram
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2425,12 +2456,10 @@ bot.on("callback_query", async (query) => {
       disable_web_page_preview: true
     });
   
-    // Actualizar la referencia para refrescos
-    if (!buyReferenceMap[chatId]) {
-      buyReferenceMap[chatId] = {};
-    }
+    // Actualizar la referencia para posibles futuros refrescos
+    if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][soldTokenMint] = {
-      solBeforeBuy: parseFloat(buyReferenceMap[chatId]?.[soldTokenMint]?.solBeforeBuy || "0"),
+      solBeforeBuy: parseFloat(ref?.solBeforeBuy || "0"),
       receivedAmount: 0,
       tokenPrice: tokenPrice,
       walletAddress: sellDetails.walletAddress,
@@ -2438,10 +2467,11 @@ bot.on("callback_query", async (query) => {
       time: Date.now()
     };
   
+    // Guardar en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
-      "Sold": `${soldAmount} Tokens`,
+      "Sold": `${soldAmount} ${tokenSymbol}`,
       "Got": `${gotSol} SOL`,
       "Token Price": `${tokenPrice} SOL`,
       "Sold Token": tokenSymbol,
@@ -2452,7 +2482,6 @@ bot.on("callback_query", async (query) => {
       "SOL PNL": winLossDisplay,
       "messageText": confirmationMessage
     });
-  
   }
 
   bot.on("callback_query", async (query) => {
