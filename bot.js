@@ -2225,18 +2225,18 @@ bot.on("callback_query", async (query) => {
   async function confirmSell(
     chatId,
     sellDetails,
-    soldAmountStr,
+    _soldAmountStr,    // ya no lo usamos, vendimos lo que dice sellDetails.soldAmount
     messageId,
     txSignature,
     expectedTokenMint
   ) {
     const solPrice = await getSolPriceUSD();
   
-    // Parsear cantidades
-    const soldTokens = parseFloat(sellDetails.soldAmount ?? soldAmountStr) || 0;
-    const gotSol     = parseFloat(sellDetails.receivedAmount)     || 0;
+    // Parsear cantidades desde sellDetails
+    const soldTokens = parseFloat(sellDetails.soldAmount)   || 0;
+    const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
   
-    // Calcular PnL en SOL y USD
+    // PnL en SOL y USD
     let pnlDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
     if (ref?.solBeforeBuy != null) {
@@ -2251,41 +2251,42 @@ bot.on("callback_query", async (query) => {
         );
     }
   
-    // Precio promedio de venta (SOL/token)
+    // Precio promedio de venta
     const tokenPrice = soldTokens > 0
       ? (gotSol / soldTokens).toFixed(9)
       : "N/A";
   
-    // Timestamp
+    // Formatear hora
     const now = Date.now();
     const utcTime = new Date(now).toLocaleTimeString("en-GB", {
-      hour12: false,
-      timeZone: "UTC"
+      hour12: false, timeZone: "UTC"
     });
     const estTime = new Date(now).toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: "America/New_York"
+      hour12: false, timeZone: "America/New_York"
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Balance actual de la wallet en SOL y USD
+    // Balance actual de la wallet
     const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-    const balLam     = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
-    const walletSol  = balLam / 1e9;
-    const walletUsd  = solPrice != null
+    const balLam     = await connection.getBalance(
+      new PublicKey(sellDetails.walletAddress)
+    );
+    const walletSol = balLam / 1e9;
+    const walletUsd = solPrice != null
       ? (walletSol * solPrice).toFixed(2)
       : "N/A";
   
-    // Símbolo del token vendido
-    const tokenInfo   = getTokenInfo(expectedTokenMint) || {};
-    const tokenSymbol = escapeMarkdown(tokenInfo.symbol || "Unknown");
+    // Símbolo del token
+    const tokenSymbol = escapeMarkdown(
+      getTokenInfo(expectedTokenMint).symbol || "Unknown"
+    );
   
-    // Construir mensaje final
+    // Mensaje final
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
-      `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+      `⚡️ SELL ⚡️\n` +
       `💲 *Token Price:* ${tokenPrice} SOL\n` +
       `💰 *SOL PnL:* ${pnlDisplay}\n\n` +
       `💲 *Sold:* ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
@@ -2301,7 +2302,7 @@ bot.on("callback_query", async (query) => {
       disable_web_page_preview: true
     });
   
-    // Mantener solBeforeBuy en la referencia
+    // Actualizamos sólo la metadata, conservando solBeforeBuy
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
@@ -2310,15 +2311,15 @@ bot.on("callback_query", async (query) => {
   
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
-      "Pair": `${tokenSymbol}/SOL`,
-      "Sold": `${soldTokens.toFixed(3)} ${tokenSymbol}`,
-      "Got": `${gotSol.toFixed(9)} SOL`,
+      Pair:         `${tokenSymbol}/SOL`,
+      Sold:         `${soldTokens.toFixed(3)} ${tokenSymbol}`,
+      Got:          `${gotSol.toFixed(9)} SOL`,
       "Token Price": `${tokenPrice} SOL`,
-      "SOL PnL": pnlDisplay,
-      "Time": formattedTime,
-      "Transaction": `https://solscan.io/tx/${txSignature}`,
-      "Wallet": sellDetails.walletAddress,
-      "messageText": confirmationMessage
+      "SOL PnL":    pnlDisplay,
+      Time:         formattedTime,
+      Transaction:  `https://solscan.io/tx/${txSignature}`,
+      Wallet:       sellDetails.walletAddress,
+      messageText:  confirmationMessage
     });
   }
 
