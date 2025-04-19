@@ -2470,32 +2470,27 @@ bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // Esta parte se activa cuando el callback empieza con "buy_"
     if (data.startsWith("buy_")) {
       const parts     = data.split("_");
-      const mint      = parts[1];                     // Mint del token
-      const amountSOL = parseFloat(parts[2]);          // Monto en SOL
+      const mint      = parts[1];
+      const amountSOL = parseFloat(parts[2]);
   
-      // Validación: clave privada registrada
       if (!users[chatId] || !users[chatId].privateKey) {
         await bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
         await bot.answerCallbackQuery(query.id);
         return;
       }
   
-      // Paso 1: mensaje inicial
       const sent      = await bot.sendMessage(chatId, `🛒 Processing purchase of ${amountSOL} SOL for ${mint}...`);
       const messageId = sent.message_id;
   
       try {
-        // Paso 2: ejecutar la compra
         const txSignature = await buyToken(chatId, mint, amountSOL);
   
-        // Paso 3: confirmar transmisión de la orden
         if (!txSignature) {
           await bot.editMessageText(`❌ The purchase could not be completed.`, {
             chat_id: chatId,
-            message_id
+            message_id: messageId
           });
           await bot.answerCallbackQuery(query.id);
           return;
@@ -2507,22 +2502,19 @@ bot.on("callback_query", async (query) => {
           `⏳ *Fetching swap details...*`,
           {
             chat_id: chatId,
-            message_id,
+            message_id: messageId,
             parse_mode: "Markdown",
             disable_web_page_preview: true
           }
         );
   
-        // ————————————————
-        // Paso 4: obtener detalles del swap vía Jupiter (sin bucle de retry)
-        // ————————————————
         const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
         if (!swapDetails) {
           await bot.editMessageText(
             `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
             {
               chat_id: chatId,
-              message_id,
+              message_id: messageId,
               parse_mode: "Markdown",
               disable_web_page_preview: true
             }
@@ -2531,7 +2523,6 @@ bot.on("callback_query", async (query) => {
           return;
         }
   
-        // Paso 5: llamar a confirmBuy para generar el mensaje final
         await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
       } catch (error) {
@@ -2542,12 +2533,11 @@ bot.on("callback_query", async (query) => {
         const text = raw.includes("Not enough SOL") ? raw : "❌ The purchase could not be completed.";
         await bot.editMessageText(text, {
           chat_id: chatId,
-          message_id
+          message_id: messageId
         });
       }
     }
   
-    // Responde siempre al callback para quitar el “loading” del botón
     await bot.answerCallbackQuery(query.id);
   });
 
