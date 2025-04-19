@@ -2369,64 +2369,88 @@ bot.on("callback_query", async (query) => {
 
   async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature, expectedTokenMint) {
     const solPrice = await getSolPriceUSD();
+  
+    // Forzamos el uso del mint que esperamos (expectedTokenMint)
     const soldTokenMint = expectedTokenMint;
+  
+    // Obtenemos la información del token vendido de forma estática
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
-    const tokenSymbol = escapeMarkdown(soldTokenData.symbol || "Unknown");
+    const tokenSymbol   = typeof soldTokenData.symbol === "string"
+      ? escapeMarkdown(soldTokenData.symbol)
+      : "Unknown";
   
-    const gotSol       = parseFloat(sellDetails.receivedAmount);
-    const soldAmtFloat = parseFloat(soldAmount);
+    // SOL recibido por la venta
+    const gotSol = parseFloat(sellDetails.receivedAmount) || 0;
+    // Tokens vendidos (pasado como string)
+    const soldTokens = parseFloat(soldAmount) || 0;
   
-    // --- PNL PROPORCIONAL ---
+    // --- CÁLCULO DE PnL ---
     let winLossDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[soldTokenMint];
-    if (ref?.solBeforeBuy != null && ref?.receivedAmount != null) {
-      const solInvested   = ref.solBeforeBuy;
-      const tokensBought  = ref.receivedAmount;
-      const costPerToken  = solInvested / tokensBought;
-      const costUsed      = costPerToken * soldAmtFloat;
-      const pnlSol        = gotSol - costUsed;
-      const emoji         = pnlSol >= 0 ? "🟢" : "🔻";
-      const pnlUsd        = solPrice != null ? pnlSol * solPrice : null;
-      winLossDisplay = `${emoji}${pnlSol.toFixed(3)} SOL` +
-        (pnlUsd != null
-          ? ` (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`
-          : ""
-        );
+    if (ref && typeof ref.solBeforeBuy === "number") {
+      const beforeBuy = ref.solBeforeBuy;           // SOL que gastaste en la compra
+      const pnlSol    = gotSol - beforeBuy;         // Diferencia
+      const emoji     = pnlSol >= 0 ? "🟢" : "🔻";
+      if (!isNaN(pnlSol)) {
+        const pnlUsd = solPrice != null ? pnlSol * solPrice : null;
+        // Formateamos con signo
+        const signUsd = pnlUsd != null ? (pnlUsd >= 0 ? "+" : "-") : "";
+        winLossDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL` +
+          (pnlUsd != null
+            ? ` (USD ${signUsd}$${Math.abs(pnlUsd).toFixed(2)})`
+            : "");
+      }
     }
   
-    const usdValue    = solPrice != null
+    // Valor USD del SOL recibido
+    const usdValue = solPrice != null
       ? `USD $${(gotSol * solPrice).toFixed(2)}`
       : "N/A";
-    const tokenPrice  = soldAmtFloat > 0
-      ? (gotSol / soldAmtFloat).toFixed(9)
+  
+    // Precio promedio de venta (SOL por token)
+    const tokenPrice = soldTokens > 0
+      ? (gotSol / soldTokens).toFixed(9)
       : "N/A";
   
-    // formatear hora
-    const rawTime   = sellDetails.rawTime || Date.now();
-    const utcTime   = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const estTime   = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
-    const formatted = `${utcTime} UTC | ${estTime} EST`;
+    // Formatear la hora de la transacción (rawTime opcional)
+    const rawTime = sellDetails.rawTime || Date.now();
+    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
+      hour12: false,
+      timeZone: "UTC"
+    });
+    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
+      hour12: false,
+      timeZone: "America/New_York"
+    });
+    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // balance final de SOL
-    const conn          = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-    const lamportsBal   = await conn.getBalance(new PublicKey(sellDetails.walletAddress));
-    const walletBalance = lamportsBal / 1e9;
-    const walletUsd     = solPrice != null
+    // Obtener balance actual de SOL de la wallet para mostrar
+    const connectionForBalance = new Connection(
+      "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+      "confirmed"
+    );
+    const walletPubKey = new PublicKey(sellDetails.walletAddress);
+    const solBalanceLamports = await connectionForBalance.getBalance(walletPubKey);
+    const walletBalance = solBalanceLamports / 1e9;
+    const walletUsdValue = solPrice != null
       ? (walletBalance * solPrice).toFixed(2)
       : "N/A";
   
+    // --- CONSTRUIR EL MENSAJE FINAL DE VENTA ---
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
-      `🕒 *Time:* ${formatted}\n\n` +
+      `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
-      `💲 *Sold:* ${soldAmount} ${tokenSymbol}\n` +
-      `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
-      `🪙 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n` +
+      `💰 *SOL PnL:* ${winLossDisplay}\n\n` +
+      `💲 *Sold:* ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `💰 *Got:* ${gotSol.toFixed(9)} SOL (${usdValue})\n\n` +
+      `🌑 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsdValue})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
+    // Reescribir el mensaje original de "Waiting for sell"
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2434,7 +2458,7 @@ bot.on("callback_query", async (query) => {
       disable_web_page_preview: true
     });
   
-    // actualizar referencia para futuros refresh
+    // --- ACTUALIZAR referencia para futuros refrescos ---
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][soldTokenMint] = {
       solBeforeBuy: ref?.solBeforeBuy || 0,
@@ -2445,15 +2469,17 @@ bot.on("callback_query", async (query) => {
       time: Date.now()
     };
   
+    // Guardar en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
-      "Sold": `${soldAmount} ${tokenSymbol}`,
-      "Got": `${gotSol} SOL`,
+      "Sold": `${soldTokens.toFixed(3)} ${tokenSymbol}`,
+      "Got": `${gotSol.toFixed(9)} SOL`,
       "Token Price": `${tokenPrice} SOL`,
-      "SOL PNL": winLossDisplay,
-      "Time": formatted,
+      "Wallet": sellDetails.walletAddress,
+      "Time": formattedTime,
       "Transaction": `https://solscan.io/tx/${txSignature}`,
+      "SOL PnL": winLossDisplay,
       "messageText": confirmationMessage
     });
   }
