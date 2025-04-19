@@ -41,7 +41,7 @@ let ataAutoCreationEnabled = false;
 // ─────────────────────────────────────────────
 // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
 // ─────────────────────────────────────────────
-bot.onText(/\/ata (on|off)/, async (msg, match) => {
+bot.onText(/\/ata_(on|off)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const command = match[1].toLowerCase(); // "on" o "off"
   
@@ -611,9 +611,11 @@ bot.onText(/\/status/, (msg) => {
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
-    { command: 'autobuy', description: 'autobuy on – Enable auto‑buy / autobuy off – Disable auto‑buy' },
-    { command: 'ata',     description: 'ata on – Accelerate ATA creation / ata off – Disable ATA creation' },
-    { command: 'close_ata', description: 'Close any ATA and refund rents' },
+    { command: 'autobuy_on',  description: 'Enable auto‑buy (for a single token only)' },
+    { command: 'autobuy_off', description: 'Disable auto‑buy' },
+    { command: 'ata_on',      description: 'Accelerate ATA creation process' },
+    { command: 'ata_off',     description: 'Disable ATA creation and return rents' },
+    { command: 'close_ata',   description: 'Close any ATA and refund rents' },
   ]);
 
 // 🔹 Conexión WebSocket con reconexión automática
@@ -1741,7 +1743,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
-  bot.onText(/\/autobuy (on|off)/, async (msg, match) => {
+  bot.onText(/\/autobuy_(on|off)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const cmd    = match[1];
   
