@@ -1160,7 +1160,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         outputMint: mint,
         amount: Math.floor(amountSOL * 1e9).toString(),
         taker: userPublicKey.toBase58(),
-        slippageBps: 500
+        dynamicSlippage: true
       };
   
       const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
@@ -1304,7 +1304,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
           outputMint: "So11111111111111111111111111111111111111112",
           amount:     amountInUnits,
           taker:      wallet.publicKey.toBase58(),
-          slippageBps: 500
+          dynamicSlippage: true
         },
         headers: { Accept: "application/json" }
       });
@@ -2667,7 +2667,7 @@ async function getSolPriceUSD() {
         inputMint: "So11111111111111111111111111111111111111112", // SOL
         outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
         amount: 100000000, // 0.1 SOL (100M lamports)
-        slippageBps: 50
+        dynamicSlippage: true
       }
     });
 
