@@ -2013,15 +2013,11 @@ function formatTimestampToUTCandEST(timestamp) {
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 /**
- * Obtiene los detalles de un swap SOLO a partir de la respuesta de Jupiter Ultra
+ * Obtiene los detalles de un swap sólo a partir de la respuesta de Jupiter Ultra
  * previamente guardada en buyReferenceMap.
  */
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
-  const user = users[chatId];
-  if (!user?.walletPublicKey) {
-    throw new Error("User wallet not found");
-  }
-
+  // 1) Recuperar la respuesta completa de Jupiter
   const ref = buyReferenceMap[chatId]?.[expectedMint];
   const jup = ref?.executeResponse;
   if (!jup || (jup.txSignature || jup.signature) !== signature) {
@@ -2031,45 +2027,38 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     throw new Error(`Swap not successful: ${jup.status}`);
   }
 
-  // Montos crudos en lamports
+  // 2) Montos crudos en lamports
   const inLam  = BigInt(jup.inputAmountResult   || jup.totalInputAmount);
   const outLam = BigInt(jup.outputAmountResult  || jup.totalOutputAmount);
   const inMint  = jup.swapEvents[0].inputMint;
   const outMint = jup.swapEvents[0].outputMint;
 
-  // Decimales
+  // 3) Decimales de cada token
   const decIn  = inMint  === SOL_MINT ? 9 : await getTokenDecimals(inMint);
   const decOut = outMint === SOL_MINT ? 9 : await getTokenDecimals(outMint);
 
-  // Convertir a unidades humanas
-  let soldAmountTokens, receivedAmountSol;
-  if (inMint === SOL_MINT) {
-    // Compra: vendimos SOL, recibimos token
-    soldAmountTokens  = Number(inLam) / 1e9;
-    receivedAmountSol = Number(outLam) / (10 ** decOut);
-  } else {
-    // Venta: vendimos token, recibimos SOL
-    soldAmountTokens  = Number(inLam)  / (10 ** decIn);
-    receivedAmountSol = Number(outLam) / 1e9;
-  }
+  // 4) Convertir a unidades humanas
+  const inputAmount  = Number(inLam)  / (10 ** decIn);   // SOL gastado (si fue compra)
+  const outputAmount = Number(outLam) / (10 ** decOut);  // Token recibido (si fue compra)
 
-  // Símbolos y nombres
+  // 5) Símbolos y nombres
   const soldSym = inMint  === SOL_MINT ? "SOL" : (getTokenInfo(inMint).symbol || "Unknown");
   const recvSym = outMint === SOL_MINT ? "SOL" : (getTokenInfo(outMint).symbol || "Unknown");
-  const soldName = getTokenInfo(inMint).name || soldSym;
-  const recvName = getTokenInfo(outMint).name || recvSym;
+  const soldName = getTokenInfo(inMint).name      || soldSym;
+  const recvName = getTokenInfo(outMint).name     || recvSym;
 
-  // Timestamp en EST
-  const timeStamp = new Date().toLocaleString("en-US", {
+  // 6) Timestamp en EST
+  const estTime = new Date().toLocaleString("en-US", {
     timeZone: "America/New_York",
     hour12: false
   });
 
+  // 7) Devolver TODO lo que luego usan confirmBuy / confirmSell
   return {
-    soldAmount:        soldAmountTokens,                   // tokens (si venta) o SOL (si compra)
-    receivedAmount:    receivedAmountSol.toFixed(
-                         inMint === SOL_MINT ? decOut : 9
-                       ),
+    // Para compra: inputAmount = SOL gastado; receivedAmount = tokens recibidos
+    inputAmount,                // número puro (ej: 0.1)
+    receivedAmount: outputAmount,
+    soldAmount:  inputAmount,   // mismo que inputAmount sólamente para compra
     soldTokenMint:     inMint,
     receivedTokenMint: outMint,
     soldTokenName:     soldName,
@@ -2077,8 +2066,8 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     receivedTokenName: recvName,
     receivedTokenSymbol: recvSym,
     dexPlatform:       "Jupiter Aggregator v6",
-    walletAddress:     user.walletPublicKey,
-    timeStamp
+    walletAddress:     jup.taker,
+    timeStamp:         estTime
   };
 }
 
@@ -2435,9 +2424,12 @@ bot.on("callback_query", async (query) => {
   async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const solPrice = await getSolPriceUSD(); // Precio actual de SOL en USD
   
-    const receivedAmount     = parseFloat(swapDetails.receivedAmount) || 0;
-    const receivedTokenMint  = swapDetails.receivedTokenMint;
+    // 1) Extract y saneamiento de datos
+    const inputAmount    = parseFloat(swapDetails.inputAmount)    || 0;    // SOL gastado
+    const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;    // Tokens recibidos
+    const receivedTokenMint = swapDetails.receivedTokenMint;
   
+    // Validación básica
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
       console.error("❌ Error: No se pudo determinar un token recibido válido.");
       await bot.editMessageText("⚠️ Error: No se pudo identificar el token recibido.", {
@@ -2447,23 +2439,20 @@ bot.on("callback_query", async (query) => {
       return;
     }
   
-    // Obtener la información estática del token (nombre, símbolo, etc.)
+    // 2) Información estática del token
     const swapTokenData = getTokenInfo(receivedTokenMint);
     const tokenSymbol   = escapeMarkdown(swapTokenData.symbol || "Unknown");
   
-    const inputAmount = parseFloat(swapDetails.inputAmount) || 0;
-    // Dado que eliminamos el swapFee, el total gastado es el inputAmount.
+    // 3) Formateo de valores para el mensaje
     const spentTotal = inputAmount.toFixed(3);
     const usdBefore  = solPrice != null
       ? `USD $${(inputAmount * solPrice).toFixed(2)}`
       : "N/A";
-  
-    // Calcular el precio por token: cuánto SOL se pagó por cada token recibido.
     const tokenPrice = receivedAmount > 0
-      ? (inputAmount / receivedAmount)
-      : 0;
+      ? (inputAmount / receivedAmount).toFixed(9)
+      : "N/A";
   
-    // Formatear la hora de la transacción en UTC y EST.
+    // 4) Timestamp en UTC y EST
     const rawTime = swapDetails.rawTime || Date.now();
     const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
       hour12: false,
@@ -2475,19 +2464,19 @@ bot.on("callback_query", async (query) => {
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // --- CONSTRUIR EL MENSAJE DE CONFIRMACIÓN DE COMPRA ---
+    // 5) Construcción del mensaje de confirmación
     const confirmationMessage =
       `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
       `🕒 *Time:* ${formattedTime}\n\n` +
       `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${tokenPrice.toFixed(9)} SOL\n\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n\n` +
       `💲 *Spent:* ${spentTotal} SOL (${usdBefore})\n` +
       `💰 *Got:* ${receivedAmount.toFixed(3)} Tokens\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(receivedTokenMint)}\`\n` +
+      `🔗 *Received Token ${tokenSymbol}:* \`${receivedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${swapDetails.walletAddress}\``;
   
-    // Actualizar el mensaje de compra con la información del swap
+    // 6) Editar el mensaje original
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2496,7 +2485,7 @@ bot.on("callback_query", async (query) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${receivedTokenMint}` },
+            { text: "🔄 Refresh",    callback_data: `refresh_buy_${receivedTokenMint}` },
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
@@ -2506,32 +2495,30 @@ bot.on("callback_query", async (query) => {
       }
     });
   
-    // --- ENVIAR UN SEGUNDO MENSAJE PARA "WAITING FOR SELL" ---
+    // 7) Enviar el mensaje de "Waiting for sell"
     const waitingSellMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", {
       parse_mode: "Markdown"
     });
   
-    // --- GUARDAR EN buyReferenceMap PARA USAR EN LA VENTA ---
-    if (!buyReferenceMap[chatId]) {
-      buyReferenceMap[chatId] = {};
-    }
+    // 8) Guardar en buyReferenceMap para la venta
+    buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][receivedTokenMint] = {
-      solBeforeBuy: parseFloat(spentTotal),   // p.ej. 0.1 SOL gastados
-      receivedAmount: receivedAmount,         // p.ej. 160424.513 tokens
-      tokenPrice: tokenPrice,
+      solBeforeBuy:  inputAmount,     // SOL que se gastó en la compra
+      receivedAmount,
+      tokenPrice:   parseFloat(tokenPrice) || 0,
       walletAddress: swapDetails.walletAddress,
       txSignature,
-      time: Date.now(),
-      sellMessageId: waitingSellMsg.message_id  // ID del mensaje "Waiting for sell"
+      time:         Date.now(),
+      sellMessageId: waitingSellMsg.message_id
     };
   
-    // Guardar el registro completo de la operación en swaps.json
+    // 9) Guardar registro en swaps.json
     saveSwap(chatId, "Buy", {
       "Swap completed successfully": true,
       "Pair": `SOL/${tokenSymbol}`,
       "Spent": `${spentTotal} SOL`,
       "Got": `${receivedAmount.toFixed(3)} Tokens`,
-      "Token Price": `${tokenPrice.toFixed(9)} SOL`,
+      "Token Price": `${tokenPrice} SOL`,
       "Received Token": tokenSymbol,
       "Received Token Address": receivedTokenMint,
       "Wallet": swapDetails.walletAddress,
