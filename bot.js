@@ -609,7 +609,12 @@ bot.onText(/\/status/, (msg) => {
   bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
 });
 
-
+// tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+bot.setMyCommands([
+    { command: 'autobuy', description: 'autobuy on – Enable auto‑buy / autobuy off – Disable auto‑buy' },
+    { command: 'ata',     description: 'ata on – Accelerate ATA creation / ata off – Disable ATA creation' },
+    { command: 'close_ata', description: 'Close any ATA and refund rents' },
+  ]);
 
 // 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
