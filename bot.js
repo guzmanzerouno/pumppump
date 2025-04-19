@@ -1993,59 +1993,69 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
  * previamente guardada en buyReferenceMap.
  */
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
-  // 1) Recuperar la respuesta completa de Jupiter
-  const ref = buyReferenceMap[chatId]?.[expectedMint];
-  const jup = ref?.executeResponse;
-  if (!jup || (jup.txSignature || jup.signature) !== signature) {
-    throw new Error("Jupiter response not found or signature mismatch");
+    const ref = buyReferenceMap[chatId]?.[expectedMint];
+    const jup = ref?.executeResponse;
+    if (!jup || (jup.txSignature || jup.signature) !== signature) {
+      throw new Error("Jupiter response not found or signature mismatch");
+    }
+    if (jup.status !== "Success") {
+      throw new Error(`Swap not successful: ${jup.status}`);
+    }
+  
+    // Montos en lamports
+    const inLam  = BigInt(jup.inputAmountResult   || jup.totalInputAmount);
+    const outLam = BigInt(jup.outputAmountResult  || jup.totalOutputAmount);
+    const inMint  = jup.swapEvents[0].inputMint;
+    const outMint = jup.swapEvents[0].outputMint;
+  
+    // Decimales
+    const decIn  = inMint  === SOL_MINT ? 9 : await getTokenDecimals(inMint);
+    const decOut = outMint === SOL_MINT ? 9 : await getTokenDecimals(outMint);
+  
+    // Calculamos vendido y recibido
+    let soldAmountTokens, gotSol;
+    if (inMint === SOL_MINT) {
+      // Fue compra de token
+      soldAmountTokens = Number(inLam) / 1e9;      // SOL gastado
+      gotSol           = null;                    // no aplicable
+    } else {
+      // Fue venta de token
+      soldAmountTokens = Number(inLam) / (10 ** decIn);
+      gotSol           = Number(outLam) / 1e9;
+    }
+  
+    // Símbolos/nombres
+    const soldSym = inMint  === SOL_MINT
+      ? "SOL"
+      : (getTokenInfo(inMint).symbol || "Unknown");
+    const recvSym = outMint === SOL_MINT
+      ? "SOL"
+      : (getTokenInfo(outMint).symbol || "Unknown");
+    const soldName = getTokenInfo(inMint).name || soldSym;
+    const recvName = getTokenInfo(outMint).name || recvSym;
+  
+    // Timestamp en EST
+    const estTime = new Date().toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      hour12: false
+    });
+  
+    return {
+      soldAmount:        soldAmountTokens,                             // tokens vendidos
+      receivedAmount:    gotSol !== null
+                          ? gotSol.toFixed(9)                          // SOL recibido
+                          : (Number(outLam) / 10**decOut).toFixed(decOut),
+      soldTokenMint:     inMint,
+      receivedTokenMint: outMint,
+      soldTokenName:     soldName,
+      soldTokenSymbol:   soldSym,
+      receivedTokenName: recvName,
+      receivedTokenSymbol:recvSym,
+      dexPlatform:       "Jupiter Aggregator v6",
+      walletAddress:     users[chatId].walletPublicKey,               // tu wallet
+      timeStamp:         estTime
+    };
   }
-  if (jup.status !== "Success") {
-    throw new Error(`Swap not successful: ${jup.status}`);
-  }
-
-  // 2) Montos crudos en lamports
-  const inLam  = BigInt(jup.inputAmountResult   || jup.totalInputAmount);
-  const outLam = BigInt(jup.outputAmountResult  || jup.totalOutputAmount);
-  const inMint  = jup.swapEvents[0].inputMint;
-  const outMint = jup.swapEvents[0].outputMint;
-
-  // 3) Decimales de cada token
-  const decIn  = inMint  === SOL_MINT ? 9 : await getTokenDecimals(inMint);
-  const decOut = outMint === SOL_MINT ? 9 : await getTokenDecimals(outMint);
-
-  // 4) Convertir a unidades humanas
-  const inputAmount  = Number(inLam)  / (10 ** decIn);   // SOL gastado (si fue compra)
-  const outputAmount = Number(outLam) / (10 ** decOut);  // Token recibido (si fue compra)
-
-  // 5) Símbolos y nombres
-  const soldSym = inMint  === SOL_MINT ? "SOL" : (getTokenInfo(inMint).symbol || "Unknown");
-  const recvSym = outMint === SOL_MINT ? "SOL" : (getTokenInfo(outMint).symbol || "Unknown");
-  const soldName = getTokenInfo(inMint).name      || soldSym;
-  const recvName = getTokenInfo(outMint).name     || recvSym;
-
-  // 6) Timestamp en EST
-  const estTime = new Date().toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    hour12: false
-  });
-
-  // 7) Devolver TODO lo que luego usan confirmBuy / confirmSell
-  return {
-    // Para compra: inputAmount = SOL gastado; receivedAmount = tokens recibidos
-    inputAmount,                // número puro (ej: 0.1)
-    receivedAmount: outputAmount,
-    soldAmount:  inputAmount,   // mismo que inputAmount sólamente para compra
-    soldTokenMint:     inMint,
-    receivedTokenMint: outMint,
-    soldTokenName:     soldName,
-    soldTokenSymbol:   soldSym,
-    receivedTokenName: recvName,
-    receivedTokenSymbol: recvSym,
-    dexPlatform:       "Jupiter Aggregator v6",
-    walletAddress:     jup.taker,
-    timeStamp:         estTime
-  };
-}
 
   function detectDexPlatform(accountKeys) {
     const dexIdentifiers = {
