@@ -2762,14 +2762,6 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
       return;
     }
 
-    // Obtener el par (pairAddress) del token
-    const pairAddress = tokenInfo.pair || tokenInfo.pairAddress;
-    if (!pairAddress || pairAddress === "N/A") {
-      console.warn(`⚠️ Token ${tokenMint} does not have a valid pairAddress.`);
-      await bot.sendMessage(chatId, "❌ This token does not have a pair address for refresh.");
-      return;
-    }
-
     // --- CONTROL DE RATERATE ---
     const now = Date.now();
     const elapsed = now - lastJupRequestTime;
