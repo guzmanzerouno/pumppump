@@ -2013,15 +2013,15 @@ function formatTimestampToUTCandEST(timestamp) {
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 /**
- * Obtiene los detalles de un swap (compra o venta) a partir de la respuesta
- * de Jupiter Ultra previamente guardada en buyReferenceMap.
- *
- * @param {string} signature     La firma de la transacción.
- * @param {string} expectedMint  El mint que esperamos (para identificar el par).
- * @param {string} chatId        ID de Telegram del usuario.
+ * Obtiene los detalles de un swap SOLO a partir de la respuesta de Jupiter Ultra
+ * previamente guardada en buyReferenceMap.
  */
 async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
-  // 1) Recuperar la respuesta de Jupiter
+  const user = users[chatId];
+  if (!user?.walletPublicKey) {
+    throw new Error("User wallet not found");
+  }
+
   const ref = buyReferenceMap[chatId]?.[expectedMint];
   const jup = ref?.executeResponse;
   if (!jup || (jup.txSignature || jup.signature) !== signature) {
@@ -2031,59 +2031,54 @@ async function getSwapDetailsHybrid(signature, expectedMint, chatId) {
     throw new Error(`Swap not successful: ${jup.status}`);
   }
 
-  // 2) Montos brutos en lamports
+  // Montos crudos en lamports
   const inLam  = BigInt(jup.inputAmountResult   || jup.totalInputAmount);
   const outLam = BigInt(jup.outputAmountResult  || jup.totalOutputAmount);
-
-  // 3) Mints de entrada y salida
   const inMint  = jup.swapEvents[0].inputMint;
   const outMint = jup.swapEvents[0].outputMint;
 
-  // 4) Decimales
+  // Decimales
   const decIn  = inMint  === SOL_MINT ? 9 : await getTokenDecimals(inMint);
   const decOut = outMint === SOL_MINT ? 9 : await getTokenDecimals(outMint);
 
-  // 5) Convertir a unidades humanas
-  const inputAmount = inMint === SOL_MINT
-    ? Number(inLam) / 1e9
-    : Number(inLam) / (10 ** decIn);
-  const soldAmount = inputAmount;  // tokens vendidos o SOL gastado
-  const receivedAmount = outMint === SOL_MINT
-    ? Number(outLam) / 1e9
-    : Number(outLam) / (10 ** decOut);
+  // Convertir a unidades humanas
+  let soldAmountTokens, receivedAmountSol;
+  if (inMint === SOL_MINT) {
+    // Compra: vendimos SOL, recibimos token
+    soldAmountTokens  = Number(inLam) / 1e9;
+    receivedAmountSol = Number(outLam) / (10 ** decOut);
+  } else {
+    // Venta: vendimos token, recibimos SOL
+    soldAmountTokens  = Number(inLam)  / (10 ** decIn);
+    receivedAmountSol = Number(outLam) / 1e9;
+  }
 
-  // 6) Símbolos y nombres
-  const soldSym = inMint  === SOL_MINT
-    ? "SOL"
-    : (getTokenInfo(inMint).symbol || "Unknown");
-  const recvSym = outMint === SOL_MINT
-    ? "SOL"
-    : (getTokenInfo(outMint).symbol || "Unknown");
-
+  // Símbolos y nombres
+  const soldSym = inMint  === SOL_MINT ? "SOL" : (getTokenInfo(inMint).symbol || "Unknown");
+  const recvSym = outMint === SOL_MINT ? "SOL" : (getTokenInfo(outMint).symbol || "Unknown");
   const soldName = getTokenInfo(inMint).name || soldSym;
   const recvName = getTokenInfo(outMint).name || recvSym;
 
-  // 7) Timestamp en EST
-  const estTime = new Date().toLocaleString("en-US", {
+  // Timestamp en EST
+  const timeStamp = new Date().toLocaleString("en-US", {
     timeZone: "America/New_York",
     hour12: false
   });
 
-  // 8) Devolver el objeto que usan confirmBuy y confirmSell
   return {
-    inputAmount:        inputAmount.toFixed(3),
-    soldAmount:         soldAmount,
-    receivedAmount:     receivedAmount.toFixed(outMint === SOL_MINT ? 9 : decOut),
-    swapFee:            "0.00000",
-    soldTokenMint:      inMint,
-    receivedTokenMint:  outMint,
-    soldTokenName:      soldName,
-    soldTokenSymbol:    soldSym,
-    receivedTokenName:  recvName,
-    receivedTokenSymbol:recvSym,
-    dexPlatform:        "Jupiter Aggregator v6",
-    walletAddress:      jup.taker,
-    timeStamp:          estTime
+    soldAmount:        soldAmountTokens,                   // tokens (si venta) o SOL (si compra)
+    receivedAmount:    receivedAmountSol.toFixed(
+                         inMint === SOL_MINT ? decOut : 9
+                       ),
+    soldTokenMint:     inMint,
+    receivedTokenMint: outMint,
+    soldTokenName:     soldName,
+    soldTokenSymbol:   soldSym,
+    receivedTokenName: recvName,
+    receivedTokenSymbol: recvSym,
+    dexPlatform:       "Jupiter Aggregator v6",
+    walletAddress:     user.walletPublicKey,
+    timeStamp
   };
 }
 
@@ -2274,7 +2269,7 @@ bot.on("callback_query", async (query) => {
   
     // Parsear cantidades
     const soldTokens = parseFloat(sellDetails.soldAmount ?? soldAmountStr) || 0;
-    const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
+    const gotSol     = parseFloat(sellDetails.receivedAmount)     || 0;
   
     // Calcular PnL en SOL y USD
     let pnlDisplay = "N/A";
@@ -2296,7 +2291,7 @@ bot.on("callback_query", async (query) => {
       ? (gotSol / soldTokens).toFixed(9)
       : "N/A";
   
-    // Timestamp: usar ahora si sellDetails no trae rawTime
+    // Timestamp
     const now = Date.now();
     const utcTime = new Date(now).toLocaleTimeString("en-GB", {
       hour12: false,
@@ -2310,8 +2305,7 @@ bot.on("callback_query", async (query) => {
   
     // Balance actual de la wallet en SOL y USD
     const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-    const walletPk   = new PublicKey(sellDetails.walletAddress);
-    const balLam     = await connection.getBalance(walletPk);
+    const balLam     = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
     const walletSol  = balLam / 1e9;
     const walletUsd  = solPrice != null
       ? (walletSol * solPrice).toFixed(2)
@@ -2335,7 +2329,6 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // Editar el mensaje de "Waiting for sell"
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2343,14 +2336,13 @@ bot.on("callback_query", async (query) => {
       disable_web_page_preview: true
     });
   
-    // Actualizar la referencia (mantener solBeforeBuy)
+    // Mantener solBeforeBuy en la referencia
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
       time: Date.now()
     };
   
-    // Guardar en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
