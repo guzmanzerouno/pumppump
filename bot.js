@@ -1155,7 +1155,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         outputMint: mint,
         amount: Math.floor(amountSOL * 1e9).toString(),
         taker: userPublicKey.toBase58(),
-        dynamicSlippage: true
+        slippageBps: 100
       };
   
       const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
@@ -1196,7 +1196,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
 const executePayload = {
   signedTransaction: signedTxBase64,
   requestId: requestId,
-  prioritizationFeeLamports: 2000000 // Valor configurable
+  prioritizationFeeLamports: 3500000 // Valor configurable
 };
 const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
   headers: { "Content-Type": "application/json", Accept: "application/json" }
@@ -1220,7 +1220,7 @@ return txSignature;
     } catch (error) {
       const errorMessage = error.message || "";
       console.error(`❌ Error in purchase attempt ${attempt}:`, errorMessage, error.response ? JSON.stringify(error.response.data) : "");
-      if (attempt < 3) {
+      if (attempt < 6) {
         const delay = 1000; // Delay fijo de 1 segundo
         await new Promise(resolve => setTimeout(resolve, delay));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
@@ -1283,7 +1283,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         outputMint: "So11111111111111111111111111111111111111112", // Wrapped SOL
         amount: amountInUnits,
         taker: wallet.publicKey.toBase58(),
-        dynamicSlippage: true
+        slippageBps: 100
       };
   
       const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
@@ -1323,7 +1323,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const executePayload = {
         signedTransaction: signedTxBase64,
         requestId: requestId,
-        prioritizationFeeLamports: 2000000 // Valor configurable (ej. 0.002 SOL aprox.)
+        prioritizationFeeLamports: 3500000 // Valor configurable (ej. 0.002 SOL aprox.)
       };
       const executeResponse = await axios.post("https://lite-api.jup.ag/ultra/v1/execute", executePayload, {
         headers: { "Content-Type": "application/json", Accept: "application/json" }
@@ -1371,7 +1371,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
   
     } catch (error) {
       // Se reintenta la venta hasta 4 intentos, con delays exponenciales.
-      if (attempt < 4) {
+      if (attempt < 6) {
         const delay = 1000 * Math.pow(2, attempt - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
         return await sellToken(chatId, mint, amount, attempt + 1);
