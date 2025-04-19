@@ -1541,14 +1541,16 @@ async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
     if (!forceCheck) processedSignatures.add(signature);
   
+    // 1) Obtener mint desde la tx
     const mintData = await getMintAddressFromTransaction(signature);
-    if (!mintData || !mintData.mintAddress) return;
+    if (!mintData?.mintAddress) return;
   
+    // 2) No procesar dos veces el mismo mint
     if (processedMints[mintData.mintAddress]) return;
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Pre‑creación de ATAs en modo fire‑and‑forget
+    // Pre‑creación de ATAs (fire‑and‑forget)
     preCreateATAsForToken(mintData.mintAddress)
       .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
   
@@ -1556,15 +1558,15 @@ async function analyzeTransaction(signature, forceCheck = false) {
     for (const [chatId, user] of Object.entries(users)) {
       if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
         const amountSOL = user.autoBuyAmount;
-        const mint = mintData.mintAddress;
+        const mint      = mintData.mintAddress;
   
-        // _Desactivar auto‑buy_
+        // Desactivar auto‑buy
         user.autoBuyEnabled = false;
         saveUsers();
   
         try {
           // 1) Mensaje inicial
-          const sent = await bot.sendMessage(
+          const sent      = await bot.sendMessage(
             chatId,
             `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
           );
@@ -1580,45 +1582,15 @@ async function analyzeTransaction(signature, forceCheck = false) {
             continue;
           }
   
-          // 3) Confirmación de envío de la orden
-          await bot.editMessageText(
-            `✅ *Purchase order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ *Fetching sell details…*`,
-            {
-              chat_id: chatId,
-              message_id: messageId,
-              parse_mode: "Markdown",
-              disable_web_page_preview: true
-            }
-          );
+          // → ya no editamos el mensaje con “order confirmed”
+          // → ya no hacemos el bucle manual de retry
   
-          // 4) Obtener detalles del swap
-          let swapDetails = null;
-          let attempt = 0, delay = 3000, maxAttempts = 5;
-          while (attempt < maxAttempts && !swapDetails) {
-            attempt++;
-            swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
-            if (!swapDetails) await new Promise(r => setTimeout(r, delay *= 1.5));
-          }
-  
-          if (!swapDetails) {
-            await bot.editMessageText(
-              `⚠️ Swap details could not be retrieved after ${maxAttempts} attempts.\n[View tx](https://solscan.io/tx/${txSignature})`,
-              {
-                chat_id: chatId,
-                message_id: messageId,
-                parse_mode: "Markdown",
-                disable_web_page_preview: true
-              }
-            );
-            continue;
-          }
-  
-          // 5) Mensaje final con confirmBuy (incluye botón “Sell” y resto)
+          // 3) Obtener detalles de una sola vez y confirmar
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
         } catch (err) {
           console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
-          // Opción: notificar al usuario
           bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
         }
       }
@@ -2095,151 +2067,108 @@ bot.on("callback_query", async (query) => {
     const data   = query.data;
   
     if (data.startsWith("sell_")) {
-      const parts            = data.split("_");
-      const expectedTokenMint = parts[1];    // Mint del token que se quiere vender
-      const sellType          = parts[2];    // "50" o "max"
+      const [_, expectedTokenMint, sellType] = data.split("_");
   
-      console.log(
-        `🔍 Debug - User before selling (${expectedTokenMint}):`,
-        JSON.stringify(users[chatId], null, 2)
-      );
-  
-      if (!users[chatId] || !users[chatId].privateKey) {
-        console.error(
-          `⚠️ Private key not found for user: ${JSON.stringify(users[chatId])}`
-        );
+      // Asegurarnos de que tenemos llave privada
+      if (!users[chatId]?.privateKey) {
         await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
         return bot.answerCallbackQuery(query.id);
       }
   
       // Recuperar o enviar el mensaje "Waiting for sell"
-      let waitingMsgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
-      if (!waitingMsgId) {
-        const waitingMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", {
-          parse_mode: "Markdown",
-        });
-        waitingMsgId = waitingMsg.message_id;
+      let msgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
+      if (!msgId) {
+        const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
+        msgId = m.message_id;
         buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
         buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
-        buyReferenceMap[chatId][expectedTokenMint].sellMessageId = waitingMsgId;
+        buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
       }
   
       // Mostrar que estamos procesando la venta
       await bot.editMessageText(
         `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
-        { chat_id: chatId, message_id: waitingMsgId }
+        { chat_id: chatId, message_id: msgId }
       );
   
       try {
-        // Asegurar ATA, decimales y balance
+        // 1) Asegurar ATA, obtener decimales y balance
         const wallet     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-        const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-  
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
         await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
-        const decimals = await getTokenDecimals(expectedTokenMint);
-        let balance     = await getTokenBalance(chatId, expectedTokenMint);
   
+        const decimals = await getTokenDecimals(expectedTokenMint);
+        const balance  = await getTokenBalance(chatId, expectedTokenMint);
         if (!balance || balance <= 0) {
           await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
-            chat_id: chatId,
-            message_id: waitingMsgId,
+            chat_id: chatId, message_id: msgId
           });
-          // Borrar en 30s
-          setTimeout(() => bot.deleteMessage(chatId, waitingMsgId).catch(() => {}), 30000);
+          setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 30_000);
           return bot.answerCallbackQuery(query.id);
         }
   
-        // Calcular lamports a vender
-        const balanceInLamports = Math.floor(balance * 10 ** decimals);
-        const amountToSell      = sellType === "50"
-          ? Math.floor(balanceInLamports / 2)
-          : balanceInLamports;
-        const soldAmount        = sellType === "50"
-          ? (balance / 2).toFixed(9)
-          : balance.toFixed(3);
+        // 2) Calcular lamports y soldAmount
+        const balanceInLam = Math.floor(balance * 10 ** decimals);
+        const amountToSell = sellType === "50"
+          ? Math.floor(balanceInLam / 2)
+          : balanceInLam;
+        const soldAmount = sellType === "50"
+          ? (balance / 2).toFixed(decimals)
+          : balance.toFixed(decimals);
   
         if (amountToSell < 1) {
           await bot.editMessageText("⚠️ The amount to sell is too low.", {
-            chat_id: chatId,
-            message_id: waitingMsgId,
+            chat_id: chatId, message_id: msgId
           });
           return bot.answerCallbackQuery(query.id);
         }
   
-        // Ejecutar la venta (3 intentos)
+        // 3) Ejecutar la venta (hasta 3 intentos con 1 s backoff)
         let txSignature = null;
-        let attempts    = 0;
-        let delayMs     = 5000;
-        while (attempts < 3 && !txSignature) {
-          attempts++;
-          console.log(`🔄 Attempt ${attempts}/3 to execute sale...`);
+        for (let i = 0; i < 3 && !txSignature; i++) {
           txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
-          if (!txSignature) {
-            await new Promise(res => setTimeout(res, delayMs));
-            delayMs *= 1.5;
-          }
+          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
         }
-  
         if (!txSignature) {
-          console.error("❌ Sale could not be completed after multiple attempts.");
           await bot.editMessageText(
             "❌ The sale could not be completed after multiple attempts. Please check server logs.",
-            { chat_id: chatId, message_id: waitingMsgId }
+            { chat_id: chatId, message_id: msgId }
           );
           return bot.answerCallbackQuery(query.id);
         }
   
-        // Confirmar orden en Solana y pedir detalles
-        await bot.editMessageText(
-          `✅ *Sell order confirmed on Solana!*\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n⏳ Fetching sell details...`,
-          {
-            chat_id: chatId,
-            message_id: waitingMsgId,
-            parse_mode: "Markdown",
-            disable_web_page_preview: true,
-          }
-        );
-  
-        // Esperar y obtener detalles vía getSwapDetailsHybrid
+        // 4) Obtener detalles de la venta (hasta 5 intentos con 1 s backoff)
         let sellDetails = null;
-        attempts = 0;
-        delayMs  = 5000;
-        while (attempts < 5 && !sellDetails) {
-          attempts++;
-          console.log(`⏳ Fetching transaction details (Attempt ${attempts}): ${txSignature}`);
+        for (let i = 0; i < 5 && !sellDetails; i++) {
           sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
-          if (!sellDetails) {
-            await new Promise(res => setTimeout(res, delayMs));
-            delayMs *= 1.2;
-          }
+          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
         }
-  
         if (!sellDetails) {
           await bot.editMessageText(
             `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
             {
               chat_id: chatId,
-              message_id: waitingMsgId,
+              message_id: msgId,
               parse_mode: "Markdown",
-              disable_web_page_preview: true,
+              disable_web_page_preview: true
             }
           );
           return bot.answerCallbackQuery(query.id);
         }
   
-        // Finalmente, actualizar con confirmSell
-        await confirmSell(chatId, sellDetails, soldAmount, waitingMsgId, txSignature, expectedTokenMint);
+        // 5) Confirmar y actualizar con todos los detalles finales
+        await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
   
-      } catch (error) {
-        console.error("❌ Error in sell process:", error);
+      } catch (err) {
+        console.error("❌ Error in sell process:", err);
         await bot.editMessageText(
-          `❌ The sale could not be completed. Error: ${error.message}`,
-          { chat_id: chatId, message_id: waitingMsgId }
+          `❌ The sale could not be completed. Error: ${err.message}`,
+          { chat_id: chatId, message_id: msgId }
         );
       }
     }
   
-    // Siempre respondemos para quitar el “loading” del botón
+    // siempre respondemos para quitar el “loading” del botón
     bot.answerCallbackQuery(query.id);
   });
 
@@ -2349,50 +2278,42 @@ bot.on("callback_query", async (query) => {
     const data   = query.data;
   
     if (data.startsWith("buy_")) {
-      const parts     = data.split("_");
-      const mint      = parts[1];
-      const amountSOL = parseFloat(parts[2]);
+      const [_, mint, amountStr] = data.split("_");
+      const amountSOL = parseFloat(amountStr);
+      const messageId = (await bot.sendMessage(
+        chatId,
+        `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+      )).message_id;
   
-      if (!users[chatId] || !users[chatId].privateKey) {
-        await bot.sendMessage(chatId, "⚠️ You don't have a registered private key. Use /start to register.");
+      if (!users[chatId]?.privateKey) {
+        await bot.editMessageText("⚠️ You don't have a registered private key. Use /start to register.", {
+          chat_id: chatId,
+          message_id
+        });
         await bot.answerCallbackQuery(query.id);
         return;
       }
   
-      const sent      = await bot.sendMessage(chatId, `🛒 Processing purchase of ${amountSOL} SOL for ${mint}...`);
-      const messageId = sent.message_id;
-  
       try {
+        // 1) Send order
         const txSignature = await buyToken(chatId, mint, amountSOL);
-  
         if (!txSignature) {
           await bot.editMessageText(`❌ The purchase could not be completed.`, {
             chat_id: chatId,
-            message_id: messageId
+            message_id
           });
           await bot.answerCallbackQuery(query.id);
           return;
         }
   
-        await bot.editMessageText(
-          `✅ *Purchase order confirmed on Solana!*\n` +
-          `🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-          `⏳ *Fetching swap details...*`,
-          {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            disable_web_page_preview: true
-          }
-        );
-  
+        // 2) Fetch swap details once
         const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
         if (!swapDetails) {
           await bot.editMessageText(
             `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
             {
               chat_id: chatId,
-              message_id: messageId,
+              message_id,
               parse_mode: "Markdown",
               disable_web_page_preview: true
             }
@@ -2401,22 +2322,24 @@ bot.on("callback_query", async (query) => {
           return;
         }
   
+        // 3) Final confirmation (updates the same message to the full summary)
         await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
       } catch (error) {
         console.error("❌ Error in purchase process:", error);
-        const raw = typeof error === "string"
+        const msg = typeof error === "string"
           ? error
-          : error?.message || "❌ The purchase could not be completed.";
-        const text = raw.includes("Not enough SOL") ? raw : "❌ The purchase could not be completed.";
-        await bot.editMessageText(text, {
+          : error.message.includes("Not enough SOL")
+            ? error.message
+            : "❌ The purchase could not be completed.";
+        await bot.editMessageText(msg, {
           chat_id: chatId,
-          message_id: messageId
+          message_id
         });
       }
-    }
   
-    await bot.answerCallbackQuery(query.id);
+      await bot.answerCallbackQuery(query.id);
+    }
   });
 
   async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
