@@ -2369,36 +2369,24 @@ bot.on("callback_query", async (query) => {
 
   async function confirmSell(chatId, sellDetails, soldAmount, messageId, txSignature, expectedTokenMint) {
     const solPrice = await getSolPriceUSD();
-  
-    // Forzamos el uso del mint que esperamos
     const soldTokenMint = expectedTokenMint;
-  
-    // Info estática del token
     const soldTokenData = getTokenInfo(soldTokenMint) || {};
-    const tokenSymbol = typeof soldTokenData.symbol === "string"
-      ? escapeMarkdown(soldTokenData.symbol)
-      : "Unknown";
+    const tokenSymbol = escapeMarkdown(soldTokenData.symbol || "Unknown");
   
-    // SOL recibido por la venta y cantidad de tokens vendidos
-    const gotSol = parseFloat(sellDetails.receivedAmount);
+    const gotSol       = parseFloat(sellDetails.receivedAmount);
     const soldAmtFloat = parseFloat(soldAmount);
   
-    // --- CÁLCULO DE PNL PROPORCIONAL ---
+    // --- PNL PROPORCIONAL ---
     let winLossDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[soldTokenMint];
     if (ref?.solBeforeBuy != null && ref?.receivedAmount != null) {
-      // SOL gastado originalmente y tokens recibidos entonces
-      const solInvested = parseFloat(ref.solBeforeBuy);
-      const tokensBought = parseFloat(ref.receivedAmount);
-      // coste unitario por token
-      const costPerToken = solInvested / tokensBought;
-      // coste proporcional para los tokens que vendemos ahora
-      const costUsed = costPerToken * soldAmtFloat;
-      // PNL en SOL
-      const pnlSol = gotSol - costUsed;
-      const emoji = pnlSol >= 0 ? "🟢" : "🔻";
-      // PNL en USD
-      const pnlUsd = solPrice != null ? pnlSol * solPrice : null;
+      const solInvested   = ref.solBeforeBuy;
+      const tokensBought  = ref.receivedAmount;
+      const costPerToken  = solInvested / tokensBought;
+      const costUsed      = costPerToken * soldAmtFloat;
+      const pnlSol        = gotSol - costUsed;
+      const emoji         = pnlSol >= 0 ? "🟢" : "🔻";
+      const pnlUsd        = solPrice != null ? pnlSol * solPrice : null;
       winLossDisplay = `${emoji}${pnlSol.toFixed(3)} SOL` +
         (pnlUsd != null
           ? ` (USD ${pnlUsd >= 0 ? '+' : '-'}$${Math.abs(pnlUsd).toFixed(2)})`
@@ -2406,49 +2394,39 @@ bot.on("callback_query", async (query) => {
         );
     }
   
-    // Valor total recibido en USD
-    const usdValue = solPrice != null
+    const usdValue    = solPrice != null
       ? `USD $${(gotSol * solPrice).toFixed(2)}`
       : "N/A";
-  
-    // Precio por token (SOL/token)
-    const tokenPrice = soldAmtFloat > 0
+    const tokenPrice  = soldAmtFloat > 0
       ? (gotSol / soldAmtFloat).toFixed(9)
       : "N/A";
   
-    // Formateo de hora
-    const rawTime = sellDetails.rawTime || Date.now();
-    const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
-      hour12: false, timeZone: "UTC"
-    });
-    const estTime = new Date(rawTime).toLocaleTimeString("en-US", {
-      hour12: false, timeZone: "America/New_York"
-    });
-    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+    // formatear hora
+    const rawTime   = sellDetails.rawTime || Date.now();
+    const utcTime   = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime   = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+    const formatted = `${utcTime} UTC | ${estTime} EST`;
   
-    // Obtener balance actual de SOL
-    const connectionForBalance = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-    const walletPubKey = new PublicKey(sellDetails.walletAddress);
-    const solBalanceLamports = await connectionForBalance.getBalance(walletPubKey);
-    const walletBalance = solBalanceLamports / 1e9;
-    const walletUsdValue = solPrice
+    // balance final de SOL
+    const conn          = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+    const lamportsBal   = await conn.getBalance(new PublicKey(sellDetails.walletAddress));
+    const walletBalance = lamportsBal / 1e9;
+    const walletUsd     = solPrice != null
       ? (walletBalance * solPrice).toFixed(2)
       : "N/A";
   
-    // Construir el mensaje final
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
-      `🕒 *Time:* ${formattedTime}\n\n` +
+      `🕒 *Time:* ${formatted}\n\n` +
       `⚡️ SELL ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
       `💰 *SOL PNL:* ${winLossDisplay}\n\n` +
       `💲 *Sold:* ${soldAmount} ${tokenSymbol}\n` +
       `💰 *Got:* ${gotSol} SOL (${usdValue})\n\n` +
-      `🪙 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsdValue})\n\n` +
+      `🪙 *Wallet Balance:* ${walletBalance.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${soldTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // Editar el mismo mensaje en Telegram
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2456,30 +2434,26 @@ bot.on("callback_query", async (query) => {
       disable_web_page_preview: true
     });
   
-    // Actualizar la referencia para posibles futuros refrescos
+    // actualizar referencia para futuros refresh
     if (!buyReferenceMap[chatId]) buyReferenceMap[chatId] = {};
     buyReferenceMap[chatId][soldTokenMint] = {
-      solBeforeBuy: parseFloat(ref?.solBeforeBuy || "0"),
+      solBeforeBuy: ref?.solBeforeBuy || 0,
       receivedAmount: 0,
-      tokenPrice: tokenPrice,
+      tokenPrice,
       walletAddress: sellDetails.walletAddress,
       txSignature,
       time: Date.now()
     };
   
-    // Guardar en swaps.json
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       "Pair": `${tokenSymbol}/SOL`,
       "Sold": `${soldAmount} ${tokenSymbol}`,
       "Got": `${gotSol} SOL`,
       "Token Price": `${tokenPrice} SOL`,
-      "Sold Token": tokenSymbol,
-      "Sold Token Address": soldTokenMint,
-      "Wallet": sellDetails.walletAddress,
-      "Time": formattedTime,
-      "Transaction": `https://solscan.io/tx/${txSignature}`,
       "SOL PNL": winLossDisplay,
+      "Time": formatted,
+      "Transaction": `https://solscan.io/tx/${txSignature}`,
       "messageText": confirmationMessage
     });
   }
@@ -2562,8 +2536,8 @@ bot.on("callback_query", async (query) => {
   async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
     const solPrice = await getSolPriceUSD(); // Precio actual de SOL en USD
   
-    const receivedAmount = parseFloat(swapDetails.receivedAmount) || 0;
-    const receivedTokenMint = swapDetails.receivedTokenMint;
+    const receivedAmount     = parseFloat(swapDetails.receivedAmount) || 0;
+    const receivedTokenMint  = swapDetails.receivedTokenMint;
   
     if (!receivedTokenMint || receivedTokenMint.length < 32) {
       console.error("❌ Error: No se pudo determinar un token recibido válido.");
@@ -2576,17 +2550,21 @@ bot.on("callback_query", async (query) => {
   
     // Obtener la información estática del token (nombre, símbolo, etc.)
     const swapTokenData = getTokenInfo(receivedTokenMint);
-    const tokenSymbol = escapeMarkdown(swapTokenData.symbol || "Unknown");
+    const tokenSymbol   = escapeMarkdown(swapTokenData.symbol || "Unknown");
   
-    const inputAmount = parseFloat(swapDetails.inputAmount);
+    const inputAmount = parseFloat(swapDetails.inputAmount) || 0;
     // Dado que eliminamos el swapFee, el total gastado es el inputAmount.
     const spentTotal = inputAmount.toFixed(3);
-    const usdBefore = solPrice ? `USD $${(inputAmount * solPrice).toFixed(2)}` : "N/A";
+    const usdBefore  = solPrice != null
+      ? `USD $${(inputAmount * solPrice).toFixed(2)}`
+      : "N/A";
   
     // Calcular el precio por token: cuánto SOL se pagó por cada token recibido.
-    const tokenPrice = receivedAmount > 0 ? (inputAmount / receivedAmount) : 0;
+    const tokenPrice = receivedAmount > 0
+      ? (inputAmount / receivedAmount)
+      : 0;
   
-    // Obtener el timestamp de la transacción y formatearlo en UTC y EST.
+    // Formatear la hora de la transacción en UTC y EST.
     const rawTime = swapDetails.rawTime || Date.now();
     const utcTime = new Date(rawTime).toLocaleTimeString("en-GB", {
       hour12: false,
@@ -2630,21 +2608,22 @@ bot.on("callback_query", async (query) => {
     });
   
     // --- ENVIAR UN SEGUNDO MENSAJE PARA "WAITING FOR SELL" ---
-    // Este mensaje se envía al finalizar la compra y se guarda su ID para futuras actualizaciones en el proceso de venta.
-    const waitingSellMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
+    const waitingSellMsg = await bot.sendMessage(chatId, "⏳ Waiting for sell...", {
+      parse_mode: "Markdown"
+    });
   
-    // Guardar la referencia para refrescar la compra en el futuro, incluyendo el ID del mensaje "Waiting for sell"
+    // --- GUARDAR EN buyReferenceMap PARA USAR EN LA VENTA ---
     if (!buyReferenceMap[chatId]) {
       buyReferenceMap[chatId] = {};
     }
     buyReferenceMap[chatId][receivedTokenMint] = {
-      solBeforeBuy: parseFloat(spentTotal),
-      receivedAmount: receivedAmount,
+      solBeforeBuy: parseFloat(spentTotal),   // p.ej. 0.1 SOL gastados
+      receivedAmount: receivedAmount,         // p.ej. 160424.513 tokens
       tokenPrice: tokenPrice,
       walletAddress: swapDetails.walletAddress,
       txSignature,
       time: Date.now(),
-      sellMessageId: waitingSellMsg.message_id // Se guarda el ID del mensaje "Waiting for sell"
+      sellMessageId: waitingSellMsg.message_id  // ID del mensaje "Waiting for sell"
     };
   
     // Guardar el registro completo de la operación en swaps.json
