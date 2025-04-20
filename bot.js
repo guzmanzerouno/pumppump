@@ -29,6 +29,45 @@ const proxyPort = "33335";
 const baseUsername = "brd-customer-hl_7a7f0241-zone-datacenter_proxy1";
 const proxyPassword = "i75am5xil518";
 
+// Lista de tus endpoints
+const RPC_ENDPOINTS = [
+    "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35",
+    "https://mainnet.helius-rpc.com/?api-key=1b6d8190-08a4-48dd-8dbd-1a0f5861fa61",
+    "https://solana-api.instantnodes.io/token-hL8J457Dhvr7qc4c1GJ91VtxVaFnHzzW",
+    "https://mainnet.helius-rpc.com/?api-key=c42de7e4-9d4b-4d03-a866-9ce503b19b46",
+    "https://solana-api.instantnodes.io/token-2eFQ4GJbhQu4wxmCv9H8E3FIx88pxHn4",
+    "https://mainnet.helius-rpc.com/?api-key=c62c4420-5caa-4e75-a727-7f1ca0925142",
+    "https://solana-api.instantnodes.io/token-D0D7hdvtjS1kzIpGwkP4UQicSxj5NYWt",
+    "https://solana-api.instantnodes.io/token-THgy2FU2ysquJJSpOSABTBkwJqWcQwzK"
+  ];
+  
+  // Puntero para el siguiente endpoint a usar
+  let nextRpcIndex = 0;
+  // Set de endpoints ya asignados en la tanda concurrente
+  const inUseRpc = new Set();
+  
+  function getNextRpc() {
+    // Intentamos encontrar uno libre
+    for (let i = 0; i < RPC_ENDPOINTS.length; i++) {
+      const idx = (nextRpcIndex + i) % RPC_ENDPOINTS.length;
+      const url = RPC_ENDPOINTS[idx];
+      if (!inUseRpc.has(url)) {
+        // lo reservamos
+        inUseRpc.add(url);
+        nextRpcIndex = (idx + 1) % RPC_ENDPOINTS.length;
+        return url;
+      }
+    }
+    // Si todos están “in use”, simplemente usamos round‑robin sin bloqueo
+    const url = RPC_ENDPOINTS[nextRpcIndex];
+    nextRpcIndex = (nextRpcIndex + 1) % RPC_ENDPOINTS.length;
+    return url;
+  }
+  
+  function releaseRpc(url) {
+    inUseRpc.delete(url);
+  }
+
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
@@ -1092,44 +1131,38 @@ function getTokenInfo(mintAddress) {
 
 // Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
+    let rpcUrl;
     try {
       const user = users[chatId];
       if (!user || !user.privateKey) {
         throw new Error("User not registered or missing privateKey.");
       }
   
-      // Obtención del keypair y de la wallet del usuario
-      const userKeypair = Keypair.fromSecretKey(
-        new Uint8Array(bs58.decode(user.privateKey))
-      );
+      // 1) Reservar un RPC distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "processed");
+  
+      // 2) Keypair y wallet
+      const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
   
-      // Crear la conexión a Helius usando un endpoint premium y el compromiso "processed"
-      const connection = new Connection(
-        "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35",
-        "processed"
-      );
-  
-      // Verificar/crear la ATA y obtener el balance de SOL en paralelo
+      // 3) Crear/asegurar ATA y chequear balance simultáneo
       const [ata, balanceLamports] = await Promise.all([
         ensureAssociatedTokenAccount(userKeypair, mint, connection),
         connection.getBalance(userPublicKey, "processed")
       ]);
-  
       if (!ata) {
-        // reintentar si no logró crear el ATA
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1000));
         return buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-  
       const balanceSOL = balanceLamports / 1e9;
       if (balanceSOL < amountSOL) {
         throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
       }
   
-      // ── PEDIR ORDEN UNSIGNED A ULTRA API ──
+      // 4) Pedir orden unsigned a Ultra
       const orderParams = {
-        inputMint:  "So11111111111111111111111111111111111111112", // Wrapped SOL
+        inputMint:  "So11111111111111111111111111111111111111112",
         outputMint: mint,
         amount:     Math.floor(amountSOL * 1e9).toString(),
         taker:      userPublicKey.toBase58(),
@@ -1145,22 +1178,20 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error("Invalid order response from Ultra API.");
       }
   
-      // ── DESERIALIZAR Y FIRMAR LOCALMENTE ──
+      // 5) Firmar localmente (versioned o legacy)
       const txBuf = Buffer.from(txData, "base64");
       let signedTxBase64;
       try {
-        // Versioned
         const vtx = VersionedTransaction.deserialize(txBuf);
         vtx.sign([userKeypair]);
         signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
       } catch {
-        // Fallback legacy
         const legacy = Transaction.from(txBuf);
         legacy.sign(userKeypair);
         signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // ── EJECUTAR CON ULTRA EXECUTE (igual que en sellToken) ──
+      // 6) Ejecutar con Ultra Execute
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
         {
@@ -1176,12 +1207,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       }
       const txSignature = exec.txSignature || exec.signature;
   
-      // ── GUARDAR EN buyReferenceMap ──
+      // 7) Guardar referencia
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = {
-        txSignature,
-        executeResponse: exec
-      };
+      buyReferenceMap[chatId][mint] = { txSignature, executeResponse: exec };
   
       return txSignature;
   
@@ -1191,7 +1219,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         await new Promise(r => setTimeout(r, 500));
         return buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-      return Promise.reject(error);
+      throw error;
+    } finally {
+      // 8) Liberar el RPC para futuras compras
+      if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
 
@@ -1227,19 +1258,19 @@ async function getTokenBalance(chatId, mint) {
 
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
-    // Tu endpoint premium de Helius y el mint de SOL Wrapped dentro de la función
-    const HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
-    const SOL_MINT   = "So11111111111111111111111111111111111111112";
+    const SOL_MINT = "So11111111111111111111111111111111111111112";
+    let rpcUrl;
   
     try {
       const user = users[chatId];
       if (!user?.privateKey) return null;
   
-      // 1) Keypair & conexión premium a Helius
-      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection(HELIUS_RPC, "confirmed");
+      // 1) Reservar un endpoint distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "confirmed");
   
-      // 2) Pedir la orden unsigned a Ultra API
+      // 2) Keypair y pedir orden unsigned
+      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
         params: {
           inputMint:  mint,
@@ -1256,7 +1287,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      // 3) Deserializar y firmar localmente (versioned o legacy)
+      // 3) Deserializar y firmar localmente
       const txBuf = Buffer.from(txData, "base64");
       let signedTxBase64;
       try {
@@ -1269,13 +1300,13 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // 4) Ejecutar con Ultra Execute, manteniendo tu payload
+      // 4) Ejecutar con Ultra Execute
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
         {
-          signedTransaction:          signedTxBase64,
-          requestId:                  requestId,
-          prioritizationFeeLamports:  5000000
+          signedTransaction:         signedTxBase64,
+          requestId:                 requestId,
+          prioritizationFeeLamports: 5000000
         },
         { headers: { "Content-Type": "application/json", Accept: "application/json" } }
       );
@@ -1285,7 +1316,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       }
       const txSignatureFinal = exec.txSignature || exec.signature;
   
-      // 5) Merge en tu referencia de venta sin perder solBeforeBuy
+      // 5) Merge de la referencia sin perder solBeforeBuy
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
       buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
       Object.assign(buyReferenceMap[chatId][mint], {
@@ -1293,7 +1324,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         executeResponse: exec
       });
   
-      // 6) Cerrar el ATA en background (no bloquea la UI)
+      // 6) Cerrar ATA en background
       (async () => {
         try {
           const ataAddr = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
@@ -1302,25 +1333,26 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
           if (uiAmt === 0) {
             const closeIx = createCloseAccountInstruction(ataAddr, wallet.publicKey, wallet.publicKey, []);
             const closeTx = new Transaction().add(closeIx);
-            // envia sin preflight para ir más rápido
-            const sig = await connection.sendRawTransaction(closeTx.serialize(), { skipPreflight: true });
-            console.log("Background ATA close sig:", sig);
+            await connection.sendRawTransaction(closeTx.serialize(), { skipPreflight: true });
           }
         } catch (e) {
-          console.warn("Background ATA close failed:", e.message);
+          /* silently ignore */
         }
       })();
   
       return txSignatureFinal;
   
     } catch (error) {
-      // reintentos exponenciales
       if (attempt < 6) {
         const delay = 500 * Math.pow(2, attempt - 1);
         await new Promise(r => setTimeout(r, delay));
         return sellToken(chatId, mint, amount, attempt + 1);
       }
       return Promise.reject(error);
+  
+    } finally {
+      // 7) Liberar el RPC
+      if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
 
