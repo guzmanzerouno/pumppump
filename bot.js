@@ -1201,26 +1201,30 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
       }
   
-      // 4) Pedir orden unsigned a Ultra
+      // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
       const orderParams = {
-        inputMint:  "So11111111111111111111111111111111111111112",
+        inputMint:  "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
         outputMint: mint,
         amount:     Math.floor(amountSOL * 1e9).toString(),
         taker:      userPublicKey.toBase58(),
         dynamicSlippage: true
       };
-      const orderRes = await axios.get(
-        "https://lite-api.jup.ag/ultra/v1/order",
-        { params: orderParams, headers: { Accept: "application/json" } }
-      );
-      const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
-      const txData = (unsignedTransaction || transaction || "").trim();
-      if (!txData || !requestId) {
+      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
+        params: orderParams,
+        headers: { Accept: "application/json" }
+      });
+      if (!orderRes.data) {
+        throw new Error("Failed to receive order details from Ultra API.");
+      }
+      let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
+      const requestId = orderRes.data.requestId;
+      if (!unsignedTx || !requestId) {
         throw new Error("Invalid order response from Ultra API.");
       }
+      unsignedTx = unsignedTx.trim();
   
-      // 5) Firmar localmente (versioned o legacy)
-      const txBuf = Buffer.from(txData, "base64");
+      // Deserializar, firmar y volver a serializar la transacción
+      const txBuf = Buffer.from(unsignedTx, "base64");
       let signedTxBase64;
       try {
         const vtx = VersionedTransaction.deserialize(txBuf);
@@ -1232,14 +1236,15 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // 6) Ejecutar con Ultra Execute
+      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
+      const executePayload = {
+        signedTransaction:          signedTxBase64,
+        requestId:                  requestId,
+        prioritizationFeeLamports:  5000000 // Valor configurable
+      };
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
-        {
-          signedTransaction:         signedTxBase64,
-          requestId:                 requestId,
-          prioritizationFeeLamports: 5000000
-        },
+        executePayload,
         { headers: { "Content-Type": "application/json", Accept: "application/json" } }
       );
       const exec = execRes.data || {};
@@ -1248,21 +1253,30 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       }
       const txSignature = exec.txSignature || exec.signature;
   
-      // 7) Guardar referencia
+      // ── GUARDAR EN buyReferenceMap ──
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = { txSignature, executeResponse: exec };
+      buyReferenceMap[chatId][mint] = {
+        txSignature,
+        executeResponse: exec
+      };
   
       return txSignature;
   
     } catch (error) {
-      console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
+      const errorMessage = error.message || "";
+      console.error(
+        `❌ Error in purchase attempt ${attempt}:`,
+        errorMessage,
+        error.response ? JSON.stringify(error.response.data) : ""
+      );
       if (attempt < 6) {
         await new Promise(r => setTimeout(r, 500));
         return buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-      throw error;
+      return Promise.reject(error);
+  
     } finally {
-      // 8) Liberar el RPC para futuras compras
+      // Liberar el RPC para futuras llamadas
       if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
