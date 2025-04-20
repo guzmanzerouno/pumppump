@@ -91,8 +91,8 @@ bot.onText(/\/ata/, async (msg) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "ON",  callback_data: "ata_on"  },
-            { text: "OFF", callback_data: "ata_off" }
+            { text: "✅ ON",  callback_data: "ata_on"  },
+            { text: "❌ OFF", callback_data: "ata_off" }
           ]
         ]
       }
@@ -682,8 +682,8 @@ bot.onText(/\/status/, (msg) => {
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
-    { command: 'autobuy',  description: 'Enable auto‑buy (for a single token only) or stop' },
-    { command: 'ata',         description: 'Accelerate Associated Token Account creation or stop' },
+    { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
+    { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
     { command: 'close_ata',   description: 'Close any ATA and refund rents' },
   ]);
 
