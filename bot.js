@@ -2750,9 +2750,9 @@ getSolPriceUSD().then(price => {
 });
 
 // ----------------------------------------
-// 1) Nuevo handler para /close (o /close_ata)
+// 1) Nuevo handler para /close_ata
 // ----------------------------------------
-bot.onText(/\/close/, async (msg) => {
+bot.onText(/\/close_ata/, async (msg) => {
     const chatId   = msg.chat.id;
     const cmdMsgId = msg.message_id;
   
@@ -2780,30 +2780,34 @@ bot.onText(/\/close/, async (msg) => {
   });
   
   // ----------------------------------------
-  // 2) Nuevo handler para los callbacks
+  // 2) Handler para los callbacks de ATA
   // ----------------------------------------
   bot.on('callback_query', async query => {
     const chatId = query.message.chat.id;
     const msgId  = query.message.message_id;
     const data   = query.data;
   
-    // 2.1) Check ATAs: contamos cuántas vacías hay
+    // Helper: conexión fija a Helius
+    const connection = new Connection(
+      "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+      'confirmed'
+    );
+  
+    // 2.1) Check ATAs
     if (data === 'ata_check') {
       await bot.answerCallbackQuery(query.id);
   
       const user = users[chatId];
-      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      // Aquí usamos tu endpoint Helius
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", 'confirmed');
-  
       const accounts = await connection.getParsedTokenAccountsByOwner(
         new PublicKey(user.walletPublicKey),
         { programId: TOKEN_PROGRAM_ID }
       );
   
-      const emptyCount = accounts.value.filter(acc =>
-        Number(acc.account.data.parsed.info.tokenAmount.amount) === 0
-      ).length;
+      const emptyCount = accounts.value
+        .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+        .length;
+  
+      console.log(`[ata_check] User ${chatId} has ${emptyCount} empty ATAs`);
   
       const newText = `🔍 You have *${emptyCount}* empty ATA account${emptyCount !== 1 ? 's' : ''} that can be closed.`;
   
@@ -2822,38 +2826,60 @@ bot.onText(/\/close/, async (msg) => {
       });
     }
   
-    // 2.2) Close ATAs: cerramos en batches hasta agotar
+    // 2.2) Close ATAs
     if (data === 'ata_close') {
       await bot.answerCallbackQuery(query.id);
   
-      const user = users[chatId];
+      const user    = users[chatId];
       const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      // Y aquí también, tu endpoint Helius
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", 'confirmed');
   
       let closedTotal = 0;
-      while (true) {
-        const accounts = await connection.getParsedTokenAccountsByOwner(
-          new PublicKey(user.walletPublicKey),
-          { programId: TOKEN_PROGRAM_ID }
-        );
+      let iteration   = 0;
   
-        const empties = accounts.value
-          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
-          .slice(0, 25);
-  
-        if (empties.length === 0) break;
-  
-        const tx = new Transaction();
-        for (let { pubkey } of empties) {
-          tx.add(createCloseAccountInstruction(
-            pubkey,
+      try {
+        while (true) {
+          iteration++;
+          const accounts = await connection.getParsedTokenAccountsByOwner(
             new PublicKey(user.walletPublicKey),
-            new PublicKey(user.walletPublicKey)
-          ));
+            { programId: TOKEN_PROGRAM_ID }
+          );
+  
+          const empties = accounts.value
+            .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+            .slice(0, 25);
+  
+          console.log(`[ata_close][iter ${iteration}] Found ${empties.length} empty ATAs:`,
+            empties.map(a => a.pubkey.toBase58())
+          );
+  
+          if (empties.length === 0) break;
+  
+          const tx = new Transaction();
+          for (let { pubkey } of empties) {
+            tx.add(createCloseAccountInstruction(
+              pubkey,
+              new PublicKey(user.walletPublicKey),
+              new PublicKey(user.walletPublicKey)
+            ));
+          }
+  
+          try {
+            const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+            closedTotal += empties.length;
+            console.log(`[ata_close][iter ${iteration}] Closed ${empties.length} ATAs, txSig=${sig}`);
+          } catch (err) {
+            console.error(
+              `[ata_close][iter ${iteration}] Error closing ATAs:`,
+              err.message
+            );
+            if (err.transactionLogs) {
+              console.error('[ata_close] transactionLogs:', err.transactionLogs);
+            }
+            break;  // salimos del loop ante error
+          }
         }
-        await sendAndConfirmTransaction(connection, tx, [keypair]);
-        closedTotal += empties.length;
+      } catch (err) {
+        console.error('[ata_close] Unexpected error:', err);
       }
   
       const finalText = closedTotal > 0
@@ -2867,7 +2893,7 @@ bot.onText(/\/close/, async (msg) => {
       });
     }
   
-    // siempre respondemos para quitar el “spinner”
+    // responder cualquier otro callback para quitar spinner
     await bot.answerCallbackQuery(query.id);
   });
 
