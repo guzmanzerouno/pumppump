@@ -1701,10 +1701,19 @@ async function analyzeTransaction(signature, forceCheck = false) {
   }
 
   bot.onText(/\/autobuy/, async (msg) => {
-    const chatId = msg.chat.id;
-    if (!users[chatId]) users[chatId] = {};
+    const chatId    = msg.chat.id;
+    const cmdMsgId  = msg.message_id;
   
-    const intro = 
+    // 1️⃣ Borra primero el mensaje con el comando
+    try {
+      await bot.deleteMessage(chatId, cmdMsgId);
+    } catch (err) {
+      // puede fallar si el bot no tiene permisos, pero seguimos igual
+      console.warn("Could not delete command message:", err.message);
+    }
+  
+    // 2️⃣ Preparamos el menú
+    const intro =
       "🚀 *Auto‑Buy Turbo Mode!* 🚀\n\n" +
       "Instantly fresh tokens the moment they land on Solana—hands‑free and lightning‑fast! " +
       "Turn it *ON*, pick your amount, and watch bot work. " +
@@ -1717,8 +1726,9 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ]
     ];
   
+    // 3️⃣ Enviamos el menú
     await bot.sendMessage(chatId, intro, {
-      parse_mode: 'Markdown',
+      parse_mode:   'Markdown',
       reply_markup: { inline_keyboard: keyboard }
     });
   });
