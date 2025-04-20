@@ -695,7 +695,7 @@ bot.onText(/\/status/, (msg) => {
 bot.setMyCommands([
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
-    { command: 'close', description: '🔒 Close empty ATAs and reclaim SOL rent' },
+    { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
 ]);
 
 // 🔹 Conexión WebSocket con reconexión automática
