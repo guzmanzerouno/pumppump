@@ -2752,7 +2752,7 @@ getSolPriceUSD().then(price => {
 // ----------------------------------------
 // 1) Nuevo handler para /close_ata
 // ----------------------------------------
-bot.onText(/\/close_ata/, async (msg) => {
+bot.onText(/\/close/, async (msg) => {
     const chatId   = msg.chat.id;
     const cmdMsgId = msg.message_id;
   
