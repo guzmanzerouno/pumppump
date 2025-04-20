@@ -84,7 +84,9 @@ let ataAutoCreationEnabled = false;
 bot.onText(/\/ata/, async (msg) => {
     const chatId = msg.chat.id;
     const text =
-      "⚡️Turbo‑charge⚡️ your token buys by pre‑creating ATAs! A small refundable fee applies, but you’ll get it back the moment you switch off ATA auto‑creation.";
+    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time!  " +
+    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
     const opts = {
       reply_markup: {
         inline_keyboard: [
@@ -680,9 +682,8 @@ bot.onText(/\/status/, (msg) => {
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
-    { command: 'autobuy_on',  description: 'Enable auto‑buy (for a single token only)' },
-    { command: 'autobuy_off', description: 'Disable auto‑buy' },
-    { command: 'ata',         description: 'Accelerate ATA creation process' },
+    { command: 'autobuy',  description: 'Enable auto‑buy (for a single token only) or stop' },
+    { command: 'ata',         description: 'Accelerate Associated Token Account creation or stop' },
     { command: 'close_ata',   description: 'Close any ATA and refund rents' },
   ]);
 
@@ -1699,66 +1700,105 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
-  bot.onText(/\/autobuy_(on|off)/, async (msg, match) => {
+  bot.onText(/\/autobuy/, async (msg) => {
     const chatId = msg.chat.id;
-    const cmd    = match[1];
-  
     if (!users[chatId]) users[chatId] = {};
-    if (cmd === 'off') {
-      users[chatId].autoBuyEnabled = false;
-      saveUsers();
-      return bot.sendMessage(chatId, "❌ Auto‑Buy disabled.");
-    }
   
-    // on: preguntar monto con emoji 💰 y "Sol" al final
+    const intro = 
+      "🚀 *Auto‑Buy Turbo Mode!* 🚀\n\n" +
+      "Instantly fresh tokens the moment they land on Solana—hands‑free and lightning‑fast! " +
+      "Turn it *ON*, pick your amount, and watch bot work. " +
+      "Turn it *OFF* anytime and I'll stop buying tokens.";
+  
     const keyboard = [
-      [0.1, 0.2, 0.3].map(x => ({
-        text: `💰 ${x} Sol`,
-        callback_data: `autobuy_amt_${x}`
-      })),
-      [0.5, 1.0, 2.0].map(x => ({
-        text: `💰 ${x} Sol`,
-        callback_data: `autobuy_amt_${x}`
-      }))
+      [
+        { text: "✅ Enable",  callback_data: "autobuy_toggle_on"  },
+        { text: "❌ Disable", callback_data: "autobuy_toggle_off" }
+      ]
     ];
   
-    await bot.sendMessage(
-      chatId,
-      "How much SOL would you like to auto‑buy?",
-      { reply_markup: { inline_keyboard: keyboard } }
-    );
+    await bot.sendMessage(chatId, intro, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
   });
-
-// ————————————————
-// 1) Capturar la selección de monto para Auto‑Buy
-// (debe ir antes que los handlers de buy_, sell_, refresh_)
-// ————————————————
-bot.on('callback_query', async (query) => {
+  
+  // —————————————————————————————————————————————
+  //  3) Capturar toggles y luego monto (debe ir antes que buy_/sell_/refresh_)
+  // —————————————————————————————————————————————
+  bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // Si viene de un botón 'autobuy_amt_X'
-    if (data.startsWith('autobuy_amt_')) {
-      const amount = parseFloat(data.replace('autobuy_amt_',''));
-      if (!users[chatId]) users[chatId] = {};
-  
-      users[chatId].autoBuyEnabled = true;
-      users[chatId].autoBuyAmount  = amount;
-      saveUsers();   // ← Persiste en users.json
-  
-      // Respondemos al botón y actualizamos el texto
-      await bot.answerCallbackQuery(query.id, { text: `✅ Auto‑Buy enabled: ${amount} SOL` });
+    // ── Toggle OFF ──
+    if (data === 'autobuy_toggle_off') {
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = false;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: '❌ Auto‑Buy disabled.' });
       return bot.editMessageText(
-        `✅ Auto‑Buy set to *${amount} SOL*`,
+        '❌ *Auto‑Buy is now DISABLED!*',
         {
           chat_id: chatId,
           message_id: query.message.message_id,
-          parse_mode: "Markdown"
+          parse_mode: 'Markdown'
         }
       );
     }
   
-    // Si no era Auto‑Buy, no hacemos nada aquí y dejamos que otros handlers lo procesen.
+    // ── Toggle ON ── → confirmamos y preguntamos monto
+    if (data === 'autobuy_toggle_on') {
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = true;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
+  
+      // editamos el mensaje original
+      await bot.editMessageText(
+        '✅ *Auto‑Buy is now ENABLED!*  \n\n' +
+        '💰 *How much SOL would you like me to auto‑buy each time?*',
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown'
+        }
+      );
+  
+      // y enviamos teclado de selección de monto
+      const keyboard = [
+        [0.1, 0.2, 0.3].map(x => ({
+          text: `💰 ${x} SOL`,
+          callback_data: `autobuy_amt_${x}`
+        })),
+        [0.5, 1.0, 2.0].map(x => ({
+          text: `💰 ${x} SOL`,
+          callback_data: `autobuy_amt_${x}`
+        }))
+      ];
+      return bot.sendMessage(chatId, 'Select your amount:', {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    }
+  
+    // ── Capturar monto seleccionado ──
+    if (data.startsWith('autobuy_amt_')) {
+      const amount = parseFloat(data.replace('autobuy_amt_',''));
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = true;
+      users[chatId].autoBuyAmount  = amount;
+      saveUsers();
+  
+      await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
+      return bot.sendMessage(
+        chatId,
+        `🎉 *Auto‑Buy amount set!*  \n\n` +
+        `I will now auto‑buy *${amount} SOL* whenever a new token appears.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+  
+    // — si no era autobuy, dejamos que otros handlers lo procesen —
+    return;
   });
 
   bot.on("callback_query", async (query) => {
