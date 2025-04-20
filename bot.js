@@ -80,37 +80,61 @@ let ataAutoCreationEnabled = false;
 // ─────────────────────────────────────────────
 // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
 // ─────────────────────────────────────────────
-bot.onText(/\/ata_(on|off)/, async (msg, match) => {
+// 1) Comando /ata: muestra el menú ON / OFF
+bot.onText(/\/ata/, async (msg) => {
     const chatId = msg.chat.id;
-    const command = match[1].toLowerCase(); // "on" o "off"
-  
-    if (!users[chatId]) users[chatId] = {};
-  
-    if (command === 'off') {
-      try {
-        await closeAllATAs(chatId);
-        await bot.sendMessage(chatId, "✅ Auto‑creation disabled and your empty ATAs have been closed (rent returned).");
-      } catch (err) {
-        console.error("❌ Error cerrando ATAs al apagar:", err);
-        await bot.sendMessage(chatId, "❌ Auto‑creation disabled, but error closing ATAs. Check logs.");
+    const text =
+      "Configurar la creación de ATA acelera el proceso de compra de los tokens, " +
+      "esto genera un fee que es devuelto a tu cuenta una vez se apague la auto‑creación de ATA.";
+    const opts = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "ON",  callback_data: "ata_on"  },
+            { text: "OFF", callback_data: "ata_off" }
+          ]
+        ]
       }
+    };
+    await bot.sendMessage(chatId, text, opts);
+  });
+  
+  // 2) Handler para los botones ON / OFF
+  bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    if (data === "ata_on" || data === "ata_off") {
+      // Actualiza la configuración del usuario
+      const enabled = data === "ata_on";
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = enabled;
+      saveUsers();
+  
+      // Mensaje de confirmación (reemplaza el texto y elimina los botones)
+      const confText = enabled
+        ? "✅ Auto‑creation of ATAs is now *ENABLED*"
+        : "❌ Auto‑creation of ATAs is now *DISABLED*";
+  
+      await bot.editMessageText(confText, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown"
+      });
+  
+      // Responde el callback para quitar el spinner
+      return bot.answerCallbackQuery(query.id);
     }
   
-    users[chatId].ataAutoCreationEnabled = (command === 'on');
-    saveUsers();
-  
-    const statusText = command === 'on'
-      ? '✅ Auto‑creation of ATAs is now *ENABLED* for you.'
-      : '❌ Auto‑creation of ATAs is now *DISABLED* for you.';
-    await bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown' });
+    // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
+    return bot.answerCallbackQuery(query.id);
   });
   
   // ─────────────────────────────────────────────
   // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
   // ─────────────────────────────────────────────
   async function preCreateATAsForToken(mintAddress) {
-    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
-  
+    // 1) Filtrar usuarios que quieren creación automática de ATA
     const usersToProcess = Object.entries(users)
       .filter(([, user]) =>
         user.subscribed &&
@@ -118,14 +142,18 @@ bot.onText(/\/ata_(on|off)/, async (msg, match) => {
         user.ataAutoCreationEnabled
       );
   
+    // 2) Para cada usuario, usar un endpoint distinto
     await Promise.all(usersToProcess.map(async ([chatId, user]) => {
+      const rpcUrl = getNextRpc();
+      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection(rpcUrl, "confirmed");
+  
       try {
-        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", "confirmed");
+        // 3) Comprueba si ya existe el ATA
         const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
         const ataInfo = await connection.getAccountInfo(ata);
         if (ataInfo === null) {
-          console.log(`Creando ATA para usuario ${chatId}: ${ata.toBase58()}`);
+          // 4) Si no existe, créalo
           const tx = new Transaction().add(
             createAssociatedTokenAccountInstruction(
               keypair.publicKey,
@@ -134,11 +162,14 @@ bot.onText(/\/ata_(on|off)/, async (msg, match) => {
               new PublicKey(mintAddress)
             )
           );
-          const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
-          console.log(`✅ ATA creada para ${chatId}. TX: ${sig}`);
+          await sendAndConfirmTransaction(connection, tx, [keypair]);
         }
       } catch (err) {
-        console.error(`❌ Error al crear ATA para ${chatId}:`, err);
+        // Sólo en consola
+        console.error(`❌ Error al crear ATA para ${chatId} usando ${rpcUrl}:`, err);
+      } finally {
+        // 5) Liberamos el endpoint para que lo pueda usar otra tarea
+        releaseRpc(rpcUrl);
       }
     }));
   }
@@ -652,8 +683,7 @@ bot.onText(/\/status/, (msg) => {
 bot.setMyCommands([
     { command: 'autobuy_on',  description: 'Enable auto‑buy (for a single token only)' },
     { command: 'autobuy_off', description: 'Disable auto‑buy' },
-    { command: 'ata_on',      description: 'Accelerate ATA creation process' },
-    { command: 'ata_off',     description: 'Disable ATA creation and return rents' },
+    { command: 'ATA',      description: 'Accelerate ATA creation process' },
     { command: 'close_ata',   description: 'Close any ATA and refund rents' },
   ]);
 
