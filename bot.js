@@ -1776,21 +1776,28 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   
     // ── Capturar monto seleccionado ──
-    if (data.startsWith('autobuy_amt_')) {
-      const amount = parseFloat(data.replace('autobuy_amt_',''));
-      users[chatId] = users[chatId] || {};
-      users[chatId].autoBuyEnabled = true;
-      users[chatId].autoBuyAmount  = amount;
-      saveUsers();
+if (data.startsWith('autobuy_amt_')) {
+    const amount = parseFloat(data.replace('autobuy_amt_',''));
+    users[chatId] = users[chatId] || {};
+    users[chatId].autoBuyEnabled = true;
+    users[chatId].autoBuyAmount  = amount;
+    saveUsers();
   
-      await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
-      return bot.sendMessage(
-        chatId,
-        `🎉 *Auto‑Buy amount set!*  \n\n` +
-        `I will now auto‑buy *${amount} SOL* once a new token appears.`,
-        { parse_mode: 'Markdown' }
-      );
-    }
+    // quita el “loading” del botón
+    await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
+  
+    // EDITA el mensaje original con la confirmación y quita los botones
+    return bot.editMessageText(
+      '🎉 *Auto‑Buy amount set!*  \n\n' +
+      `I will now auto‑buy *${amount} SOL* whenever a new token appears.`,
+      {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true
+      }
+    );
+  }
   
     // — si no era autobuy, dejamos que otros handlers lo procesen —
     return;
