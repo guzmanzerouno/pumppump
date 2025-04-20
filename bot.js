@@ -77,7 +77,10 @@ async function closeEmptyATAsAfterSell(chatId) {
       if (!user?.privateKey || !user.walletPublicKey) return;
   
       const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+      const connection = new Connection(
+        "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+        "confirmed"
+      );
   
       while (true) {
         const { value } = await connection.getParsedTokenAccountsByOwner(
@@ -98,8 +101,14 @@ async function closeEmptyATAsAfterSell(chatId) {
             new PublicKey(user.walletPublicKey)
           ));
         }
-        // enviamos pero no esperamos preflight
-        await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  
+        // Enviamos usando sendAndConfirmTransaction, que añade blockhash y feePayer
+        await sendAndConfirmTransaction(
+          connection,
+          tx,
+          [keypair],
+          { skipPreflight: true }
+        );
       }
     } catch (e) {
       console.error("closeEmptyATAsAfterSell error:", e);
