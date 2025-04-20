@@ -1245,7 +1245,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         error.response ? JSON.stringify(error.response.data) : ""
       );
       if (attempt < 6) {
-        const delay = 1000; // Delay fijo de 1 segundo
+        const delay = 500; // Delay fijo de 1 segundo
         await new Promise(resolve => setTimeout(resolve, delay));
         return await buyToken(chatId, mint, amountSOL, attempt + 1);
       } else {
