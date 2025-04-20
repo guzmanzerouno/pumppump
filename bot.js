@@ -33,12 +33,8 @@ const proxyPassword = "i75am5xil518";
 const RPC_ENDPOINTS = [
     "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35",
     "https://mainnet.helius-rpc.com/?api-key=1b6d8190-08a4-48dd-8dbd-1a0f5861fa61",
-    "https://solana-api.instantnodes.io/token-hL8J457Dhvr7qc4c1GJ91VtxVaFnHzzW",
     "https://mainnet.helius-rpc.com/?api-key=c42de7e4-9d4b-4d03-a866-9ce503b19b46",
-    "https://solana-api.instantnodes.io/token-2eFQ4GJbhQu4wxmCv9H8E3FIx88pxHn4",
-    "https://mainnet.helius-rpc.com/?api-key=c62c4420-5caa-4e75-a727-7f1ca0925142",
-    "https://solana-api.instantnodes.io/token-D0D7hdvtjS1kzIpGwkP4UQicSxj5NYWt",
-    "https://solana-api.instantnodes.io/token-THgy2FU2ysquJJSpOSABTBkwJqWcQwzK"
+    "https://mainnet.helius-rpc.com/?api-key=c62c4420-5caa-4e75-a727-7f1ca0925142"
   ];
   
   // Puntero para el siguiente endpoint a usar
