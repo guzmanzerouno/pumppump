@@ -1217,76 +1217,54 @@ function getTokenInfo(mintAddress) {
 }
 
 // Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
-async function buyToken(chatId, mint, amountSOL, attempt = 1) {
+async function sellToken(chatId, mint, amount, attempt = 1) {
+    const SOL_MINT = "So11111111111111111111111111111111111111112";
     let rpcUrl;
+  
     try {
       const user = users[chatId];
-      if (!user || !user.privateKey) {
-        throw new Error("User not registered or missing privateKey.");
-      }
+      if (!user?.privateKey) return null;
   
-      // 1) Reservar un RPC distinto
+      // 1) Reservar un endpoint distinto
       rpcUrl = getNextRpc();
-      const connection = new Connection(rpcUrl, "processed");
+      const connection = new Connection(rpcUrl, "confirmed");
   
-      // 2) Keypair y wallet
-      const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const userPublicKey = userKeypair.publicKey;
-  
-      // 3) Crear/asegurar ATA y chequear balance simultáneo
-      const [ata, balanceLamports] = await Promise.all([
-        ensureAssociatedTokenAccount(userKeypair, mint, connection),
-        connection.getBalance(userPublicKey, "processed")
-      ]);
-      if (!ata) {
-        await new Promise(r => setTimeout(r, 1000));
-        return buyToken(chatId, mint, amountSOL, attempt + 1);
-      }
-      const balanceSOL = balanceLamports / 1e9;
-      if (balanceSOL < amountSOL) {
-        throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
-      }
-  
-      // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      const orderParams = {
-        inputMint:  "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
-        outputMint: mint,
-        amount:     Math.floor(amountSOL * 1e9).toString(),
-        taker:      userPublicKey.toBase58(),
-        dynamicSlippage: true
-      };
+      // 2) Keypair y pedir orden unsigned
+      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-        params: orderParams,
+        params: {
+          inputMint:  mint,
+          outputMint: SOL_MINT,
+          amount:     amount.toString(),
+          taker:      wallet.publicKey.toBase58(),
+          dynamicSlippage: true
+        },
         headers: { Accept: "application/json" }
       });
-      if (!orderRes.data) {
-        throw new Error("Failed to receive order details from Ultra API.");
+      const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
+      const txData = (unsignedTransaction || transaction || "").trim();
+      if (!txData || !requestId) {
+        throw new Error("Invalid order response from Ultra API for sell.");
       }
-      let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
-      const requestId = orderRes.data.requestId;
-      if (!unsignedTx || !requestId) {
-        throw new Error("Invalid order response from Ultra API.");
-      }
-      unsignedTx = unsignedTx.trim();
   
-      // Deserializar, firmar y volver a serializar la transacción
-      const txBuf = Buffer.from(unsignedTx, "base64");
+      // 3) Deserializar y firmar localmente
+      const txBuf = Buffer.from(txData, "base64");
       let signedTxBase64;
       try {
         const vtx = VersionedTransaction.deserialize(txBuf);
-        vtx.sign([userKeypair]);
+        vtx.sign([wallet]);
         signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
       } catch {
         const legacy = Transaction.from(txBuf);
-        legacy.sign(userKeypair);
+        legacy.sign(wallet);
         signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
+      // 4) Ejecutar con Ultra Execute (igual que en buyToken)
       const executePayload = {
         signedTransaction:          signedTxBase64,
         requestId:                  requestId,
-        prioritizationFeeLamports:  5000000 // Valor configurable
+        prioritizationFeeLamports:  5000000  // configurable
       };
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
@@ -1295,34 +1273,36 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       );
       const exec = execRes.data || {};
       if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-        throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
+        throw new Error("Invalid execute response from Ultra API for sell: " + JSON.stringify(exec));
       }
-      const txSignature = exec.txSignature || exec.signature;
+      const txSignatureFinal = exec.txSignature || exec.signature;
   
-      // ── GUARDAR EN buyReferenceMap ──
+      // 5) Merge de la referencia sin perder solBeforeBuy
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = {
-        txSignature,
+      buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
+      Object.assign(buyReferenceMap[chatId][mint], {
+        txSignature:     txSignatureFinal,
         executeResponse: exec
-      };
+      });
   
-      return txSignature;
+      // 6) Programar cierre de ATAs vacías en background
+      //    no bloquea el flujo de venta ni espera a terminar
+      setImmediate(() => {
+        closeEmptyATAs(chatId)
+          .catch(err => console.error("Error closing ATAs after sell:", err));
+      });
+  
+      return txSignatureFinal;
   
     } catch (error) {
-      const errorMessage = error.message || "";
-      console.error(
-        `❌ Error in purchase attempt ${attempt}:`,
-        errorMessage,
-        error.response ? JSON.stringify(error.response.data) : ""
-      );
       if (attempt < 6) {
-        await new Promise(r => setTimeout(r, 500));
-        return buyToken(chatId, mint, amountSOL, attempt + 1);
+        const delay = 500 * Math.pow(2, attempt - 1);
+        await new Promise(r => setTimeout(r, delay));
+        return sellToken(chatId, mint, amount, attempt + 1);
       }
       return Promise.reject(error);
-  
     } finally {
-      // Liberar el RPC para futuras llamadas
+      // 7) Liberar el RPC
       if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
