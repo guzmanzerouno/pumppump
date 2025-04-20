@@ -1748,36 +1748,31 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     // ── Toggle ON ── → confirmamos y preguntamos monto
     if (data === 'autobuy_toggle_on') {
-      users[chatId] = users[chatId] || {};
-      users[chatId].autoBuyEnabled = true;
-      saveUsers();
-      await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
-  
-      // editamos el mensaje original
-      await bot.editMessageText(
-        '✅ *Auto‑Buy is now ENABLED!*  \n\n' +
-        '💰 *How much SOL would you like me to auto‑buy each time?*',
-        {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          parse_mode: 'Markdown'
-        }
-      );
-  
-      // y enviamos teclado de selección de monto
-      const keyboard = [
-        [0.1, 0.2, 0.3].map(x => ({
-          text: `💰 ${x} SOL`,
-          callback_data: `autobuy_amt_${x}`
-        })),
-        [0.5, 1.0, 2.0].map(x => ({
-          text: `💰 ${x} SOL`,
-          callback_data: `autobuy_amt_${x}`
-        }))
-      ];
-      return bot.sendMessage(chatId, 'Select your amount:', {
-        reply_markup: { inline_keyboard: keyboard }
-      });
+        users[chatId] = users[chatId] || {};
+        users[chatId].autoBuyEnabled = true;
+        saveUsers();
+    
+        // quita el “loading” del botón
+        await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
+    
+        // construye el teclado de montos
+        const keyboard = [
+          [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
+          [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
+        ];
+    
+        // edita el mensaje original con texto + teclado
+        return bot.editMessageText(
+          '✅ *Auto‑Buy is now ENABLED!*  \n\n' +
+          '💰 *How much SOL would you like me to auto‑buy each time?*',
+          {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true,
+            reply_markup: { inline_keyboard: keyboard }
+          }
+        );
     }
   
     // ── Capturar monto seleccionado ──
@@ -1792,7 +1787,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       return bot.sendMessage(
         chatId,
         `🎉 *Auto‑Buy amount set!*  \n\n` +
-        `I will now auto‑buy *${amount} SOL* whenever a new token appears.`,
+        `I will now auto‑buy *${amount} SOL* once a new token appears.`,
         { parse_mode: 'Markdown' }
       );
     }
