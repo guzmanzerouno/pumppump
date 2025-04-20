@@ -2748,10 +2748,10 @@ bot.onText(/\/close/, async (msg) => {
   
     // 2️⃣ Enviar menú inicial
     const text =
-      '⚡️ *What is an ATA?* ⚡️\n\n' +
+      '🗄 *Associated Token Account* 🗄\n\n' +
       'An Associated Token Account (ATA) is where your tokens live on Solana. ' +
       'Empty ATAs still hold a small rent deposit. You can either *check* how many empty ATAs you have, ' +
-      'or *close* them in batches of 25 to reclaim that rent.';
+      'or *close* them to reclaim that rent.';
   
     const keyboard = [
       [
