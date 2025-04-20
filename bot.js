@@ -84,8 +84,7 @@ let ataAutoCreationEnabled = false;
 bot.onText(/\/ata/, async (msg) => {
     const chatId = msg.chat.id;
     const text =
-      "Configurar la creación de ATA acelera el proceso de compra de los tokens, " +
-      "esto genera un fee que es devuelto a tu cuenta una vez se apague la auto‑creación de ATA.";
+      "⚡️Turbo‑charge⚡️ your token buys by pre‑creating ATAs! A small refundable fee applies, but you’ll get it back the moment you switch off ATA auto‑creation.";
     const opts = {
       reply_markup: {
         inline_keyboard: [
