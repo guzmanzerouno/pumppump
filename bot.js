@@ -67,6 +67,45 @@ const RPC_ENDPOINTS = [
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+/**
+ * Cierra en background todas las ATAs vacías de un usuario SIN NOTIFICAR.
+ * Diseñada para invocarse tras una venta.
+ */
+async function closeEmptyATAsAfterSell(chatId) {
+    try {
+      const user = users[chatId];
+      if (!user?.privateKey || !user.walletPublicKey) return;
+  
+      const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+      while (true) {
+        const { value } = await connection.getParsedTokenAccountsByOwner(
+          new PublicKey(user.walletPublicKey),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+        const empties = value
+          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+          .slice(0, 25);
+  
+        if (empties.length === 0) break;
+  
+        const tx = new Transaction();
+        for (let { pubkey } of empties) {
+          tx.add(createCloseAccountInstruction(
+            pubkey,
+            new PublicKey(user.walletPublicKey),
+            new PublicKey(user.walletPublicKey)
+          ));
+        }
+        // enviamos pero no esperamos preflight
+        await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+      }
+    } catch (e) {
+      console.error("closeEmptyATAsAfterSell error:", e);
+    }
+  }
+
 // ==========================================
 // VARIABLE GLOBAL PARA AUTO CREACIÓN DE ATA
 // (Por defecto DESACTIVADA)
@@ -1401,11 +1440,11 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // 4) Ejecutar con Ultra Execute (igual que en buyToken)
+      // 4) Ejecutar con Ultra Execute
       const executePayload = {
-        signedTransaction:          signedTxBase64,
-        requestId:                  requestId,
-        prioritizationFeeLamports:  5000000  // configurable
+        signedTransaction:         signedTxBase64,
+        requestId:                 requestId,
+        prioritizationFeeLamports: 5000000
       };
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
@@ -1426,11 +1465,9 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         executeResponse: exec
       });
   
-      // 6) Programar cierre de ATAs vacías en background
-      //    no bloquea el flujo de venta ni espera a terminar
+      // 6) Disparar el cierre silencioso de ATAs tras la venta
       setImmediate(() => {
-        closeEmptyATAs(chatId)
-          .catch(err => console.error("Error closing ATAs after sell:", err));
+        closeEmptyATAsAfterSell(chatId);
       });
   
       return txSignatureFinal;
