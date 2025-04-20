@@ -683,7 +683,7 @@ bot.onText(/\/status/, (msg) => {
 bot.setMyCommands([
     { command: 'autobuy_on',  description: 'Enable auto‑buy (for a single token only)' },
     { command: 'autobuy_off', description: 'Disable auto‑buy' },
-    { command: 'ATA',      description: 'Accelerate ATA creation process' },
+    { command: 'ata',         description: 'Accelerate ATA creation process' },
     { command: 'close_ata',   description: 'Close any ATA and refund rents' },
   ]);
 
