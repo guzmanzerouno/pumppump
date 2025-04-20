@@ -1011,114 +1011,84 @@ async function getDexScreenerData(pairAddress) {
     }
   }
 
-function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
-    console.log("🔄 Intentando guardar datos en tokens.json...");
-  
+  function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
+    // Validaciones iniciales
     if (!dexData || !mintData || !rugCheckData) {
-      console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
       return;
     }
-  
-    console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h }, null, 2));
-  
+
+    // Formatear la información a guardar
     const tokenInfo = {
-      // 🪙 Token
-      name: dexData.name || "Unknown",
-      symbol: dexData.symbol || "Unknown",
-      tokenAddress: dexData.tokenAddress || "N/A",
-      tokenLogo: dexData.tokenLogo || "",
-  
-      // 📊 Precios
-      USD: dexData.priceUsd || "N/A",
-      SOL: dexData.priceSol || "N/A",
-      liquidity: dexData.liquidity || "N/A",
-      liquidityChange24h: dexData.liquidityChange24h || "N/A",
-  
-      // 📈 Stats 24h
-      priceChange24h: dexData.priceChange24h || "N/A",
-      buyVolume24h: dexData.buyVolume24h || "N/A",
-      sellVolume24h: dexData.sellVolume24h || "N/A",
-      totalVolume24h: dexData.totalVolume24h || "N/A",
-      buys24h: dexData.buys24h || "0",
-      sells24h: dexData.sells24h || "0",
-      buyers24h: dexData.buyers24h || "0",
-      sellers24h: dexData.sellers24h || "0",
-  
-      // 🔐 Seguridad
-      riskLevel: rugCheckData.riskLevel || "N/A",
-      warning: rugCheckData.riskDescription || "No risks detected",
-      LPLOCKED: rugCheckData.lpLocked || "N/A",
-      freezeAuthority: rugCheckData.freezeAuthority || "N/A",
-      mintAuthority: rugCheckData.mintAuthority || "N/A",
-  
-      // 🧩 DEX info
-      chain: dexData.chain || "solana",
-      dex: dexData.dex || "N/A",
-      pair: dexData.pairAddress || "N/A",
-      pairLabel: dexData.pairLabel || "N/A",
-      exchangeAddress: dexData.exchangeAddress || "N/A",
-      exchangeLogo: dexData.exchangeLogo || "",
-  
-      // ⏱️ Metadata
-      migrationDate: typeof mintData.date === "number" ? mintData.date : null,
-      status: mintData.status || "N/A",
-      token: mintData.mintAddress || "N/A"
+      name:                 dexData.name               || "Unknown",
+      symbol:               dexData.symbol             || "Unknown",
+      tokenAddress:         dexData.tokenAddress       || "N/A",
+      tokenLogo:            dexData.tokenLogo          || "",
+      USD:                  dexData.priceUsd           || "N/A",
+      SOL:                  dexData.priceSol           || "N/A",
+      liquidity:            dexData.liquidity          || "N/A",
+      liquidityChange24h:   dexData.liquidityChange24h || "N/A",
+      priceChange24h:       dexData.priceChange24h     || "N/A",
+      buyVolume24h:         dexData.buyVolume24h       || "N/A",
+      sellVolume24h:        dexData.sellVolume24h      || "N/A",
+      totalVolume24h:       dexData.totalVolume24h     || "N/A",
+      buys24h:              dexData.buys24h            || "0",
+      sells24h:             dexData.sells24h           || "0",
+      buyers24h:            dexData.buyers24h          || "0",
+      sellers24h:           dexData.sellers24h         || "0",
+      riskLevel:            rugCheckData.riskLevel     || "N/A",
+      warning:              rugCheckData.riskDescription || "No risks detected",
+      LPLOCKED:             rugCheckData.lpLocked      || "N/A",
+      freezeAuthority:      rugCheckData.freezeAuthority || "N/A",
+      mintAuthority:        rugCheckData.mintAuthority || "N/A",
+      chain:                dexData.chain              || "solana",
+      dex:                  dexData.dex                || "N/A",
+      pair:                 dexData.pairAddress        || "N/A",
+      pairLabel:            dexData.pairLabel          || "N/A",
+      exchangeAddress:      dexData.exchangeAddress    || "N/A",
+      exchangeLogo:         dexData.exchangeLogo       || "",
+      migrationDate:        typeof mintData.date === "number" ? mintData.date : null,
+      status:               mintData.status            || "N/A",
+      token:                mintData.mintAddress       || "N/A"
     };
-  
-    console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
-  
+
     const filePath = 'tokens.json';
     let tokens = {};
-  
+
+    // Leer o inicializar el archivo
     if (fs.existsSync(filePath)) {
       try {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
-        console.log("📂 Archivo tokens.json leído correctamente.");
-      } catch (error) {
-        console.error("❌ Error leyendo tokens.json:", error);
-        console.log("🔄 Restaurando tokens.json vacío...");
+        const content = fs.readFileSync(filePath, 'utf-8').trim();
+        tokens = content ? JSON.parse(content) : {};
+      } catch {
         fs.writeFileSync(filePath, "{}", 'utf-8');
         tokens = {};
       }
-    } else {
-      console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
     }
-  
-    if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
-      console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
+
+    // Validar que tengamos un mint válido
+    const key = mintData.mintAddress;
+    if (!key || key === "N/A") {
       return;
     }
-  
-    console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
-  
-    tokens[mintData.mintAddress] = tokenInfo;
-  
+
+    // Actualizar y guardar
+    tokens[key] = tokenInfo;
     try {
       fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-      console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
-    } catch (error) {
-      console.error("❌ Error guardando token en tokens.json:", error);
+    } catch {
+      // Silenciar errores de escritura
     }
-  
-    try {
-      fs.accessSync(filePath, fs.constants.W_OK);
-      console.log("✅ Permisos de escritura en tokens.json verificados.");
-    } catch (error) {
-      console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-      console.log("🔄 Ejecuta este comando para arreglarlo:");
-      console.log(`chmod 666 ${filePath}`);
-    }
-  }
+}
 
-  function getTokenInfo(mintAddress) {
-    if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
-  
-    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8')) || {};
-  
-    return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
+// Función de lectura sin logs
+function getTokenInfo(mintAddress) {
+  const filePath = 'tokens.json';
+  if (!fs.existsSync(filePath)) {
+    return { symbol: "N/A", name: "N/A" };
   }
+  const tokens = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+  return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
+}
 
 // Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
@@ -2432,186 +2402,158 @@ const lastMessageContent = {};
 
 // --- Función refreshBuyConfirmationV2 actualizada ---
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
-  let tokenSymbol = "Unknown";
+    let tokenSymbol = "Unknown";
+    
+    try {
+      // Incrementa contador y cada 20 rotar proxy
+      refreshRequestCount++;
+      if (refreshRequestCount % 20 === 0) {
+        regenerateProxySession();
+      }
   
-  try {
-    // Incrementar el contador de refrescos y, cada 20, rotar la sesión del proxy
-    refreshRequestCount++;
-    if (refreshRequestCount % 20 === 0) {
-      console.log("[refreshBuyConfirmationV2] Rotating proxy session...");
-      regenerateProxySession();
-    }
-
-    // Control de cooldown para evitar refrescos muy seguidos (bloqueo de 1 segundo por cada combinación chat+token)
-    const refreshKey = `${chatId}_${tokenMint}`;
-    if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1000)) {
-      console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1 second.`);
-      return;
-    }
-    lastRefreshTime[refreshKey] = Date.now();
-
-    // Obtener datos estáticos del token
-    const tokenInfo = getTokenInfo(tokenMint);
-    tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
-
-    // Obtener la compra original a partir de buyReferenceMap
-    const original = buyReferenceMap[chatId]?.[tokenMint];
-    if (!original || !original.solBeforeBuy) {
-      console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
-      await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
-      return;
-    }
-
-    // --- CONTROL DE RATERATE ---
-    const now = Date.now();
-    const elapsed = now - lastJupRequestTime;
-    if (elapsed < 1000) {
-      const waitTime = 1000 - elapsed;
-      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-    lastJupRequestTime = Date.now();
-    // --- FIN CONTROL ---
-
-    // Construir la URL para la API de SolanaTracker
-    const jupUrl =
+      // Cooldown de 1 s por chat+token
+      const refreshKey = `${chatId}_${tokenMint}`;
+      if (lastRefreshTime[refreshKey] && Date.now() - lastRefreshTime[refreshKey] < 1000) {
+        return;
+      }
+      lastRefreshTime[refreshKey] = Date.now();
+  
+      // Datos estáticos del token
+      const tokenInfo = getTokenInfo(tokenMint);
+      tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
+  
+      // Datos de compra original
+      const original = buyReferenceMap[chatId]?.[tokenMint];
+      if (!original || !original.solBeforeBuy) {
+        return;
+      }
+  
+      // Rate‑limit Jupiter
+      const now = Date.now();
+      const elapsed = now - lastJupRequestTime;
+      if (elapsed < 1000) {
+        await new Promise(r => setTimeout(r, 1000 - elapsed));
+      }
+      lastJupRequestTime = Date.now();
+  
+      // Cotización de venta en Jupiter
+      const jupUrl =
         `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
         `&outputMint=So11111111111111111111111111111111111111112` +
         `&amount=1000000000&slippageBps=500&priorityFeeBps=30`;
-      console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
-
-    // Realizar la solicitud mediante Axios usando el proxyAgent y un timeout
-    const jupRes = await axios.get(jupUrl, {
-      httpsAgent: proxyAgent,
-      timeout: 5000,
-    });
-
-    // Si se recibe un error 429 o 407, se espera y se lanza error (solo se loguea, no se notifica al usuario)
-    if (jupRes.status === 429 || jupRes.status === 407) {
-      console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status}. Waiting 2500 ms before retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      lastJupRequestTime = Date.now();
-      throw new Error(`Rate excess error from SolanaTracker API (status ${jupRes.status})`);
-    }
-    if (jupRes.status !== 200) {
-      throw new Error(`Error fetching SolanaTracker rate: ${jupRes.statusText}`);
-    }
-    const jupData = jupRes.data;
-
-    // Validar que jupData.outAmount sea numérico
-    const outAmount = Number(jupData.outAmount);
-    if (isNaN(outAmount)) {
-      throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
-    }
-    const priceSolNow = outAmount / 1e9;
-
-    // Funciones formateadoras seguras (si no es número, devuelven "N/A")
-    const formatDefault = (val) => {
-      const numVal = Number(val);
-      if (isNaN(numVal)) return "N/A";
-      return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
-    };
-
-    const formatWithZeros = (val) => {
-      const numVal = Number(val);
-      if (isNaN(numVal)) return "N/A";
-      if (numVal >= 1) return numVal.toFixed(6);
-      const str = numVal.toFixed(12);
-      const forced = "0.000" + str.slice(2);
-      const match = forced.match(/0*([1-9]\d{0,2})/);
-      if (!match) return forced;
-      const idx = forced.indexOf(match[1]);
-      return forced.slice(0, idx + match[1].length + 1);
-    };
-
-    const formattedOriginalPrice = formatDefault(original.tokenPrice);
-    const formattedCurrentPrice = formatWithZeros(priceSolNow);
-
-    // Calcular el valor actual de la inversión
-    const currentPriceShown = Number(formattedCurrentPrice);
-    const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-    const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-
-    // Calcular el cambio porcentual
-    let changePercent = 0;
-    if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
-      changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
-      if (!isFinite(changePercent)) changePercent = 0;
-    }
-    const changePercentStr = changePercent.toFixed(2);
-    const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-
-    const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
-    const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
-
-    // Formatear la hora de la transacción en UTC y EST
-    const rawTime = original.time || Date.now();
-    const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
-    const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
-
-    // Nota: Se ha removido la parte que añadía el "Age" para evitar que el mensaje cambie constantemente.
-
-    // Construir el mensaje final de actualización (sin la variación de "Age")
-    const updatedMessage =
-      `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
-      `🕒 *Time:* ${formattedTime}\n\n` +
-      `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
-      `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
-      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
-      `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
-      `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
-      `🔗 *Wallet:* \`${original.walletAddress}\``;
-
-    // --- COMPARAR CON EL ÚLTIMO CONTENIDO PUBLICADO ---
-    if (lastMessageContent[messageId] && lastMessageContent[messageId] === updatedMessage) {
-      console.log("⏸ New content is identical to the current content. Skipping edit.");
-      return;
-    }
-
-    // Realizar la actualización del mensaje en Telegram
-    await bot.editMessageText(updatedMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-          ],
-          [
-            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-          ]
-        ]
+      const jupRes = await axios.get(jupUrl, {
+        httpsAgent: proxyAgent,
+        timeout: 5000,
+      });
+  
+      if ([429, 407].includes(jupRes.status)) {
+        await new Promise(r => setTimeout(r, 2500));
+        lastJupRequestTime = Date.now();
+        throw new Error(`Rate limit error from Jupiter (status ${jupRes.status})`);
       }
-    });
-
-    // Almacenar el nuevo contenido para futuras comparaciones
-    lastMessageContent[messageId] = updatedMessage;
-
-    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-  } catch (error) {
-    const errMsg = error.message || "";
-    // Filtrar errores para no notificar al usuario:
-    if (errMsg.includes("message is not modified")) {
-      console.log("⏸ Message not modified, skipping update.");
-      return;
-    } else if (errMsg.includes("429") || errMsg.includes("407") || errMsg.includes("502")) {
-      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy/502 related):", error.stack || error);
-      // No notificar al usuario para estos errores específicos
-      return;
-    } else {
-      console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
-      await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
+      if (jupRes.status !== 200) {
+        throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+      }
+      const outAmount = Number(jupRes.data.outAmount);
+      if (isNaN(outAmount)) {
+        throw new Error(`Invalid outAmount from Jupiter: ${jupRes.data.outAmount}`);
+      }
+      const priceSolNow = outAmount / 1e9;
+  
+      // Formateadores
+      const formatDefault = val => {
+        const n = Number(val);
+        if (isNaN(n)) return "N/A";
+        return n >= 1 ? n.toFixed(6) : n.toFixed(9).replace(/0+$/, "");
+      };
+      const formatWithZeros = val => {
+        const n = Number(val);
+        if (isNaN(n)) return "N/A";
+        if (n >= 1) return n.toFixed(6);
+        const str = n.toFixed(12);
+        const forced = "0.000" + str.slice(2);
+        const m = forced.match(/0*([1-9]\d{0,2})/);
+        if (!m) return forced;
+        const idx = forced.indexOf(m[1]);
+        return forced.slice(0, idx + m[1].length + 1);
+      };
+  
+      const formattedOriginalPrice = formatDefault(original.tokenPrice);
+      const formattedCurrentPrice = formatWithZeros(priceSolNow);
+  
+      // Cálculos PnL y porcentaje
+      const currentPriceShown = Number(formattedCurrentPrice);
+      const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
+      let changePercent = 0;
+      if (Number(original.tokenPrice) > 0 && !isNaN(currentPriceShown)) {
+        changePercent = ((currentPriceShown - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
+        if (!isFinite(changePercent)) changePercent = 0;
+      }
+      const changePercentStr = changePercent.toFixed(2);
+      const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
+  
+      const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
+      const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
+  
+      // Horario
+      const rawTime = original.time || Date.now();
+      const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+      const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+      const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
+  
+      // Mensaje actualizado
+      const updatedMessage =
+        `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
+        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+        `🕒 *Time:* ${formattedTime}\n\n` +
+        `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+        `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
+        `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
+        `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
+        `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+        `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
+        `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
+        `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
+        `🔗 *Wallet:* \`${original.walletAddress}\``;
+  
+      // Si no cambia nada, no editar
+      if (lastMessageContent[messageId] === updatedMessage) {
+        return;
+      }
+  
+      // Editar mensaje
+      await bot.editMessageText(updatedMessage, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh",   callback_data: `refresh_buy_${tokenMint}` },
+              { text: "💯 Sell MAX",  callback_data: `sell_${tokenMint}_100` }
+            ],
+            [
+              { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
+            ]
+          ]
+        }
+      });
+  
+      lastMessageContent[messageId] = updatedMessage;
+  
+    } catch (error) {
+        const errMsg = error.message || "";
+        if (errMsg.includes("message is not modified")) {
+          return;
+        } else if (/^(429|407|502)/.test(errMsg)) {
+          return;
+        } else {
+          console.error("❌ Error while refreshing token info:", error);
+          return;
+        }
+      }
     }
-  }
-}
 
 async function getSolPriceUSD() {
   try {
