@@ -82,12 +82,25 @@ let ataAutoCreationEnabled = false;
 // ─────────────────────────────────────────────
 // 1) Comando /ata: muestra el menú ON / OFF
 bot.onText(/\/ata/, async (msg) => {
-    const chatId = msg.chat.id;
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
+  
+    // 1️⃣ Borra primero el mensaje con el comando
+    try {
+      await bot.deleteMessage(chatId, cmdMsgId);
+    } catch (err) {
+      // Puede fallar si no tienes permisos, pero seguimos de todos modos
+      console.warn("Could not delete /ata command message:", err.message);
+    }
+  
+    // 2️⃣ Texto y botones del menú ATA
     const text =
-    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
-    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time!  " +
-    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+      "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+      "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
+      "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+  
     const opts = {
+      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [
@@ -97,6 +110,8 @@ bot.onText(/\/ata/, async (msg) => {
         ]
       }
     };
+  
+    // 3️⃣ Envía el menú ATA limpio
     await bot.sendMessage(chatId, text, opts);
   });
   
