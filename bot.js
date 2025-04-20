@@ -2127,110 +2127,119 @@ bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    if (data.startsWith("sell_")) {
-      const [_, expectedTokenMint, sellType] = data.split("_");
-  
-      // Asegurarnos de que tenemos llave privada
-      if (!users[chatId]?.privateKey) {
-        await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
-        return bot.answerCallbackQuery(query.id);
-      }
-  
-      // Recuperar o enviar el mensaje "Waiting for sell"
-      let msgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
-      if (!msgId) {
-        const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
-        msgId = m.message_id;
-        buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-        buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
-        buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
-      }
-  
-      // Mostrar que estamos procesando la venta
-      await bot.editMessageText(
-        `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
-        { chat_id: chatId, message_id: msgId }
-      );
-  
-      try {
-        // 1) Asegurar ATA, obtener decimales y balance
-        const wallet     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-        await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
-  
-        const decimals = await getTokenDecimals(expectedTokenMint);
-        const balance  = await getTokenBalance(chatId, expectedTokenMint);
-        if (!balance || balance <= 0) {
-          await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
-            chat_id: chatId, message_id: msgId
-          });
-          setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 30_000);
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 2) Calcular lamports y soldAmount
-        const balanceInLam = Math.floor(balance * 10 ** decimals);
-        const amountToSell = sellType === "50"
-          ? Math.floor(balanceInLam / 2)
-          : balanceInLam;
-        const soldAmount = sellType === "50"
-          ? (balance / 2).toFixed(decimals)
-          : balance.toFixed(decimals);
-  
-        if (amountToSell < 1) {
-          await bot.editMessageText("⚠️ The amount to sell is too low.", {
-            chat_id: chatId, message_id: msgId
-          });
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 3) Ejecutar la venta (hasta 3 intentos con 1 s backoff)
-        let txSignature = null;
-        for (let i = 0; i < 3 && !txSignature; i++) {
-          txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
-          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
-        }
-        if (!txSignature) {
-          await bot.editMessageText(
-            "❌ The sale could not be completed after multiple attempts. Please check server logs.",
-            { chat_id: chatId, message_id: msgId }
-          );
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 4) Obtener detalles de la venta (hasta 5 intentos con 1 s backoff)
-        let sellDetails = null;
-        for (let i = 0; i < 5 && !sellDetails; i++) {
-          sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
-          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
-        }
-        if (!sellDetails) {
-          await bot.editMessageText(
-            `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
-            {
-              chat_id: chatId,
-              message_id: msgId,
-              parse_mode: "Markdown",
-              disable_web_page_preview: true
-            }
-          );
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 5) Confirmar y actualizar con todos los detalles finales
-        await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
-  
-      } catch (err) {
-        console.error("❌ Error in sell process:", err);
-        await bot.editMessageText(
-          `❌ The sale could not be completed. Error: ${err.message}`,
-          { chat_id: chatId, message_id: msgId }
-        );
-      }
+    if (!data.startsWith("sell_")) {
+      return bot.answerCallbackQuery(query.id);
     }
   
-    // siempre respondemos para quitar el “loading” del botón
-    bot.answerCallbackQuery(query.id);
+    // deshabilitar spinner inmediatamente
+    await bot.answerCallbackQuery(query.id);
+  
+    const [_, expectedTokenMint, sellType] = data.split("_");
+  
+    // asegurarnos de que exista la clave
+    if (!users[chatId]?.privateKey) {
+      await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
+      return;
+    }
+  
+    // recuperar o enviar el mensaje "Waiting for sell"
+    let msgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
+    if (!msgId) {
+      const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
+      msgId = m.message_id;
+      buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
+      buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
+      buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
+    }
+  
+    // indicar procesamiento
+    await bot.editMessageText(
+      `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
+      { chat_id: chatId, message_id: msgId }
+    );
+  
+    let rpcUrl;
+    try {
+      // 1) escoger un RPC distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "confirmed");
+  
+      // 2) asegurar ATA y obtener decimales/balance
+      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
+      await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
+  
+      const decimals = await getTokenDecimals(expectedTokenMint);
+      const balance  = await getTokenBalance(chatId, expectedTokenMint);
+      if (!balance || balance <= 0) {
+        await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
+          chat_id: chatId, message_id: msgId
+        });
+        setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 30_000);
+        return;
+      }
+  
+      // 3) preparar montos
+      const balanceInLam = Math.floor(balance * 10 ** decimals);
+      const amountToSell = sellType === "50"
+        ? Math.floor(balanceInLam / 2)
+        : balanceInLam;
+      const soldAmount = sellType === "50"
+        ? (balance / 2).toFixed(decimals)
+        : balance.toFixed(decimals);
+  
+      if (amountToSell < 1) {
+        await bot.editMessageText("⚠️ The amount to sell is too low.", {
+          chat_id: chatId, message_id: msgId
+        });
+        return;
+      }
+  
+      // 4) ejecutar la venta (hasta 3 intentos)
+      let txSignature = null;
+      for (let i = 0; i < 3 && !txSignature; i++) {
+        txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
+        if (!txSignature) await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!txSignature) {
+        await bot.editMessageText(
+          "❌ The sale could not be completed after multiple attempts. Please check server logs.",
+          { chat_id: chatId, message_id: msgId }
+        );
+        return;
+      }
+  
+      // 5) detalles de la venta (hasta 5 intentos)
+      let sellDetails = null;
+      for (let i = 0; i < 5 && !sellDetails; i++) {
+        sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
+        if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!sellDetails) {
+        await bot.editMessageText(
+          `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+          {
+            chat_id: chatId,
+            message_id: msgId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true
+          }
+        );
+        return;
+      }
+  
+      // 6) confirmar y actualizar
+      await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
+  
+    } catch (err) {
+      console.error("❌ Error in sell process:", err);
+      await bot.editMessageText(
+        `❌ The sale could not be completed. Error: ${err.message}`,
+        { chat_id: chatId, message_id: msgId }
+      );
+    } finally {
+      // 7) liberar el RPC usado
+      if (rpcUrl) releaseRpc(rpcUrl);
+    }
   });
 
   async function confirmSell(
@@ -2277,11 +2286,15 @@ bot.on("callback_query", async (query) => {
     });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Balance actual de la wallet
-    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+    // Balance actual de la wallet usando RPC rotatorio
+    let rpcUrl = getNextRpc();
+    const connection = new Connection(rpcUrl, "confirmed");
     const balLam     = await connection.getBalance(
       new PublicKey(sellDetails.walletAddress)
     );
+    // liberar el endpoint
+    releaseRpc(rpcUrl);
+  
     const walletSol = balLam / 1e9;
     const walletUsd = solPrice != null
       ? (walletSol * solPrice).toFixed(2)
@@ -2737,7 +2750,7 @@ getSolPriceUSD().then(price => {
 });
 
 // ----------------------------------------
-// 1) Nuevo handler para /close_ata
+// 1) Nuevo handler para /close (o /close_ata)
 // ----------------------------------------
 bot.onText(/\/close/, async (msg) => {
     const chatId   = msg.chat.id;
@@ -2780,7 +2793,8 @@ bot.onText(/\/close/, async (msg) => {
   
       const user = users[chatId];
       const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+      // Aquí usamos tu endpoint Helius
+      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", 'confirmed');
   
       const accounts = await connection.getParsedTokenAccountsByOwner(
         new PublicKey(user.walletPublicKey),
@@ -2814,22 +2828,22 @@ bot.onText(/\/close/, async (msg) => {
   
       const user = users[chatId];
       const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+      // Y aquí también, tu endpoint Helius
+      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", 'confirmed');
   
       let closedTotal = 0;
       while (true) {
-        // obtenemos ATAs vacías
         const accounts = await connection.getParsedTokenAccountsByOwner(
           new PublicKey(user.walletPublicKey),
           { programId: TOKEN_PROGRAM_ID }
         );
+  
         const empties = accounts.value
           .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
           .slice(0, 25);
   
         if (empties.length === 0) break;
   
-        // montamos y enviamos batch
         const tx = new Transaction();
         for (let { pubkey } of empties) {
           tx.add(createCloseAccountInstruction(
@@ -2842,7 +2856,6 @@ bot.onText(/\/close/, async (msg) => {
         closedTotal += empties.length;
       }
   
-      // mensaje final
       const finalText = closedTotal > 0
         ? `✅ Closed *${closedTotal}* ATA account${closedTotal !== 1 ? 's' : ''}. All rent deposits have been returned!`
         : '⚠️ No empty ATA accounts found to close.';
@@ -2854,7 +2867,7 @@ bot.onText(/\/close/, async (msg) => {
       });
     }
   
-    // asegurarnos de responder cualquier otro callback
+    // siempre respondemos para quitar el “spinner”
     await bot.answerCallbackQuery(query.id);
   });
 
