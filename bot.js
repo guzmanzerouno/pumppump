@@ -695,8 +695,8 @@ bot.onText(/\/status/, (msg) => {
 bot.setMyCommands([
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
-    { command: 'close_ata',   description: 'Close any ATA and refund rents' },
-  ]);
+    { command: 'close', description: '🔒 Close empty ATAs and reclaim SOL rent' },
+]);
 
 // 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
@@ -2736,113 +2736,126 @@ getSolPriceUSD().then(price => {
   }
 });
 
-/**
- * Cierra hasta 20 de las cuentas ATA vacías asociadas a la wallet del usuario.
- * @param {string} telegramId - El ID de Telegram del usuario.
- */
-async function closeAllATAs(telegramId) {
-    try {
-      // Asegúrate de haber cargado tus usuarios desde el archivo (users.json)
-      const user = users[telegramId];
-      if (!user || !user.walletPublicKey || !user.privateKey) {
-        console.error("User not found or missing wallet credentials.");
-        return;
-      }
+// ----------------------------------------
+// 1) Nuevo handler para /close_ata
+// ----------------------------------------
+bot.onText(/\/close/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
   
-      // Lista de direcciones ATA que se desean excluir (en base58)
-      const exclusionList = [
-        "J65HtePF5TvPud7gyoqrGSy3hz2U8FTfYLy4RCho5K8x"
-      ];
+    // 1️⃣ Borrar el comando
+    await bot.deleteMessage(chatId, cmdMsgId).catch(() => {});
   
-      // Crear el keypair y la conexión
-      const walletKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+    // 2️⃣ Enviar menú inicial
+    const text =
+      '⚡️ *What is an ATA?* ⚡️\n\n' +
+      'An Associated Token Account (ATA) is where your tokens live on Solana. ' +
+      'Empty ATAs still hold a small rent deposit. You can either *check* how many empty ATAs you have, ' +
+      'or *close* them in batches of 25 to reclaim that rent.';
   
-      // Obtener todas las cuentas de tokens asociadas a la wallet
-      const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(
+    const keyboard = [
+      [
+        { text: '🔍 Check ATAs', callback_data: 'ata_check' },
+        { text: '🔒 Close ATAs', callback_data: 'ata_close' }
+      ]
+    ];
+  
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  });
+  
+  // ----------------------------------------
+  // 2) Nuevo handler para los callbacks
+  // ----------------------------------------
+  bot.on('callback_query', async query => {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    const data   = query.data;
+  
+    // 2.1) Check ATAs: contamos cuántas vacías hay
+    if (data === 'ata_check') {
+      await bot.answerCallbackQuery(query.id);
+  
+      const user = users[chatId];
+      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+  
+      const accounts = await connection.getParsedTokenAccountsByOwner(
         new PublicKey(user.walletPublicKey),
         { programId: TOKEN_PROGRAM_ID }
       );
   
-      let instructions = [];
-      const batchLimit = 25; // Limite de 20 cuentas por batch
-      let count = 0;
-      for (const { pubkey, account } of parsedTokenAccounts.value) {
-        const ataAddress = pubkey.toBase58();
+      const emptyCount = accounts.value.filter(acc =>
+        Number(acc.account.data.parsed.info.tokenAmount.amount) === 0
+      ).length;
   
-        // Si la cuenta está en la lista de exclusión, se omite
-        if (exclusionList.includes(ataAddress)) {
-          console.log(`Excluida ATA ${ataAddress} de cierre (en lista de exclusión).`);
-          continue;
-        }
+      const newText = `🔍 You have *${emptyCount}* empty ATA account${emptyCount !== 1 ? 's' : ''} that can be closed.`;
   
-        const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Solo se procede si el campo "amount" (saldo bruto) es exactamente 0
-        if (Number(tokenAmountInfo.amount) === 0) {
-          console.log(`Preparando a cerrar ATA: ${ataAddress}`);
-          instructions.push(
-            createCloseAccountInstruction(
-              pubkey, // La ATA a cerrar
-              new PublicKey(user.walletPublicKey), // El dueño de la cuenta
-              new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
-            )
-          );
-          count++;
-          // Si ya se alcanzaron las 20 instrucciones, salimos del bucle.
-          if (count === batchLimit) break;
-        } else {
-          console.log(`No se cerrará ATA ${ataAddress} porque tiene un saldo residual: ${tokenAmountInfo.amount}`);
+      return bot.editMessageText(newText, {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '🔍 Check ATAs', callback_data: 'ata_check' },
+              { text: '🔒 Close ATAs', callback_data: 'ata_close' }
+            ]
+          ]
         }
+      });
+    }
+  
+    // 2.2) Close ATAs: cerramos en batches hasta agotar
+    if (data === 'ata_close') {
+      await bot.answerCallbackQuery(query.id);
+  
+      const user = users[chatId];
+      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+  
+      let closedTotal = 0;
+      while (true) {
+        // obtenemos ATAs vacías
+        const accounts = await connection.getParsedTokenAccountsByOwner(
+          new PublicKey(user.walletPublicKey),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+        const empties = accounts.value
+          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+          .slice(0, 25);
+  
+        if (empties.length === 0) break;
+  
+        // montamos y enviamos batch
+        const tx = new Transaction();
+        for (let { pubkey } of empties) {
+          tx.add(createCloseAccountInstruction(
+            pubkey,
+            new PublicKey(user.walletPublicKey),
+            new PublicKey(user.walletPublicKey)
+          ));
+        }
+        await sendAndConfirmTransaction(connection, tx, [keypair]);
+        closedTotal += empties.length;
       }
   
-      if (instructions.length === 0) {
-        console.log("No se encontraron ATA vacías (o todas están en la lista de exclusión) para cerrar.");
-        return;
-      }
+      // mensaje final
+      const finalText = closedTotal > 0
+        ? `✅ Closed *${closedTotal}* ATA account${closedTotal !== 1 ? 's' : ''}. All rent deposits have been returned!`
+        : '⚠️ No empty ATA accounts found to close.';
   
-      // Crear y enviar la transacción con las instrucciones de cierre
-      const transaction = new Transaction().add(...instructions);
-      const signature = await sendAndConfirmTransaction(connection, transaction, [walletKeypair]);
-      console.log(`✅ Cierre de ATA completado (batch de ${instructions.length}). Signature: ${signature}`);
-      // Aquí podrías notificar al usuario (o al admin) que la operación se completó, si lo deseas.
-    } catch (error) {
-      console.error("❌ Error cerrando ATA:", error);
+      return bot.editMessageText(finalText, {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: 'Markdown'
+      });
     }
-  }
   
-  // Ejemplo de función para cerrar una ATA individual
-  async function closeAssociatedTokenAccount(wallet, mint, connection) {
-    try {
-      // Calcular la dirección ATA
-      const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-  
-      // Crear la instrucción de cierre
-      const closeIx = createCloseAccountInstruction(
-        ata,                // ATA a cerrar
-        wallet.publicKey,   // Dirección donde se devolverá el depósito de alquiler (usualmente el owner)
-        wallet.publicKey    // El owner de la cuenta ATA
-      );
-  
-      // Crear y enviar la transacción
-      const transaction = new Transaction().add(closeIx);
-      const signature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
-      console.log(`✅ ATA ${ata.toBase58()} cerrada. Signature: ${signature}`);
-      return signature;
-    } catch (error) {
-      console.error("❌ Error al cerrar la ATA:", error);
-      throw error;
-    }
-  }
-
-  bot.onText(/\/close_ata/, async (msg) => {
-    const chatId = msg.chat.id;
-    try {
-      await closeAllATAs(chatId);
-      bot.sendMessage(chatId, "✅ ATAs have been closed (rent returned).");
-    } catch (error) {
-      console.error("❌ Error en /close_ata:", error);
-      bot.sendMessage(chatId, "❌ Error al cerrar las ATA.");
-    }
+    // asegurarnos de responder cualquier otro callback
+    await bot.answerCallbackQuery(query.id);
   });
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
