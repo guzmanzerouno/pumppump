@@ -1286,69 +1286,65 @@ async function getTokenBalance(chatId, mint) {
 
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
+    // Tu endpoint premium de Helius y el mint de SOL Wrapped dentro de la función
+    const HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35";
+    const SOL_MINT   = "So11111111111111111111111111111111111111112";
+  
     try {
       const user = users[chatId];
-      if (!user || !user.privateKey) {
-        return null;
-      }
+      if (!user?.privateKey) return null;
   
-      // Obtiene el keypair y establece la conexión.
+      // 1) Keypair & conexión premium a Helius
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+      const connection = new Connection(HELIUS_RPC, "confirmed");
   
-      // Construir parámetros para la solicitud de orden a la API Ultra de Jupiter.
-      const amountInUnits = amount.toString();
-      const orderResponse = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
+      // 2) Pedir la orden unsigned a Ultra API
+      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
         params: {
           inputMint:  mint,
-          outputMint: "So11111111111111111111111111111111111111112",
-          amount:     amountInUnits,
+          outputMint: SOL_MINT,
+          amount:     amount.toString(),
           taker:      wallet.publicKey.toBase58(),
           dynamicSlippage: true
         },
         headers: { Accept: "application/json" }
       });
-      if (!orderResponse.data) {
-        throw new Error("Failed to receive order details from Ultra API for sell.");
-      }
-      const { unsignedTransaction, requestId, transaction } = orderResponse.data;
-      let txData = (unsignedTransaction || transaction || "").trim();
+      const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
+      const txData = (unsignedTransaction || transaction || "").trim();
       if (!txData || !requestId) {
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      // Deserializar, firmar y volver a serializar la transacción.
-      const transactionBuffer = Buffer.from(txData, "base64");
+      // 3) Deserializar y firmar localmente (versioned o legacy)
+      const txBuf = Buffer.from(txData, "base64");
       let signedTxBase64;
       try {
-        // Intentamos v1
-        const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
-        versionedTx.sign([wallet]);
-        signedTxBase64 = Buffer.from(versionedTx.serialize()).toString("base64");
-      } catch (err) {
-        // Fallback a legacy
-        const legacyTx = Transaction.from(transactionBuffer);
-        legacyTx.sign(wallet);
-        signedTxBase64 = Buffer.from(legacyTx.serialize()).toString("base64");
+        const vtx = VersionedTransaction.deserialize(txBuf);
+        vtx.sign([wallet]);
+        signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+      } catch {
+        const legacy = Transaction.from(txBuf);
+        legacy.sign(wallet);
+        signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // Ejecutar la transacción mediante Ultra Execute
-      const executeResponse = await axios.post(
+      // 4) Ejecutar con Ultra Execute, manteniendo tu payload
+      const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
         {
-          signedTransaction:   signedTxBase64,
-          requestId,
-          prioritizationFeeLamports: 3500000
+          signedTransaction:          signedTxBase64,
+          requestId:                  requestId,
+          prioritizationFeeLamports:  5000000
         },
         { headers: { "Content-Type": "application/json", Accept: "application/json" } }
       );
-      const exec = executeResponse.data || {};
+      const exec = execRes.data || {};
       if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
         throw new Error("Invalid execute response from Ultra API for sell: " + JSON.stringify(exec));
       }
       const txSignatureFinal = exec.txSignature || exec.signature;
   
-      // ── MERGE de la respuesta de venta sin borrar solBeforeBuy ──
+      // 5) Merge en tu referencia de venta sin perder solBeforeBuy
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
       buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
       Object.assign(buyReferenceMap[chatId][mint], {
@@ -1356,37 +1352,34 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         executeResponse: exec
       });
   
-      // Intentar cerrar el ATA si quedó vacío
-      try {
-        const ataAddress = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-        const ataInfo = await connection.getParsedAccountInfo(ataAddress, "confirmed");
-        const tokenAmount = ataInfo.value?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-        if (tokenAmount === 0) {
-          const closeTx = new Transaction().add(
-            createCloseAccountInstruction(
-              ataAddress,
-              wallet.publicKey,
-              wallet.publicKey,
-              []
-            )
-          );
-          await sendAndConfirmTransaction(connection, closeTx, [wallet]);
+      // 6) Cerrar el ATA en background (no bloquea la UI)
+      (async () => {
+        try {
+          const ataAddr = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
+          const info    = await connection.getParsedAccountInfo(ataAddr, "confirmed");
+          const uiAmt   = info.value?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+          if (uiAmt === 0) {
+            const closeIx = createCloseAccountInstruction(ataAddr, wallet.publicKey, wallet.publicKey, []);
+            const closeTx = new Transaction().add(closeIx);
+            // envia sin preflight para ir más rápido
+            const sig = await connection.sendRawTransaction(closeTx.serialize(), { skipPreflight: true });
+            console.log("Background ATA close sig:", sig);
+          }
+        } catch (e) {
+          console.warn("Background ATA close failed:", e.message);
         }
-      } catch (closeError) {
-        console.error("Error closing ATA for mint", mint, ":", closeError);
-      }
+      })();
   
       return txSignatureFinal;
   
     } catch (error) {
-      // Reintentos con backoff exponencial
+      // reintentos exponenciales
       if (attempt < 6) {
-        const delay = 1000 * Math.pow(2, attempt - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = 500 * Math.pow(2, attempt - 1);
+        await new Promise(r => setTimeout(r, delay));
         return sellToken(chatId, mint, amount, attempt + 1);
-      } else {
-        return Promise.reject(error);
       }
+      return Promise.reject(error);
     }
   }
 
