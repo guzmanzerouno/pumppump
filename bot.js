@@ -73,118 +73,164 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 // ==========================================
 let ataAutoCreationEnabled = false;
 
+/**
+ * Cierra todas las ATAs vacías de un usuario (en batchs de 25).
+ * @param {string|number} chatId - ID de Telegram / clave en users[]
+ * @returns {Promise<number>} total de ATAs cerradas
+ */
+async function closeEmptyATAs(chatId) {
+  const user = users[chatId];
+  if (!user?.privateKey || !user.walletPublicKey) return 0;
+
+  const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+  const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  let closedTotal = 0;
+
+  while (true) {
+    const { value } = await connection.getParsedTokenAccountsByOwner(
+      new PublicKey(user.walletPublicKey),
+      { programId: TOKEN_PROGRAM_ID }
+    );
+    const empties = value
+      .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+      .slice(0, 25);
+
+    if (empties.length === 0) break;
+
+    const tx = new Transaction();
+    for (let { pubkey } of empties) {
+      tx.add(createCloseAccountInstruction(
+        pubkey,
+        new PublicKey(user.walletPublicKey),
+        new PublicKey(user.walletPublicKey)
+      ));
+    }
+    await sendAndConfirmTransaction(connection, tx, [keypair]);
+    closedTotal += empties.length;
+  }
+
+  return closedTotal;
+}
+
 // ─────────────────────────────────────────────
 // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
 // ─────────────────────────────────────────────
-// 1) Comando /ata: muestra el menú ON / OFF
 bot.onText(/\/ata/, async (msg) => {
-    const chatId   = msg.chat.id;
-    const cmdMsgId = msg.message_id;
-  
-    // 1️⃣ Borra primero el mensaje con el comando
-    try {
-      await bot.deleteMessage(chatId, cmdMsgId);
-    } catch (err) {
-      // Puede fallar si no tienes permisos, pero seguimos de todos modos
-      console.warn("Could not delete /ata command message:", err.message);
-    }
-  
-    // 2️⃣ Texto y botones del menú ATA
-    const text =
-      "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
-      "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
-      "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
-  
-    const opts = {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "✅ ON",  callback_data: "ata_on"  },
-            { text: "❌ OFF", callback_data: "ata_off" }
-          ]
-        ]
-      }
-    };
-  
-    // 3️⃣ Envía el menú ATA limpio
-    await bot.sendMessage(chatId, text, opts);
-  });
-  
-  // 2) Handler para los botones ON / OFF
-  bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
-    const data   = query.data;
-  
-    if (data === "ata_on" || data === "ata_off") {
-      // Actualiza la configuración del usuario
-      const enabled = data === "ata_on";
-      users[chatId] = users[chatId] || {};
-      users[chatId].ataAutoCreationEnabled = enabled;
-      saveUsers();
-  
-      // Mensaje de confirmación (reemplaza el texto y elimina los botones)
-      const confText = enabled
-        ? "✅ Auto‑creation of ATAs is now *ENABLED*"
-        : "❌ Auto‑creation of ATAs is now *DISABLED*";
-  
-      await bot.editMessageText(confText, {
-        chat_id: chatId,
-        message_id: query.message.message_id,
-        parse_mode: "Markdown"
-      });
-  
-      // Responde el callback para quitar el spinner
-      return bot.answerCallbackQuery(query.id);
-    }
-  
-    // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
-    return bot.answerCallbackQuery(query.id);
-  });
-  
-  // ─────────────────────────────────────────────
-  // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
-  // ─────────────────────────────────────────────
-  async function preCreateATAsForToken(mintAddress) {
-    // 1) Filtrar usuarios que quieren creación automática de ATA
-    const usersToProcess = Object.entries(users)
-      .filter(([, user]) =>
-        user.subscribed &&
-        user.privateKey &&
-        user.ataAutoCreationEnabled
-      );
-  
-    // 2) Para cada usuario, usar un endpoint distinto
-    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
-      const rpcUrl = getNextRpc();
-      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection(rpcUrl, "confirmed");
-  
-      try {
-        // 3) Comprueba si ya existe el ATA
-        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
-        const ataInfo = await connection.getAccountInfo(ata);
-        if (ataInfo === null) {
-          // 4) Si no existe, créalo
-          const tx = new Transaction().add(
-            createAssociatedTokenAccountInstruction(
-              keypair.publicKey,
-              ata,
-              keypair.publicKey,
-              new PublicKey(mintAddress)
-            )
-          );
-          await sendAndConfirmTransaction(connection, tx, [keypair]);
-        }
-      } catch (err) {
-        // Sólo en consola
-        console.error(`❌ Error al crear ATA para ${chatId} usando ${rpcUrl}:`, err);
-      } finally {
-        // 5) Liberamos el endpoint para que lo pueda usar otra tarea
-        releaseRpc(rpcUrl);
-      }
-    }));
+  const chatId   = msg.chat.id;
+  const cmdMsgId = msg.message_id;
+
+  try {
+    await bot.deleteMessage(chatId, cmdMsgId);
+  } catch (err) {
+    console.warn("Could not delete /ata command message:", err.message);
   }
+
+  const text =
+    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
+    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+
+  await bot.sendMessage(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ ON",  callback_data: "ata_on"  },
+          { text: "❌ OFF", callback_data: "ata_off" }
+        ]
+      ]
+    }
+  });
+});
+
+// 2) Handler para los botones ON / OFF
+bot.on("callback_query", async (query) => {
+  const chatId = query.message.chat.id;
+  const data   = query.data;
+
+  if (data === "ata_on") {
+    users[chatId] = users[chatId] || {};
+    users[chatId].ataAutoCreationEnabled = true;
+    saveUsers();
+
+    await bot.editMessageText("✅ Auto‑creation of ATAs is now *ENABLED*", {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: "Markdown"
+    });
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  if (data === "ata_off") {
+    users[chatId] = users[chatId] || {};
+    users[chatId].ataAutoCreationEnabled = false;
+    saveUsers();
+
+    // Confirmación inmediata
+    await bot.editMessageText("❌ Auto‑creation of ATAs is now *DISABLED*", {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: "Markdown"
+    });
+    await bot.answerCallbackQuery(query.id);
+
+    // ➡️ Cerrar ATAs vacías
+    const closed = await closeEmptyATAs(chatId);
+    if (closed > 0) {
+      await bot.sendMessage(chatId,
+        `✅ Closed *${closed}* empty ATA account${closed !== 1 ? 's' : ''}. Rent deposits refunded!`,
+        { parse_mode: 'Markdown' }
+      );
+    } else {
+      await bot.sendMessage(chatId,
+        `⚠️ No empty ATA accounts were found to close.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+    return;
+  }
+
+  // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
+  return bot.answerCallbackQuery(query.id);
+});
+
+// ─────────────────────────────────────────────
+// preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
+// ─────────────────────────────────────────────
+async function preCreateATAsForToken(mintAddress) {
+  const usersToProcess = Object.entries(users)
+    .filter(([, user]) =>
+      user.subscribed &&
+      user.privateKey &&
+      user.ataAutoCreationEnabled
+    );
+
+  await Promise.all(usersToProcess.map(async ([chatId, user]) => {
+    const rpcUrl     = getNextRpc();
+    const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const connection = new Connection(rpcUrl, "confirmed");
+
+    try {
+      const ata     = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
+      const ataInfo = await connection.getAccountInfo(ata);
+      if (ataInfo === null) {
+        const tx = new Transaction().add(
+          createAssociatedTokenAccountInstruction(
+            keypair.publicKey,
+            ata,
+            keypair.publicKey,
+            new PublicKey(mintAddress)
+          )
+        );
+        await sendAndConfirmTransaction(connection, tx, [keypair]);
+      }
+    } catch (err) {
+      console.error(`❌ Error al crear ATA para ${chatId} usando ${rpcUrl}:`, err);
+    } finally {
+      releaseRpc(rpcUrl);
+    }
+  }));
+}
 
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
@@ -2164,10 +2210,10 @@ bot.on("callback_query", async (query) => {
       rpcUrl = getNextRpc();
       const connection = new Connection(rpcUrl, "confirmed");
   
-      // 2) asegurar ATA y obtener decimales/balance
+      // 2) Ya no chequeamos ni creamos la ATA, omitimos ensureAssociatedTokenAccount
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-      await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
   
+      // 3) Decimales y balance (seguimos usando getTokenBalance si lo necesitas)
       const decimals = await getTokenDecimals(expectedTokenMint);
       const balance  = await getTokenBalance(chatId, expectedTokenMint);
       if (!balance || balance <= 0) {
@@ -2178,7 +2224,7 @@ bot.on("callback_query", async (query) => {
         return;
       }
   
-      // 3) preparar montos
+      // 4) preparar montos
       const balanceInLam = Math.floor(balance * 10 ** decimals);
       const amountToSell = sellType === "50"
         ? Math.floor(balanceInLam / 2)
@@ -2194,7 +2240,7 @@ bot.on("callback_query", async (query) => {
         return;
       }
   
-      // 4) ejecutar la venta (hasta 3 intentos)
+      // 5) ejecutar la venta (hasta 3 intentos)
       let txSignature = null;
       for (let i = 0; i < 3 && !txSignature; i++) {
         txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
@@ -2208,7 +2254,7 @@ bot.on("callback_query", async (query) => {
         return;
       }
   
-      // 5) detalles de la venta (hasta 5 intentos)
+      // 6) detalles de la venta (hasta 5 intentos)
       let sellDetails = null;
       for (let i = 0; i < 5 && !sellDetails; i++) {
         sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
@@ -2227,7 +2273,7 @@ bot.on("callback_query", async (query) => {
         return;
       }
   
-      // 6) confirmar y actualizar
+      // 7) confirmar y actualizar
       await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
   
     } catch (err) {
@@ -2237,7 +2283,7 @@ bot.on("callback_query", async (query) => {
         { chat_id: chatId, message_id: msgId }
       );
     } finally {
-      // 7) liberar el RPC usado
+      // 8) liberar el RPC usado
       if (rpcUrl) releaseRpc(rpcUrl);
     }
   });
