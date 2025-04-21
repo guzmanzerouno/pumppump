@@ -2455,37 +2455,39 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // — 2) Texto corto para el tweet (sólo ASCII y algunos símbolos seguros) —
-    let shortTweetText =
-      `✅ Sell completed ${tokenSymbol}/SOL\n` +
-      `💲 Token Price: ${tokenPrice} SOL\n` +
-      `💲 Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-      `💰 SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
-      `💰 Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
-      `🔗 View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
-      `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
-  
-    // — 2a) Normalizamos y eliminamos caracteres UTF-16 mal formados —
-    shortTweetText = shortTweetText
-      .normalize('NFC')
-      // elimina posibles surrogates sueltos
-      .replace(/[\uD800-\uDFFF]/g, '');
-  
-    // — 2b) Construir la URL de Tweet —
-    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
-  
-    // — 3) Editamos el mensaje de Telegram y añadimos el botón de compartir en X —
-    await bot.editMessageText(confirmationMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🚀 Share on X", url: tweetUrl }]
-        ]
-      }
-    });
+    // — 2) Texto corto para el tweet (ahora sin cargarte los emojis) —
+let shortTweetText =
+`✅ Sell completed ${tokenSymbol}/SOL\n` +
+`💲 Token Price: ${tokenPrice} SOL\n` +
+`💲 Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+`💰 SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
+`💰 Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
+`🔗 View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
+`💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
+
+// OPCIONAL: sólo limpiar surrogates huérfanos, no emojis válidos
+shortTweetText = shortTweetText
+.normalize('NFC')
+.replace(
+  /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
+  ''
+);
+
+// — 2b) Construir la URL de Tweet —
+const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
+
+// — 3) Editamos el mensaje de Telegram y añadimos el botón de compartir en X —
+await bot.editMessageText(confirmationMessage, {
+chat_id: chatId,
+message_id: messageId,
+parse_mode: "Markdown",
+disable_web_page_preview: true,
+reply_markup: {
+  inline_keyboard: [
+    [{ text: "🚀 Share on X", url: tweetUrl }]
+  ]
+}
+});
   
     // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
