@@ -2401,11 +2401,11 @@ bot.on("callback_query", async (query) => {
   ) {
     const solPrice = await getSolPriceUSD();
   
-    // Parsear cantidades
+    // — Parsear cantidades —
     const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
     const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
   
-    // Calcular PnL
+    // — Calcular PnL —
     let pnlDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
     if (ref?.solBeforeBuy != null) {
@@ -2420,16 +2420,16 @@ bot.on("callback_query", async (query) => {
         );
     }
   
-    // Precio promedio y hora
+    // — Precio promedio y hora —
     const tokenPrice = soldTokens > 0
       ? (gotSol / soldTokens).toFixed(9)
       : "N/A";
     const now = Date.now();
-    const utcTime = new Date(now).toLocaleTimeString("en-GB",{hour12:false,timeZone:"UTC"});
-    const estTime = new Date(now).toLocaleTimeString("en-US",{hour12:false,timeZone:"America/New_York"});
+    const utcTime = new Date(now).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime = new Date(now).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
   
-    // Balance wallet
+    // — Balance wallet —
     const rpcUrl = getNextRpc();
     const connection = new Connection(rpcUrl, "processed");
     const balLam = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
@@ -2437,12 +2437,12 @@ bot.on("callback_query", async (query) => {
     const walletSol = balLam / 1e9;
     const walletUsd = solPrice != null ? (walletSol * solPrice).toFixed(2) : "N/A";
   
-    // Símbolo del token
+    // — Símbolo —
     const tokenSymbol = escapeMarkdown(
       getTokenInfo(expectedTokenMint).symbol || "Unknown"
     );
   
-    // --- 1) Mensaje completo en el chat ---
+    // — El mensaje completo que verá el usuario en Telegram —
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
@@ -2456,39 +2456,44 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
+    // — Construir URL de tweet con texto corto —
+    const tweetLines = [
+      `Sell completed ${tokenSymbol}/SOL`,
+      `Token Price: ${tokenPrice} SOL`,
+      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}`,
+      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}`,
+      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})`,
+      `View in Solscan: https://solscan.io/tx/${txSignature}`,
+      ``,
+      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`
+    ];
+    const tweetText = tweetLines.join("\n");
+  
+    let replyMarkup;
+    try {
+      const tweetUrl = "https://twitter.com/intent/tweet?text="
+        + encodeURIComponent(tweetText);
+      replyMarkup = {
+        inline_keyboard: [
+          [{ text: "🚀 Share your result on X", url: tweetUrl }]
+        ]
+      };
+    } catch (err) {
+      console.error("⚠️ Error construyendo URL de Tweet:", err);
+      // Si algo falla, simplemente no mostramos botón
+      replyMarkup = undefined;
+    }
+  
+    // — En un solo paso EDITAMOS el mensaje y añadimos (si pudo) el botón —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "Markdown",
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {})
     });
   
-    // --- 2) Construir el texto corto para el Tweet ---
-    const tweetText = 
-      `Sell completed ${tokenSymbol}/SOL\n` +
-      `Token Price: ${tokenPrice} SOL\n` +
-      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
-      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
-      `View in Solscan: https://solscan.io/tx/${txSignature}\n\n` +
-      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`;
-  
-    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-  
-    // --- 3) Agregar botón de Tweet ---
-    await bot.editMessageReplyMarkup(
-      {
-        inline_keyboard: [
-          [{ text: "🚀 Share your result on X! ", url: tweetUrl }]
-        ]
-      },
-      {
-        chat_id: chatId,
-        message_id: messageId
-      }
-    );
-  
-    // Actualizar metadata y guardar swap
+    // — Guardamos estado y swaps igual que antes —
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
