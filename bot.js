@@ -2456,41 +2456,29 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // — Construir URL de tweet con texto corto —
-    const tweetLines = [
-      `Sell completed ${tokenSymbol}/SOL`,
-      `Token Price: ${tokenPrice} SOL`,
-      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}`,
-      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}`,
-      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})`,
-      `View in Solscan: https://solscan.io/tx/${txSignature}`,
-      ``,
-      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`
-    ];
-    const tweetText = tweetLines.join("\n");
+    // — Texto corto para el tweet —
+    const tweetText =
+      `Sell completed ${tokenSymbol}/SOL\n` +
+      `Token Price: ${tokenPrice} SOL\n` +
+      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
+      `Got: ${gotSol.toFixed(9)} SOL ($${(gotSol * solPrice).toFixed(2)})\n` +
+      `View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
+      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`;
   
-    let replyMarkup;
-    try {
-      const tweetUrl = "https://twitter.com/intent/tweet?text="
-        + encodeURIComponent(tweetText);
-      replyMarkup = {
-        inline_keyboard: [
-          [{ text: "🚀 Share your result on X", url: tweetUrl }]
-        ]
-      };
-    } catch (err) {
-      console.error("⚠️ Error construyendo URL de Tweet:", err);
-      // Si algo falla, simplemente no mostramos botón
-      replyMarkup = undefined;
-    }
+    const tweetUrl = "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweetText);
   
-    // — En un solo paso EDITAMOS el mensaje y añadimos (si pudo) el botón —
+    // — Editamos TODO de una vez, con el botón de X incluido siempre —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "Markdown",
       disable_web_page_preview: true,
-      ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Share on X", url: tweetUrl }]
+        ]
+      }
     });
   
     // — Guardamos estado y swaps igual que antes —
