@@ -1658,11 +1658,54 @@ async function analyzeTransaction(signature, forceCheck = false) {
     preCreateATAsForToken(mintData.mintAddress)
       .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
   
+    // ——— AUTO‑BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
+    for (const [chatId, user] of Object.entries(users)) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'detect'
+      ) {
+        const amountSOL = user.autoBuyAmount;
+        const mint      = mintData.mintAddress;
+  
+        // Desactivar auto‑buy para no repetirlo
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
+        try {
+          // Mensaje inicial
+          const sent      = await bot.sendMessage(
+            chatId,
+            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+          );
+          const messageId = sent.message_id;
+  
+          // Ejecutar compra
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(
+              `❌ Auto‑Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
+            );
+            continue;
+          }
+  
+          // Obtener detalles y confirmar
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+        } catch (err) {
+          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
+        }
+      }
+    }
+  
     // ——— Resto del flujo manual de análisis ———
     const alertMessages = {};
     for (const userId in users) {
       const user = users[userId];
-      if (user?.subscribed && user.privateKey) {
+      if (user.subscribed && user.privateKey) {
         try {
           const msg = await bot.sendMessage(
             userId,
@@ -1684,7 +1727,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
       for (const userId in alertMessages) {
         await bot.editMessageText(
           "⚠️ Token discarded due to insufficient info for analysis.",
-          { chat_id: userId, message_id: alertMessages[userId], parse_mode: "Markdown" }
+          {
+            chat_id: userId,
+            message_id: alertMessages[userId],
+            parse_mode: "Markdown"
+          }
         ).catch(() => {});
       }
       return;
@@ -1693,29 +1740,42 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
   
-    // ——— AUTO‑BUY TRIGGERED NOW THAT DEX DATA IS AVAILABLE ———
+    // ——— AUTO‑BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
     for (const [chatId, user] of Object.entries(users)) {
-      if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'notify'
+      ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-        // Desactivar auto‑buy inmediatamente
+  
+        // Desactivar auto‑buy para no repetirlo
         user.autoBuyEnabled = false;
         saveUsers();
   
         try {
-          // Send initial message
-          const sent      = await bot.sendMessage(chatId, `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`);
+          // Mensaje inicial
+          const sent      = await bot.sendMessage(
+            chatId,
+            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+          );
           const messageId = sent.message_id;
-          // Execute purchase
+  
+          // Ejecutar compra
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
-            await bot.editMessageText(`❌ Auto‑Buy failed for ${mint}.`, { chat_id: chatId, message_id: messageId });
+            await bot.editMessageText(
+              `❌ Auto‑Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
+            );
             continue;
           }
-          // Fetch swap details and confirm
+  
+          // Obtener detalles y confirmar
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
-  
         } catch (err) {
           console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
           await bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
@@ -1808,23 +1868,21 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
-  bot.onText(/\/autobuy/, async (msg) => {
-    const chatId    = msg.chat.id;
-    const cmdMsgId  = msg.message_id;
+ // Comando /autobuy
+bot.onText(/\/autobuy/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
   
-    // 1️⃣ Borra primero el mensaje con el comando
     try {
       await bot.deleteMessage(chatId, cmdMsgId);
     } catch (err) {
-      // puede fallar si el bot no tiene permisos, pero seguimos igual
       console.warn("Could not delete command message:", err.message);
     }
   
-    // 2️⃣ Preparamos el menú
     const intro =
       "🚀 *Auto‑Buy Turbo Mode!* 🚀\n\n" +
-      "Instantly fresh tokens the moment they land on Solana—hands‑free and lightning‑fast! " +
-      "Turn it *ON*, pick your amount, and watch bot work. " +
+      "Get fresh tokens the moment they land on Solana—hands‑free and lightning‑fast! " +
+      "Turn it *ON*, pick your amount, and watch the bot work. " +
       "Turn it *OFF* anytime and I'll stop buying tokens.";
   
     const keyboard = [
@@ -1834,16 +1892,13 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ]
     ];
   
-    // 3️⃣ Enviamos el menú
     await bot.sendMessage(chatId, intro, {
       parse_mode:   'Markdown',
       reply_markup: { inline_keyboard: keyboard }
     });
   });
   
-  // —————————————————————————————————————————————
-  //  3) Capturar toggles y luego monto (debe ir antes que buy_/sell_/refresh_)
-  // —————————————————————————————————————————————
+  // Handler de toggles y selección de monto
   bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
@@ -1864,60 +1919,71 @@ async function analyzeTransaction(signature, forceCheck = false) {
       );
     }
   
-    // ── Toggle ON ── → confirmamos y preguntamos monto
+    // ── Enable Auto‑Buy ──
     if (data === 'autobuy_toggle_on') {
-        users[chatId] = users[chatId] || {};
-        users[chatId].autoBuyEnabled = true;
-        saveUsers();
-    
-        // quita el “loading” del botón
-        await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
-    
-        // construye el teclado de montos
-        const keyboard = [
-          [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
-          [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
-        ];
-    
-        // edita el mensaje original con texto + teclado
-        return bot.editMessageText(
-          '✅ *Auto‑Buy is now ENABLED!*  \n\n' +
-          '💰 *How much SOL would you like me to auto‑buy each time?*',
-          {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true,
-            reply_markup: { inline_keyboard: keyboard }
-          }
-        );
-    }
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = true;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
   
-    // ── Capturar monto seleccionado ──
-if (data.startsWith('autobuy_amt_')) {
-    const amount = parseFloat(data.replace('autobuy_amt_',''));
-    users[chatId] = users[chatId] || {};
-    users[chatId].autoBuyEnabled = true;
-    users[chatId].autoBuyAmount  = amount;
-    saveUsers();
-  
-    // quita el “loading” del botón
-    await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
-  
-    // EDITA el mensaje original con la confirmación y quita los botones
-    return bot.editMessageText(
-      '🎉 *Auto‑Buy amount set!*  \n\n' +
-      `I will now auto‑buy *${amount} SOL* whenever a new token appears.`,
-      {
+      // 👉 Nueva etapa: elegir momento de disparo
+      const text = '⌚ *When should I trigger Auto‑Buy?*';
+      const keyboard = [
+        [{ text: '1️⃣ When a token is detected as “Positive”', callback_data: 'autobuy_trigger_detect' }],
+        [{ text: '2️⃣ When the token is announced',           callback_data: 'autobuy_trigger_notify' }]
+      ];
+      return bot.editMessageText(text, {
         chat_id: chatId,
         message_id: query.message.message_id,
         parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      }
-    );
-  }
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    }
   
-    // — si no era autobuy, dejamos que otros handlers lo procesen —
+    // ── Selección de trigger ──
+    if (data === 'autobuy_trigger_detect' || data === 'autobuy_trigger_notify') {
+      const trigger = data === 'autobuy_trigger_detect' ? 'detect' : 'notify';
+      users[chatId].autoBuyTrigger = trigger;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id);
+  
+      // Ahora preguntamos el monto
+      const keyboard = [
+        [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
+        [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
+      ];
+      return bot.editMessageText(
+        '✅ *Great!*  \n\n' +
+        '💰 *How much SOL would you like me to auto‑buy each time?*',
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: keyboard }
+        }
+      );
+    }
+  
+    // ── Capturar monto seleccionado ──
+    if (data.startsWith('autobuy_amt_')) {
+      const amount = parseFloat(data.replace('autobuy_amt_',''));
+      users[chatId].autoBuyAmount = amount;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
+      return bot.editMessageText(
+        '🎉 *Auto‑Buy configured!*  \n\n' +
+        `It will now automatically purchase *${amount} SOL* according to your preference.`,
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        }
+      );
+    }
+  
+    // Si no era un callback de Auto‑Buy, dejamos que otros handlers lo procesen
     return;
   });
 
@@ -1964,8 +2030,8 @@ if (data.startsWith('autobuy_amt_')) {
           refreshRiskCount[mint]++;
         }
         let updatedRiskLevel, updatedWarning;
-        if (refreshRiskCount[mint] % 10 === 1) {
-          // Solo en el primer refresh (y cada 10 refresh) se actualiza la data de riesgo
+        if (refreshRiskCount[mint] % 16 === 1) {
+          // Solo en el primer refresh (y cada 16 refresh) se actualiza la data de riesgo
           const rugCheckData = await fetchRugCheckData(mint);
           if (rugCheckData) {
             updatedRiskLevel = rugCheckData.riskLevel;
