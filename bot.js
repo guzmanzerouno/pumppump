@@ -256,7 +256,7 @@ async function preCreateATAsForToken(mintAddress) {
   await Promise.all(usersToProcess.map(async ([chatId, user]) => {
     const rpcUrl     = getNextRpc();
     const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-    const connection = new Connection(rpcUrl, "confirmed");
+    const connection = new Connection(rpcUrl, "processed");
 
     try {
       const ata     = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
@@ -1416,7 +1416,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
   
       // 1) Reservar un endpoint distinto
       rpcUrl = getNextRpc();
-      const connection = new Connection(rpcUrl, "confirmed");
+      const connection = new Connection(rpcUrl, "processed");
   
       // 2) Keypair y pedir orden unsigned
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
@@ -1453,7 +1453,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       const executePayload = {
         signedTransaction:         signedTxBase64,
         requestId:                 requestId,
-        prioritizationFeeLamports: 5000000
+        prioritizationFeeLamports: 6000000
       };
       const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
@@ -2245,7 +2245,7 @@ bot.on("callback_query", async (query) => {
     try {
       // 1) escoger un RPC distinto
       rpcUrl = getNextRpc();
-      const connection = new Connection(rpcUrl, "confirmed");
+      const connection = new Connection(rpcUrl, "processed");
   
       // 2) Ya no chequeamos ni creamos la ATA, omitimos ensureAssociatedTokenAccount
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
@@ -2371,7 +2371,7 @@ bot.on("callback_query", async (query) => {
   
     // Balance actual de la wallet usando RPC rotatorio
     let rpcUrl = getNextRpc();
-    const connection = new Connection(rpcUrl, "confirmed");
+    const connection = new Connection(rpcUrl, "processed");
     const balLam     = await connection.getBalance(
       new PublicKey(sellDetails.walletAddress)
     );
