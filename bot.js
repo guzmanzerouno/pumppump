@@ -2394,7 +2394,7 @@ bot.on("callback_query", async (query) => {
   async function confirmSell(
     chatId,
     sellDetails,
-    _soldAmountStr,
+    _soldAmountStr,    // ya no lo usamos, vendimos lo que dice sellDetails.soldAmount
     messageId,
     txSignature,
     expectedTokenMint
@@ -2402,7 +2402,7 @@ bot.on("callback_query", async (query) => {
     const solPrice = await getSolPriceUSD();
   
     // Parsear cantidades desde sellDetails
-    const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
+    const soldTokens = parseFloat(sellDetails.soldAmount)   || 0;
     const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
   
     // PnL en SOL y USD
@@ -2441,6 +2441,7 @@ bot.on("callback_query", async (query) => {
     const balLam     = await connection.getBalance(
       new PublicKey(sellDetails.walletAddress)
     );
+    // liberar el endpoint
     releaseRpc(rpcUrl);
   
     const walletSol = balLam / 1e9;
@@ -2453,7 +2454,7 @@ bot.on("callback_query", async (query) => {
       getTokenInfo(expectedTokenMint).symbol || "Unknown"
     );
   
-    // Mensaje completo original
+    // Mensaje final
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
@@ -2467,30 +2468,14 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // Línea promocional
-    const promoLine = "\n\nI got this result using Gemsniping – the best bot on Solana! www.gemsniping.com";
+    await bot.editMessageText(confirmationMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
   
-    // Texto y URL de Tweet
-    const tweetText = `${confirmationMessage}${promoLine}`;
-    const tweetUrl  = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-  
-    // Editar mensaje con botón de Tweet
-    await bot.editMessageText(
-      confirmationMessage + promoLine,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🐦 Tweet", url: tweetUrl }]
-          ]
-        }
-      }
-    );
-  
-    // Actualizar metadata sin perder solBeforeBuy
+    // Actualizamos sólo la metadata, conservando solBeforeBuy
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
