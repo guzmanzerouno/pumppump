@@ -2456,30 +2456,30 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // — Texto corto para el tweet —
-    const tweetText =
-      `Sell completed ${tokenSymbol}/SOL\n` +
-      `Token Price: ${tokenPrice} SOL\n` +
-      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
-      `Got: ${gotSol.toFixed(9)} SOL ($${(gotSol * solPrice).toFixed(2)})\n` +
-      `View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
-      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`;
-  
-    const tweetUrl = "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweetText);
-  
-    // — Editamos TODO de una vez, con el botón de X incluido siempre —
-    await bot.editMessageText(confirmationMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🚀 Share on X", url: tweetUrl }]
-        ]
-      }
-    });
+    // — el “short tweet” que tú controlas y que solo tiene ASCII y algunos emojis seguros
+const shortTweetText =
+`Sell completed ${tokenSymbol}/SOL\n` +
+`Token Price: ${tokenPrice} SOL\n` +
+`Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+`SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
+`Got: ${gotSol.toFixed(9)} SOL ($${(gotSol * solPrice).toFixed(2)})\n` +
+`View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
+`I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`;
+
+// y ahora sí lo codificamos con encodeURIComponent
+const tweetUrl = "https://twitter.com/intent/tweet?text=" + encodeURIComponent(shortTweetText);
+
+await bot.editMessageText(confirmationMessage, {
+chat_id: chatId,
+message_id: messageId,
+parse_mode: "Markdown",
+disable_web_page_preview: true,
+reply_markup: {
+  inline_keyboard: [
+    [{ text: "🚀 Share on X", url: tweetUrl }]
+  ]
+}
+});
   
     // — Guardamos estado y swaps igual que antes —
     buyReferenceMap[chatId][expectedTokenMint] = {
