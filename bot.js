@@ -1929,7 +1929,7 @@ bot.onText(/\/autobuy/, async (msg) => {
       // 👉 Nueva etapa: elegir momento de disparo
       const text = '⌚ *When should I trigger Auto‑Buy?*';
       const keyboard = [
-        [{ text: '1️⃣ When a token is detected as “Positive”', callback_data: 'autobuy_trigger_detect' }],
+        [{ text: '1️⃣ When a token is detected', callback_data: 'autobuy_trigger_detect' }],
         [{ text: '2️⃣ When the token is announced',           callback_data: 'autobuy_trigger_notify' }]
       ];
       return bot.editMessageText(text, {
