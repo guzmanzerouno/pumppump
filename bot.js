@@ -2457,13 +2457,13 @@ bot.on("callback_query", async (query) => {
   
     // — 2) Texto corto para el tweet (sólo ASCII y algunos símbolos seguros) —
     let shortTweetText =
-      `Sell completed ${tokenSymbol}/SOL\n` +
-      `Token Price: ${tokenPrice} SOL\n` +
-      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-      `SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
-      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
-      `View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
-      `I got this result using Gemsniping – the best bot on Solana! www.gemsniping.com`;
+      `✅ Sell completed ${tokenSymbol}/SOL\n` +
+      `💲 Token Price: ${tokenPrice} SOL\n` +
+      `💲 Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `💰 SOL PnL: ${pnlDisplay.replace(/^[🟢🔻]/, "")}\n` +
+      `💰 Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
+      `🔗 View in Solscan https://solscan.io/tx/${txSignature}\n\n` +
+      `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
   
     // — 2a) Normalizamos y eliminamos caracteres UTF-16 mal formados —
     shortTweetText = shortTweetText
