@@ -2391,7 +2391,8 @@ bot.on("callback_query", async (query) => {
     }
   });
 
-  async function confirmSell(
+// ——— Función confirmSell actualizada ———
+async function confirmSell(
     chatId,
     sellDetails,
     _soldAmountStr,
@@ -2455,8 +2456,8 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-    // — 2) Texto corto para compartir (shortTweetText) —
-    let shortTweetText =
+    // — 2) Texto corto para compartir en X/WhatsApp —
+    let shareText =
       `✅ Sell completed ${tokenSymbol}/SOL\n` +
       `Token Price: ${tokenPrice} SOL\n` +
       `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
@@ -2465,18 +2466,16 @@ bot.on("callback_query", async (query) => {
       `🔗 https://solscan.io/tx/${txSignature}\n\n` +
       `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
   
-    // Normalizar y limpiar posibles surrogates huérfanos
-    shortTweetText = shortTweetText
+    // Normalizar y quitar surrogates huérfanos
+    shareText = shareText
       .normalize('NFC')
-      .replace(
-        /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
-        ""
-      );
+      .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
   
-    // — 2b) URL de Tweet —
-    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
+    // URLs de compartir
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
   
-    // — 3) Editamos el mensaje de Telegram y añadimos botones —
+    // — 3) Editamos el mensaje y añadimos botones —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2485,17 +2484,14 @@ bot.on("callback_query", async (query) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🚀 Share on X", url: tweetUrl },
-            {
-              text: "📋 Copy Swap",
-              switch_inline_query_current_chat: shortTweetText
-            }
+            { text: "🚀 Share on X",      url: tweetUrl },
+            { text: "💬 WhatsApp", url: waUrl }
           ]
         ]
       }
     });
   
-    // — 4) Guardar estado de referencia y swap —
+    // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
@@ -2514,6 +2510,12 @@ bot.on("callback_query", async (query) => {
       messageText:  confirmationMessage
     });
   }
+  
+  // ——— Listener general de callback_query ———
+  bot.on("callback_query", async (query) => {
+    // …otros handlers…
+    await bot.answerCallbackQuery(query.id);
+  });
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
