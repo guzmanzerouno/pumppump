@@ -884,36 +884,55 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
 }
 
 bot.onText(/\/status/, (msg) => {
-  const chatId = msg.chat.id;
-  const user = users[chatId];
-
-  if (!user || !user.walletPublicKey) {
-    return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
-  }
-
-  const now = Date.now();
-  let message = `👤 *Account Status*\n\n`;
-  message += `💼 Wallet: \`${user.walletPublicKey}\`\n`;
-
-  if (user.expired === "never") {
-    message += `✅ *Status:* Unlimited Membership`;
-  } else if (user.expired && now < user.expired) {
-    const expirationDate = new Date(user.expired).toLocaleDateString();
-    const remainingDays = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
-    message += `✅ *Status:* Active\n📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)`;
-  } else {
-    const expiredDate = user.expired ? new Date(user.expired).toLocaleDateString() : "N/A";
-    message += `❌ *Status:* Expired\n📅 *Expired On:* ${expiredDate}`;
-  }
-
-  bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
-});
+    const chatId = msg.chat.id;
+    const user = users[chatId];
+  
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(
+        chatId,
+        "❌ You are not registered. Use /start to begin."
+      );
+    }
+  
+    const now = Date.now();
+    let message = `👤 *Account Status*\n\n`;
+    message += `💼 Wallet: \`${user.walletPublicKey}\`\n`;
+  
+    // Estado de la suscripción
+    if (user.expired === "never") {
+      message += `✅ *Status:* Unlimited Membership\n`;
+    } else if (user.expired && now < user.expired) {
+      const expirationDate = new Date(user.expired).toLocaleDateString();
+      const remainingDays = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
+      message += 
+        `✅ *Status:* Active\n` +
+        `📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)\n`;
+    } else {
+      const expiredDate = user.expired ? new Date(user.expired).toLocaleDateString() : "N/A";
+      message += 
+        `❌ *Status:* Expired\n` +
+        `📅 *Expired On:* ${expiredDate}\n`;
+    }
+  
+    // Límite de swaps
+    let swapInfo = "N/A";
+    if (user.swapLimit === Infinity) {
+      swapInfo = "Unlimited";
+    } else if (typeof user.swapLimit === "number") {
+      swapInfo = `${user.swapLimit} swaps`;
+    }
+    message += `🔄 *Swap Limit:* ${swapInfo}`;
+  
+    bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
+  });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
     { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
+    { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
+    { command: 'payments',  description: '💳 Show your payment history' },
 ]);
 
 // 🔹 Conexión WebSocket con reconexión automática
