@@ -718,13 +718,13 @@ bot.onText(/\/start/, async (msg) => {
         : `✅ Active for ${Math.ceil((result.expiration - Date.now())/(1000*60*60*24))} day(s)`;
   
       const confirmation = `✅ *User Registered!*
-  👤 *Name:* ${user.name}
-  📱 *Phone:* ${user.phone}
-  📧 *Email:* ${user.email}
-  🆔 *Username:* ${user.username}
-  💼 *Wallet:* \`${user.walletPublicKey}\`
-  🔐 *Referral:* ${result.code} (${user.referrer})
-  ⏳ *Status:* ${activeStatus}`;
+👤 *Name:* ${user.name}
+📱 *Phone:* ${user.phone}
+📧 *Email:* ${user.email}
+🆔 *Username:* ${user.username}
+💼 *Wallet:* \`${user.walletPublicKey}\`
+🔐 *Referral:* ${result.code} (${user.referrer})
+⏳ *Status:* ${activeStatus}`;
   
       await bot.deleteMessage(chatId, msgId).catch(() => {});
       await bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
