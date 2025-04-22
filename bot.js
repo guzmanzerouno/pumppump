@@ -2391,8 +2391,7 @@ bot.on("callback_query", async (query) => {
     }
   });
 
-// ——— Función confirmSell actualizada ———
-async function confirmSell(
+  async function confirmSell(
     chatId,
     sellDetails,
     _soldAmountStr,
@@ -2461,12 +2460,12 @@ async function confirmSell(
       `✅ Sell completed ${tokenSymbol}/SOL\n` +
       `Token Price: ${tokenPrice} SOL\n` +
       `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-      `SOL PnL: ${pnlDisplay}\n` +                              // mantiene 🟢/🔻
+      `SOL PnL: ${pnlDisplay}\n` +      
       `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
       `🔗 https://solscan.io/tx/${txSignature}\n\n` +
       `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
   
-    // Limpiar sólo surrogates sueltos, sin eliminar emojis válidos
+    // Normalizar y eliminar surrogates huérfanos (no quita emojis válidos)
     shortTweetText = shortTweetText
       .normalize('NFC')
       .replace(
@@ -2474,10 +2473,10 @@ async function confirmSell(
         ""
       );
   
-    // — 2b) Construir la URL de Tweet —
+    // — 2b) URL de Tweet —
     const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
   
-    // — 3) Editamos el mensaje y añadimos botones —
+    // — 3) Editamos el mensaje de Telegram y añadimos botones —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
@@ -2487,6 +2486,7 @@ async function confirmSell(
         inline_keyboard: [
           [
             { text: "🚀 Share on X", url: tweetUrl },
+            // este botón inserta `shortTweetText` en la caja de entrada y el cliente muestra “Text copied to clipboard”
             { text: "📋 Copy Swap", switch_inline_query_current_chat: shortTweetText }
           ]
         ]
@@ -2513,12 +2513,9 @@ async function confirmSell(
     });
   }
   
-  // ——— Listener general de callback_query ———
+  // ——— Handler global para callback_query ———
+  // (sólo para "purgar" otros callbacks y no mostrar mensajes adicionales)
   bot.on("callback_query", async (query) => {
-    // Aquí tu lógica para otros callbacks (buy_, sell_, etc.)
-    // …
-  
-    // Siempre respondemos SIN TEXTO para que no aparezca otro mensaje
     await bot.answerCallbackQuery(query.id);
   });
 
