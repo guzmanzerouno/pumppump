@@ -476,6 +476,26 @@ function showPaymentButtons(chatId) {
     }
   }
 
+  function savePaymentRecord(chatId, txId, days, solAmount) {
+    const paymentsFile = "payments.json";
+    let records = [];
+  
+    if (fs.existsSync(paymentsFile)) {
+      records = JSON.parse(fs.readFileSync(paymentsFile));
+    }
+  
+    records.push({
+      chatId,
+      wallet: users[chatId].walletPublicKey,
+      tx: txId,
+      amountSol: solAmount,
+      days,
+      timestamp: Date.now()
+    });
+  
+    fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
+  }
+
 bot.onText(/\/payments/, (msg) => {
   const chatId = msg.chat.id;
 
