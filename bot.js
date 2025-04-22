@@ -510,181 +510,246 @@ bot.onText(/\/payments/, (msg) => {
   bot.sendMessage(chatId, message, { parse_mode: "Markdown", disable_web_page_preview: true });
 });
 
+// ────────────────────────────────
+// 1) Comando /start y paso inicial
+// ────────────────────────────────
 bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
-  const firstName = msg.from.first_name || "there";
-
-  if (users[chatId]?.walletPublicKey) {
-    const expired = users[chatId].expired;
-    const stillActive = expired === "never" || (expired && Date.now() < expired);
-
-    users[chatId].subscribed = stillActive; // Actualizar el campo subscribed
-    saveUsers();
-
-    if (stillActive) {
-      return bot.sendMessage(chatId, `✅ You are already registered, *${firstName}*!`, {
-        parse_mode: "Markdown"
-      });
+    const chatId = msg.chat.id;
+    const firstName = msg.from.first_name || "there";
+  
+    if (users[chatId]?.walletPublicKey) {
+      const expired = users[chatId].expired;
+      const stillActive = expired === "never" || (expired && Date.now() < expired);
+      users[chatId].subscribed = stillActive;
+      saveUsers();
+  
+      if (stillActive) {
+        return bot.sendMessage(chatId, `✅ You are already registered, *${firstName}*!`, { parse_mode: "Markdown" });
+      }
+      return bot.sendMessage(chatId, 
+        `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`, 
+        { parse_mode: "Markdown" }
+      ).then(() => showPaymentButtons(chatId));
     }
-
-    return bot.sendMessage(chatId, `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`, {
-      parse_mode: "Markdown"
-    }).then(() => showPaymentButtons(chatId));
-  }
-
-  users[chatId] = { step: 1, name: firstName };
-  saveUsers();
-
-  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *GEM*SNIPING Bot.\n\n📱 Please enter your *phone number*:`, {
-    parse_mode: "Markdown"
+  
+    // nuevo usuario
+    users[chatId] = { step: 1, name: firstName };
+    saveUsers();
+  
+    const m = await bot.sendMessage(chatId,
+      `👋 Hello *${firstName}*! Welcome to *GEMSNIPING Bot*.\n\n📱 Please enter your *phone number*:`, 
+      { parse_mode: "Markdown" }
+    );
+    users[chatId].msgId = m.message_id;
+    saveUsers();
   });
-
-  users[chatId].msgId = sent.message_id;
-  saveUsers();
-});
-
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text?.trim();
-  const messageId = msg.message_id;
-
-  if (!users[chatId] || !users[chatId].step) return;
-
-  bot.deleteMessage(chatId, messageId).catch(() => {});
-
-  const user = users[chatId];
-  const msgId = user.msgId;
-
-  switch (user.step) {
-    case 1:
-      user.phone = text;
-      user.step = 2;
-      saveUsers();
-      bot.editMessageText("📧 Please enter your *email address*:", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
-      break;
-
-    case 2:
-      user.email = text;
-      user.step = 3;
-      saveUsers();
-      bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
-      break;
-
-    case 3:
-      try {
-        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-        user.privateKey = text;
-        user.walletPublicKey = keypair.publicKey.toBase58();
+  
+  
+  // ────────────────────────────────
+  // 2) Handler de mensajes por paso
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text?.trim();
+    const messageId = msg.message_id;
+  
+    if (!users[chatId] || !users[chatId].step) return;
+    const user = users[chatId];
+    const msgId = user.msgId;
+  
+    // limpiamos el input del usuario
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+  
+    switch (user.step) {
+      case 1:
+        // 📱 PHONE
+        user.phone = text;
+        user.step = 2;
+        saveUsers();
+        await bot.editMessageText("📧 Please enter your *email address*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
+  
+      case 2:
+        // 📧 EMAIL
+        user.email = text;
+        user.step = 3;
+        saveUsers();
+        await bot.editMessageText("🆔 Please choose a *username*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
+  
+      case 3:
+        // 🆔 USERNAME
+        user.username = text;
         user.step = 4;
         saveUsers();
-
-        bot.editMessageText("🎟️ Do you have a *referral code*? Reply with Yes or No.", {
+        await bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
           chat_id: chatId,
           message_id: msgId,
           parse_mode: "Markdown"
         });
-      } catch (err) {
-        bot.editMessageText("❌ Invalid private key. Please try again:", {
-          chat_id: chatId,
-          message_id: msgId
-        });
-      }
-      break;
-
-    case 4:
-      if (/^yes$/i.test(text)) {
-        user.step = 5;
-        saveUsers();
-        bot.editMessageText("🔠 Please enter your *referral code*:", {
+        break;
+  
+      case 4:
+        // 🔑 PRIVATE KEY
+        try {
+          const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+          user.privateKey = text;
+          user.walletPublicKey = keypair.publicKey.toBase58();
+          user.step = 5;
+          saveUsers();
+  
+          // ahora preguntamos por referral con botones
+          await bot.editMessageText(
+            "🎟️ Do you have a *referral code*?",
+            {
+              chat_id: chatId,
+              message_id: msgId,
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "✅ YES", callback_data: "referral_yes" },
+                    { text: "❌ NO",   callback_data: "referral_no"  }
+                  ]
+                ]
+              }
+            }
+          );
+        } catch (err) {
+          await bot.editMessageText("❌ Invalid private key. Please try again:", {
+            chat_id: chatId,
+            message_id: msgId
+          });
+        }
+        break;
+  
+      // los pasos de código de referral ya no se manejan aquí,
+      // pasan a callback_query abajo
+  
+      default:
+        break;
+    }
+  });
+  
+  
+  // ────────────────────────────────
+  // 3) Handler de Yes/No para referral
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    const data   = query.data;
+    const user   = users[chatId];
+  
+    // YES: pedimos el código
+    if (data === "referral_yes") {
+      user.step = 6;
+      saveUsers();
+      await bot.editMessageText("🔠 Please enter your *referral code*:", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery(query.id);
+    }
+  
+    // NO: forzamos compra de suscripción
+    if (data === "referral_no") {
+      user.expired = null;
+      user.step = 0;
+      user.subscribed = false;
+      saveUsers();
+  
+      await bot.editMessageText(
+        "⚠️ No referral code provided. Please *purchase a subscription* to activate your account.",
+        {
           chat_id: chatId,
           message_id: msgId,
           parse_mode: "Markdown"
-        });
-      } else {
-        user.expired = null;
-        user.step = 0;
-        user.subscribed = false;
-        saveUsers();
-    
-        // 🔄 Primero editamos el mensaje actual con advertencia
-        await bot.editMessageText("⚠️ No referral code provided. Please *purchase a subscription* to activate your account.", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-    
-        // 💳 Mostramos el mensaje con los planes y guardamos el message_id
-        const paymentMsg = await showPaymentButtons(chatId);
-        user.lastPaymentMsgId = paymentMsg.message_id;
-        saveUsers();
-    
-        // ⏳ Pausa breve para evitar conflictos al borrar
-        await new Promise(res => setTimeout(res, 300));
-    
-        // 🗑️ Borramos el mensaje anterior (el de advertencia)
-        await bot.deleteMessage(chatId, msgId);
-      }
-      break;
-
-      case 5:
-  const result = validateReferralCode(text);
-  if (result.valid) {
-    user.referrer = result.referrer || "Unknown";
-    user.rcode = result.code;
-    user.expired = result.expiration;
-    user.step = 0;
-    user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
-
-    saveUsers();
-
-    const activeStatus = result.expiration === "never"
-      ? "✅ Unlimited"
-      : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
-
-    const confirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${result.code} (${user.referrer})
-⏳ *Status:* ${activeStatus}`;
-
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-
-    bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-      caption: confirmation,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-          [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
-        ]
-      }
-    });
-
-  } else {
-    user.expired = null;
-    user.step = 0;
-    user.subscribed = false;
-    saveUsers();
-
-    bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown"
-    }).then(() => showPaymentButtons(chatId));
-  }
-  break;
-  }
-});
+        }
+      );
+      const paymentMsg = await showPaymentButtons(chatId);
+      user.lastPaymentMsgId = paymentMsg.message_id;
+      saveUsers();
+  
+      // evitamos parpadeos
+      setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 300);
+      return bot.answerCallbackQuery(query.id);
+    }
+  
+    // respondemos otros callbacks sin texto
+    await bot.answerCallbackQuery(query.id);
+  });
+  
+  
+  // ────────────────────────────────
+  // 4) Handler de referral code (step 6)
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text?.trim();
+    const messageId = msg.message_id;
+    const user = users[chatId];
+    if (!user || user.step !== 6) return;
+  
+    // borramos input
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+  
+    const msgId = user.msgId;
+    const result = validateReferralCode(text);
+    if (result.valid) {
+      user.referrer   = result.referrer || "Unknown";
+      user.rcode      = result.code;
+      user.expired    = result.expiration;
+      user.step       = 0;
+      user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
+      saveUsers();
+  
+      const activeStatus = result.expiration === "never"
+        ? "✅ Unlimited"
+        : `✅ Active for ${Math.ceil((result.expiration - Date.now())/(1000*60*60*24))} day(s)`;
+  
+      const confirmation = `✅ *User Registered!*
+  👤 *Name:* ${user.name}
+  📱 *Phone:* ${user.phone}
+  📧 *Email:* ${user.email}
+  🆔 *Username:* ${user.username}
+  💼 *Wallet:* \`${user.walletPublicKey}\`
+  🔐 *Referral:* ${result.code} (${user.referrer})
+  ⏳ *Status:* ${activeStatus}`;
+  
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      await bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+        caption: confirmation,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
+            [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+          ]
+        }
+      });
+    } else {
+      // código inválido
+      user.expired    = null;
+      user.step       = 0;
+      user.subscribed = false;
+      saveUsers();
+      await bot.editMessageText(
+        "⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.",
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+      );
+      showPaymentButtons(chatId);
+    }
+  });
 
 // ✅ Funciones para manejo de códigos
 function loadRcodes() {
