@@ -2391,153 +2391,129 @@ bot.on("callback_query", async (query) => {
     }
   });
 
-// En tu scope global, mapea cada chatId a su texto de copia pendiente:
-const copySwapMap = {};  
-
-async function confirmSell(
-  chatId,
-  sellDetails,
-  _soldAmountStr,
-  messageId,
-  txSignature,
-  expectedTokenMint
-) {
-  const solPrice = await getSolPriceUSD();
-
-  // — Parsear cantidades —
-  const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
-  const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
-
-  // — Calcular PnL —
-  let pnlDisplay = "N/A";
-  const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
-  if (ref?.solBeforeBuy != null) {
-    const pnlSol = gotSol - ref.solBeforeBuy;
-    const emoji  = pnlSol >= 0 ? "🟢" : "🔻";
-    const usdPnL = solPrice != null ? pnlSol * solPrice : null;
-    pnlDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL` +
-      (usdPnL != null
-        ? ` (USD ${usdPnL >= 0 ? "+" : "-"}$${Math.abs(usdPnL).toFixed(2)})`
-        : ""
-      );
-  }
-
-  // — Precio medio y hora —
-  const tokenPrice = soldTokens > 0
-    ? (gotSol / soldTokens).toFixed(9)
-    : "N/A";
-  const now       = Date.now();
-  const utcTime   = new Date(now).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-  const estTime   = new Date(now).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
-  const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-
-  // — Balance de la wallet —
-  const rpcUrl     = getNextRpc();
-  const connection = new Connection(rpcUrl, "processed");
-  const balLam     = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
-  releaseRpc(rpcUrl);
-  const walletSol = balLam / 1e9;
-  const walletUsd = solPrice != null ? (walletSol * solPrice).toFixed(2) : "N/A";
-
-  // — Símbolo —
-  const tokenSymbol = escapeMarkdown(
-    getTokenInfo(expectedTokenMint).symbol || "Unknown"
-  );
-
-  // — 1) Mensaje completo para Telegram —
-  const confirmationMessage =
-    `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
-    `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
-    `🕒 *Time:* ${formattedTime}\n\n` +
-    `⚡️ SELL ⚡️\n` +
-    `💲 *Token Price:* ${tokenPrice} SOL\n` +
-    `💰 *SOL PnL:* ${pnlDisplay}\n\n` +
-    `💲 *Sold:* ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-    `💰 *Got:* ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n\n` +
-    `🌑 *Wallet Balance:* ${walletSol.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
-    `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
-    `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-
-  // — 2) Texto corto para compartir —
-  let shortTweetText =
-    `✅ Sell completed ${tokenSymbol}/SOL\n` +
-    `Token Price: ${tokenPrice} SOL\n` +
-    `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-    `SOL PnL: ${pnlDisplay}\n` +
-    `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
-    `🔗 https://solscan.io/tx/${txSignature}\n\n` +
-    `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
-
-  // Normalizar y eliminar surrogates huérfanos
-  shortTweetText = shortTweetText
-    .normalize('NFC')
-    .replace(
-      /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
-      ""
-    );
-
-  // Guardamos para cuando presionen "Copy Swap"
-  copySwapMap[chatId] = shortTweetText;
-
-  // — 2b) URL de Tweet —
-  const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
-
-  // — 3) Editamos el mensaje de Telegram y añadimos botones —
-  await bot.editMessageText(confirmationMessage, {
-    chat_id: chatId,
-    message_id: messageId,
-    parse_mode: "Markdown",
-    disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "🚀 Share on X", url: tweetUrl },
-          { text: "📋 Copy Swap", callback_data: "copy_swap" }
-        ]
-      ]
-    }
-  });
-
-  // — 4) Guardar estado de referencia y swap —
-  buyReferenceMap[chatId][expectedTokenMint] = {
-    ...buyReferenceMap[chatId][expectedTokenMint],
+  async function confirmSell(
+    chatId,
+    sellDetails,
+    _soldAmountStr,
+    messageId,
     txSignature,
-    time: Date.now()
-  };
-  saveSwap(chatId, "Sell", {
-    "Sell completed successfully": true,
-    Pair:         `${tokenSymbol}/SOL`,
-    Sold:         `${soldTokens.toFixed(3)} ${tokenSymbol}`,
-    Got:          `${gotSol.toFixed(9)} SOL`,
-    "Token Price":`${tokenPrice} SOL`,
-    "SOL PnL":    pnlDisplay,
-    Time:         formattedTime,
-    Transaction:  `https://solscan.io/tx/${txSignature}`,
-    Wallet:       sellDetails.walletAddress,
-    messageText:  confirmationMessage
-  });
-}
-
-// ——— Handler global para callback_query ———
-bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-
-  if (query.data === "copy_swap") {
-    // 1) Toast personalizado
-    await bot.answerCallbackQuery(query.id, { text: "Text copied to clipboard" });
-    // 2) Envío el texto para que el usuario lo copie manualmente
-    const textToCopy = copySwapMap[chatId] || "";
-    if (textToCopy) {
-      await bot.sendMessage(chatId, textToCopy, { disable_web_page_preview: true });
+    expectedTokenMint
+  ) {
+    const solPrice = await getSolPriceUSD();
+  
+    // — Parsear cantidades —
+    const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
+    const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
+  
+    // — Calcular PnL —
+    let pnlDisplay = "N/A";
+    const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
+    if (ref?.solBeforeBuy != null) {
+      const pnlSol = gotSol - ref.solBeforeBuy;
+      const emoji  = pnlSol >= 0 ? "🟢" : "🔻";
+      const usdPnL = solPrice != null ? pnlSol * solPrice : null;
+      pnlDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL` +
+        (usdPnL != null
+          ? ` (USD ${usdPnL >= 0 ? "+" : "-"}$${Math.abs(usdPnL).toFixed(2)})`
+          : ""
+        );
     }
-    return;
+  
+    // — Precio medio y hora —
+    const tokenPrice = soldTokens > 0
+      ? (gotSol / soldTokens).toFixed(9)
+      : "N/A";
+    const now       = Date.now();
+    const utcTime   = new Date(now).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime   = new Date(now).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+    const formattedTime = `${utcTime} UTC | ${estTime} EST`;
+  
+    // — Balance de la wallet —
+    const rpcUrl     = getNextRpc();
+    const connection = new Connection(rpcUrl, "processed");
+    const balLam     = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
+    releaseRpc(rpcUrl);
+    const walletSol = balLam / 1e9;
+    const walletUsd = solPrice != null ? (walletSol * solPrice).toFixed(2) : "N/A";
+  
+    // — Símbolo —
+    const tokenSymbol = escapeMarkdown(
+      getTokenInfo(expectedTokenMint).symbol || "Unknown"
+    );
+  
+    // — 1) Mensaje completo para Telegram —
+    const confirmationMessage =
+      `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
+      `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
+      `🕒 *Time:* ${formattedTime}\n\n` +
+      `⚡️ SELL ⚡️\n` +
+      `💲 *Token Price:* ${tokenPrice} SOL\n` +
+      `💰 *SOL PnL:* ${pnlDisplay}\n\n` +
+      `💲 *Sold:* ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `💰 *Got:* ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n\n` +
+      `🌑 *Wallet Balance:* ${walletSol.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
+      `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
+      `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
+  
+    // — 2) Texto corto para compartir (shortTweetText) —
+    let shortTweetText =
+      `✅ Sell completed ${tokenSymbol}/SOL\n` +
+      `Token Price: ${tokenPrice} SOL\n` +
+      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `SOL PnL: ${pnlDisplay}\n` +
+      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
+      `🔗 https://solscan.io/tx/${txSignature}\n\n` +
+      `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
+  
+    // Normalizar y limpiar posibles surrogates huérfanos
+    shortTweetText = shortTweetText
+      .normalize('NFC')
+      .replace(
+        /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
+        ""
+      );
+  
+    // — 2b) URL de Tweet —
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
+  
+    // — 3) Editamos el mensaje de Telegram y añadimos botones —
+    await bot.editMessageText(confirmationMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🚀 Share on X", url: tweetUrl },
+            {
+              text: "📋 Copy Swap",
+              switch_inline_query_current_chat: shortTweetText
+            }
+          ]
+        ]
+      }
+    });
+  
+    // — 4) Guardar estado de referencia y swap —
+    buyReferenceMap[chatId][expectedTokenMint] = {
+      ...buyReferenceMap[chatId][expectedTokenMint],
+      txSignature,
+      time: Date.now()
+    };
+    saveSwap(chatId, "Sell", {
+      "Sell completed successfully": true,
+      Pair:         `${tokenSymbol}/SOL`,
+      Sold:         `${soldTokens.toFixed(3)} ${tokenSymbol}`,
+      Got:          `${gotSol.toFixed(9)} SOL`,
+      "Token Price":`${tokenPrice} SOL`,
+      "SOL PnL":    pnlDisplay,
+      Time:         formattedTime,
+      Transaction:  `https://solscan.io/tx/${txSignature}`,
+      Wallet:       sellDetails.walletAddress,
+      messageText:  confirmationMessage
+    });
   }
-
-  // …otros callback_data handling si hace falta…
-
-  // Purgar spinner para callbacks que no devolvimos text
-  await bot.answerCallbackQuery(query.id);
-});
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
