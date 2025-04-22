@@ -301,132 +301,168 @@ function saveUsers() {
 }
 
 function isUserActive(user) {
-  const active = user.expired === "never" || Date.now() < user.expired;
-  user.subscribed = active;
-  saveUsers();
-  return active;
-}
-
-function showPaymentButtons(chatId) {
-  return bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-    caption: "💳 Please select a subscription plan:",
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "1 Day - 0.05 SOL", callback_data: "pay_1d" }],
-        [{ text: "15 Days - 0.60 SOL", callback_data: "pay_15d" }],
-        [{ text: "1 Month - 1.10 SOL", callback_data: "pay_month" }],
-        [{ text: "6 Months - 6.00 SOL", callback_data: "pay_6m" }],
-        [{ text: "1 Year - 11.00 SOL", callback_data: "pay_year" }]
-      ]
-    }
-  });
-}
-
-async function activateMembership(chatId, days, solAmount) {
-  const user = users[chatId];
-  const now = Date.now();
-  const expiration = now + days * 24 * 60 * 60 * 1000;
-
-  const sender = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-  const receiver = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
-
-  const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-
-  // ✅ Verificamos fondos suficientes
-  const balance = await connection.getBalance(sender.publicKey);
-  if (balance < solAmount * 1e9) {
-    return bot.sendMessage(chatId, `❌ *Insufficient funds.*\nYour wallet has ${(balance / 1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`, {
-      parse_mode: "Markdown"
-    });
-  }
-
-  // ✅ Mostramos "Processing Payment..."
-  const processingMsg = await bot.sendMessage(chatId, "🕐 *Processing your payment...*", {
-    parse_mode: "Markdown"
-  });
-
-  try {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
-        toPubkey: receiver,
-        lamports: solAmount * 1e9
-      })
-    );
-
-    const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
-
-user.expired = expiration;
-user.subscribed = true;
-saveUsers();
-savePaymentRecord(chatId, sig, days, solAmount);
-
-const expirationDate = new Date(expiration).toLocaleDateString();
-const now = Date.now();
-const statusLine = expiration === "never"
-  ? "✅ Unlimited"
-  : `✅ Active for ${Math.round((expiration - now) / (1000 * 60 * 60 * 24))} day(s)`;
-
-// ✅ Texto final unificado para el caption del mensaje con imagen
-const fullConfirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${user.rcode || "None"}
-⏳ *Status:* ${statusLine}`;
-
-// ✅ Editamos el mensaje anterior con una imagen + caption
-await bot.editMessageMedia(
-  {
-    type: "photo",
-    media: "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
-    caption: fullConfirmation,
-    parse_mode: "Markdown"
-  },
-  {
-    chat_id: chatId,
-    message_id: processingMsg.message_id,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-        [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
-      ]
-    }
-  }
-);
-
-// ✅ Eliminar mensaje de botones de pago anterior si existe
-if (user.lastPaymentMsgId) {
-  try {
-    await bot.deleteMessage(chatId, user.lastPaymentMsgId);
-    user.lastPaymentMsgId = null;
+    const active = user.expired === "never" || Date.now() < user.expired;
+    user.subscribed = active;
     saveUsers();
-  } catch (err) {
-    console.error("⚠️ No se pudo borrar el mensaje de pago:", err.message);
+    return active;
   }
-}
-
-// ✅ Notificación al admin
-const adminMsg = `✅ *Payment received successfully!*
-👤 *User:* ${user.name || "Unknown"}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-💳 *Paid:* ${solAmount} SOL for ${days} days
-🗓️ *Expires:* ${expirationDate}
-🔗 [View Tx](https://solscan.io/tx/${sig})`;
-
-bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
-  parse_mode: "Markdown",
-  disable_web_page_preview: true
-});
-
-  } catch (err) {
-    bot.editMessageText(`❌ Transaction failed: ${err.message}`, {
-      chat_id: chatId,
-      message_id: processingMsg.message_id
-    });
+  
+  function showPaymentButtons(chatId) {
+    return bot.sendPhoto(chatId,
+      "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+      {
+        caption: "💳 Please select a subscription plan:",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "1 Day – 0.05 SOL",    callback_data: "pay_1d"    }],
+            [{ text: "15 Days – 0.60 SOL",  callback_data: "pay_15d"  }],
+            [{ text: "1 Month – 1.10 SOL",  callback_data: "pay_month" }],
+            [{ text: "6 Months – 6.00 SOL", callback_data: "pay_6m"    }],
+            [{ text: "1 Year – 11.00 SOL",  callback_data: "pay_year"  }]
+          ]
+        }
+      }
+    );
   }
-}
+  
+  async function activateMembership(chatId, days, solAmount) {
+    const user       = users[chatId];
+    const now        = Date.now();
+    const expiration = now + days * 24 * 60 * 60 * 1000;
+  
+    const sender   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const receiver = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
+    const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+    // 1) Verificar fondos
+    const balance = await connection.getBalance(sender.publicKey);
+    if (balance < solAmount * 1e9) {
+      return bot.sendMessage(chatId,
+        `❌ *Insufficient funds.*\nYour wallet has ${(balance/1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`,
+        { parse_mode: "Markdown" }
+      );
+    }
+  
+    // 2) Procesando...
+    const processingMsg = await bot.sendMessage(chatId,
+      "🕐 *Processing your payment...*", { parse_mode: "Markdown" }
+    );
+  
+    try {
+      // 3) Transferencia en cadena
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: sender.publicKey,
+          toPubkey:   receiver,
+          lamports:   solAmount * 1e9
+        })
+      );
+      const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
+  
+      // 4) Actualizar usuario y UI
+      user.expired    = expiration;
+      user.subscribed = true;
+      saveUsers();
+      savePaymentRecord(chatId, sig, days, solAmount);
+  
+      const expirationDate = new Date(expiration).toLocaleDateString();
+      const statusLine = `✅ Active for ${Math.round((expiration - now)/(1000*60*60*24))} day(s)`;
+  
+      const fullConfirmation =
+        `✅ *User Registered!*\n` +
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* ${user.rcode || "None"}\n` +
+        `⏳ *Status:* ${statusLine}`;
+  
+      await bot.editMessageMedia(
+        { type: "photo", media:
+          "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+          caption: fullConfirmation,
+          parse_mode: "Markdown"
+        },
+        {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "⚙️ Settings",    callback_data: "settings_menu" }],
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+            ]
+          }
+        }
+      );
+  
+      // 5) Borrar viejos botones
+      if (user.lastPaymentMsgId) {
+        try {
+          await bot.deleteMessage(chatId, user.lastPaymentMsgId);
+          user.lastPaymentMsgId = null;
+          saveUsers();
+        } catch {}
+      }
+  
+      // 6) Notificar a admin
+      const adminMsg =
+        `✅ *Payment received successfully!*\n` +
+        `👤 *User:* ${user.name || "Unknown"}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `💳 *Paid:* ${solAmount} SOL for ${days} days\n` +
+        `🗓️ *Expires:* ${expirationDate}\n` +
+        `🔗 [View Tx](https://solscan.io/tx/${sig})`;
+  
+      bot.sendMessage(ADMIN_CHAT_ID, adminMsg,
+        { parse_mode: "Markdown", disable_web_page_preview: true }
+      );
+    } catch (err) {
+      await bot.editMessageText(
+        `❌ Transaction failed: ${err.message}`,
+        { chat_id: chatId, message_id: processingMsg.message_id }
+      );
+    }
+  }
+  
+  // ────────────────────────────────
+  // Handler global de callback_query
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId    = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data      = query.data;
+  
+    // Menú Settings
+    if (data === "settings_menu") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageReplyMarkup({
+        inline_keyboard: [
+          [{ text: "🚀 Auto‑Buy",      callback_data: "open_autobuy"    }],
+          [{ text: "⚡️ ATA Mode",     callback_data: "open_ata"        }],
+          [{ text: "🔒 Close Empty ATAs", callback_data: "open_close_atas" }]
+        ]
+      }, { chat_id: chatId, message_id });
+    }
+  
+    // Redirigir a tus comandos existentes
+    if (data === "open_autobuy") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/autobuy");
+    }
+    if (data === "open_ata") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/ata");
+    }
+    if (data === "open_close_atas") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/close");
+    }
+  
+    // Otros callbacks… siempre contestar para quitar spinner
+    await bot.answerCallbackQuery(query.id);
+  });
 
 function savePaymentRecord(chatId, txId, days, solAmount) {
   const paymentsFile = "payments.json";
@@ -690,22 +726,23 @@ bot.onText(/\/start/, async (msg) => {
   });
   
   
-  // ────────────────────────────────
-  // 4) Handler de referral code (step 6)
-  // ────────────────────────────────
-  bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text?.trim();
-    const messageId = msg.message_id;
-    const user = users[chatId];
+// ────────────────────────────────
+// 4) Handler de referral code (step 6)
+// ────────────────────────────────
+bot.on("message", async (msg) => {
+    const chatId   = msg.chat.id;
+    const text     = msg.text?.trim();
+    const messageId= msg.message_id;
+    const user     = users[chatId];
     if (!user || user.step !== 6) return;
   
-    // borramos input
+    // borramos input del usuario
     await bot.deleteMessage(chatId, messageId).catch(() => {});
-  
     const msgId = user.msgId;
+  
     const result = validateReferralCode(text);
     if (result.valid) {
+      user.username   = user.username;      // asumiendo que ya la capturaste antes
       user.referrer   = result.referrer || "Unknown";
       user.rcode      = result.code;
       user.expired    = result.expiration;
@@ -718,16 +755,16 @@ bot.onText(/\/start/, async (msg) => {
         : `✅ Active for ${Math.ceil((result.expiration - Date.now())/(1000*60*60*24))} day(s)`;
   
       const confirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-🆔 *Username:* ${user.username}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${result.code} (${user.referrer})
-⏳ *Status:* ${activeStatus}`;
+  👤 *Name:* ${user.name}
+  📱 *Phone:* ${user.phone}
+  📧 *Email:* ${user.email}
+  🆔 *Username:* ${user.username}
+  💼 *Wallet:* \`${user.walletPublicKey}\`
+  🔐 *Referral:* ${result.code} (${user.referrer})
+  ⏳ *Status:* ${activeStatus}`;
   
       await bot.deleteMessage(chatId, msgId).catch(() => {});
-      await bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+      await bot.sendPhoto(chatId, "https://cdn.shopify.com/…/pumppay.jpg", {
         caption: confirmation,
         parse_mode: "Markdown",
         reply_markup: {
@@ -738,7 +775,7 @@ bot.onText(/\/start/, async (msg) => {
         }
       });
     } else {
-      // código inválido
+      // inválido
       user.expired    = null;
       user.step       = 0;
       user.subscribed = false;
@@ -749,6 +786,47 @@ bot.onText(/\/start/, async (msg) => {
       );
       showPaymentButtons(chatId);
     }
+  });
+  
+  // ────────────────────────────────
+  // 5) Handler para ⚙️ Settings
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId    = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data      = query.data;
+  
+    // Mostrar mini‑menú de Settings
+    if (data === "settings_menu") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageReplyMarkup({
+        inline_keyboard: [
+          [ { text: "🚀 Auto‑Buy", callback_data: "open_autobuy" } ],
+          [ { text: "⚡️ ATA Mode", callback_data: "open_ata" } ],
+          [ { text: "🔒 Close Empty ATAs", callback_data: "open_close_atas" } ]
+        ]
+      }, {
+        chat_id: chatId,
+        message_id
+      });
+    }
+  
+    // Cada opción vuelve a disparar tu comando ya existente
+    if (data === "open_autobuy") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/autobuy");
+    }
+    if (data === "open_ata") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/ata");
+    }
+    if (data === "open_close_atas") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/close");
+    }
+  
+    // Otros callbacks siguen aquí…
+    await bot.answerCallbackQuery(query.id);
   });
 
 // ✅ Funciones para manejo de códigos
