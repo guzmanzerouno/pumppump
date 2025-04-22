@@ -2391,7 +2391,8 @@ bot.on("callback_query", async (query) => {
     }
   });
 
-  async function confirmSell(
+// ——— Función confirmSell actualizada ———
+async function confirmSell(
     chatId,
     sellDetails,
     _soldAmountStr,
@@ -2455,45 +2456,42 @@ bot.on("callback_query", async (query) => {
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
   
-// — 2) Texto corto para el tweet (ahora incluyendo el emoji de PnL) —
-let shortTweetText =
-  `✅ Sell completed ${tokenSymbol}/SOL\n` +
-  `Token Price: ${tokenPrice} SOL\n` +
-  `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
-  `SOL PnL: ${pnlDisplay}\n` +                              // aquí mantienes 🟢/🔻
-  `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
-  `🔗 https://solscan.io/tx/${txSignature}\n\n` +           // acorté “View in Solscan” a sólo URL
-  `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
-
-// Limpiar sólo surrogates huérfanos, no emojis válidos
-shortTweetText = shortTweetText
-  .normalize('NFC')
-  .replace(
-    /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
-    ''
-  );
-
-// — 2b) Construir la URL de Tweet —
-const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
-
-// — 3) Editamos el mensaje de Telegram y añadimos el botón de compartir en X —
-await bot.editMessageText(confirmationMessage, {
-    chat_id: chatId,
-    message_id: messageId,
-    parse_mode: "Markdown",
-    disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "🚀 Share on X", url: tweetUrl },
-          {
-            text: "📋 Copy Swap",
-            switch_inline_query_current_chat: shortTweetText
-          }
+    // — 2) Texto corto para el tweet (incluye emoji PnL) —
+    let shortTweetText =
+      `✅ Sell completed ${tokenSymbol}/SOL\n` +
+      `Token Price: ${tokenPrice} SOL\n` +
+      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `SOL PnL: ${pnlDisplay}\n` +                              // mantiene 🟢/🔻
+      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
+      `🔗 https://solscan.io/tx/${txSignature}\n\n` +
+      `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
+  
+    // Limpiar sólo surrogates sueltos, sin eliminar emojis válidos
+    shortTweetText = shortTweetText
+      .normalize('NFC')
+      .replace(
+        /(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g,
+        ""
+      );
+  
+    // — 2b) Construir la URL de Tweet —
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shortTweetText)}`;
+  
+    // — 3) Editamos el mensaje y añadimos botones —
+    await bot.editMessageText(confirmationMessage, {
+      chat_id: chatId,
+      message_id: messageId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🚀 Share on X", url: tweetUrl },
+            { text: "📋 Copy Swap", switch_inline_query_current_chat: shortTweetText }
+          ]
         ]
-      ]
-    }
-  });
+      }
+    });
   
     // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
@@ -2506,7 +2504,7 @@ await bot.editMessageText(confirmationMessage, {
       Pair:         `${tokenSymbol}/SOL`,
       Sold:         `${soldTokens.toFixed(3)} ${tokenSymbol}`,
       Got:          `${gotSol.toFixed(9)} SOL`,
-      "Token Price": `${tokenPrice} SOL`,
+      "Token Price":`${tokenPrice} SOL`,
       "SOL PnL":    pnlDisplay,
       Time:         formattedTime,
       Transaction:  `https://solscan.io/tx/${txSignature}`,
@@ -2514,6 +2512,15 @@ await bot.editMessageText(confirmationMessage, {
       messageText:  confirmationMessage
     });
   }
+  
+  // ——— Listener general de callback_query ———
+  bot.on("callback_query", async (query) => {
+    // Aquí tu lógica para otros callbacks (buy_, sell_, etc.)
+    // …
+  
+    // Siempre respondemos SIN TEXTO para que no aparezca otro mensaje
+    await bot.answerCallbackQuery(query.id);
+  });
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
