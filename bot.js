@@ -390,7 +390,7 @@ await bot.editMessageMedia(
     reply_markup: {
       inline_keyboard: [
         [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-        [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+        [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
       ]
     }
   }
@@ -535,7 +535,7 @@ bot.onText(/\/start/, async (msg) => {
   users[chatId] = { step: 1, name: firstName };
   saveUsers();
 
-  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *PUMPUltra.fun Bot*.\n\n📱 Please enter your *phone number*:`, {
+  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *GEM*SNIPING Bot.\n\n📱 Please enter your *phone number*:`, {
     parse_mode: "Markdown"
   });
 
@@ -665,7 +665,7 @@ bot.on("message", async (msg) => {
       reply_markup: {
         inline_keyboard: [
           [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-          [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
+          [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
         ]
       }
     });
@@ -2478,16 +2478,22 @@ const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(sho
 
 // — 3) Editamos el mensaje de Telegram y añadimos el botón de compartir en X —
 await bot.editMessageText(confirmationMessage, {
-  chat_id: chatId,
-  message_id: messageId,
-  parse_mode: "Markdown",
-  disable_web_page_preview: true,
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "🚀 Share on X", url: tweetUrl }]
-    ]
-  }
-});
+    chat_id: chatId,
+    message_id: messageId,
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "🚀 Share on X", url: tweetUrl },
+          {
+            text: "📋 Copy Swap",
+            switch_inline_query_current_chat: shortTweetText
+          }
+        ]
+      ]
+    }
+  });
   
     // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
