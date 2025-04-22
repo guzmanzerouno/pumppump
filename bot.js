@@ -2487,7 +2487,7 @@ await bot.editMessageText(confirmationMessage, {
         [
           { text: "🚀 Share on X", url: tweetUrl },
           {
-            text: "📋 Copy to Clipboard",
+            text: "📋 Copy Swap",
             switch_inline_query_current_chat: shortTweetText
           }
         ]
