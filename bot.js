@@ -496,38 +496,55 @@ function showPaymentButtons(chatId) {
     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-bot.onText(/\/payments/, (msg) => {
-  const chatId = msg.chat.id;
-
-  if (!users[chatId] || !users[chatId].walletPublicKey) {
-    return bot.sendMessage(chatId, "❌ You must be registered to view your payment history.");
-  }
-
-  const paymentsFile = "payments.json";
-  if (!fs.existsSync(paymentsFile)) {
-    return bot.sendMessage(chatId, "📭 No payment records found.");
-  }
-
-  const records = JSON.parse(fs.readFileSync(paymentsFile));
-  const userPayments = records.filter(p => p.chatId === chatId);
-
-  if (userPayments.length === 0) {
-    return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
-  }
-
-  let message = `📜 *Your Payment History:*\n\n`;
-
-  for (let p of userPayments.reverse()) {
-    const date = new Date(p.timestamp).toLocaleDateString();
-    message += `🗓️ *${date}*\n`;
-    message += `💼 Wallet: \`${p.wallet}\`\n`;
-    message += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-    message += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-  }
-
-  bot.sendMessage(chatId, message, { parse_mode: "Markdown", disable_web_page_preview: true });
-});
-
+  bot.onText(/\/payments/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
+  
+    // 1) Borrar el mensaje del comando inmediatamente
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /payments message:", e.message);
+    }
+  
+    // 2) Comprobar registro del usuario
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(
+        chatId,
+        "❌ You must be registered to view your payment history."
+      );
+    }
+  
+    // 3) Leer archivo de pagos
+    const paymentsFile = "payments.json";
+    if (!fs.existsSync(paymentsFile)) {
+      return bot.sendMessage(chatId, "📭 No payment records found.");
+    }
+  
+    const records      = JSON.parse(fs.readFileSync(paymentsFile));
+    const userPayments = records.filter(p => p.chatId === chatId);
+  
+    if (userPayments.length === 0) {
+      return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+    }
+  
+    // 4) Construir el mensaje de historial
+    let message = `📜 *Your Payment History:*\n\n`;
+    for (const p of userPayments.reverse()) {
+      const date = new Date(p.timestamp).toLocaleDateString();
+      message += `🗓️ *${date}*\n`;
+      message += `💼 Wallet: \`${p.wallet}\`\n`;
+      message += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+      message += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+    }
+  
+    // 5) Enviar el historial
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true
+    });
+  });
 // ────────────────────────────────
 // 1) Comando /start y paso inicial
 // ────────────────────────────────
@@ -883,10 +900,19 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
 }
 
-bot.onText(/\/status/, (msg) => {
-    const chatId = msg.chat.id;
-    const user = users[chatId];
+bot.onText(/\/status/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
   
+    // 0) Borramos el mensaje de comando para no dejar rastro
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      // puede fallar si ya expiró o no tienes permiso, pero seguimos de todos modos
+      console.warn("Could not delete /status message:", e.message);
+    }
+  
+    const user = users[chatId];
     if (!user || !user.walletPublicKey) {
       return bot.sendMessage(
         chatId,
@@ -903,13 +929,15 @@ bot.onText(/\/status/, (msg) => {
       message += `✅ *Status:* Unlimited Membership\n`;
     } else if (user.expired && now < user.expired) {
       const expirationDate = new Date(user.expired).toLocaleDateString();
-      const remainingDays = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
-      message += 
+      const remainingDays  = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
+      message +=
         `✅ *Status:* Active\n` +
         `📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)\n`;
     } else {
-      const expiredDate = user.expired ? new Date(user.expired).toLocaleDateString() : "N/A";
-      message += 
+      const expiredDate = user.expired
+        ? new Date(user.expired).toLocaleDateString()
+        : "N/A";
+      message +=
         `❌ *Status:* Expired\n` +
         `📅 *Expired On:* ${expiredDate}\n`;
     }
@@ -923,7 +951,8 @@ bot.onText(/\/status/, (msg) => {
     }
     message += `🔄 *Swap Limit:* ${swapInfo}`;
   
-    bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
+    // Enviamos el estado
+    await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
   });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
