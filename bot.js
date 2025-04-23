@@ -1812,8 +1812,32 @@ function saveProcessedMints() {
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
-// Función principal que ejecuta todo el proceso de análisis
-async function analyzeTransaction(signature, forceCheck = false) {
+// ─── Helpers para envío en paralelo ───
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  }
+  /**
+   * Envía mensajes en paralelo en lotes de 28 por segundo
+   */
+  async function broadcastMessage(chatIds, text, opts = {}) {
+    const BATCH_SIZE  = 28;
+    const INTERVAL_MS = 1000;
+    const batches     = chunkArray(chatIds, BATCH_SIZE);
+    for (const batch of batches) {
+      await Promise.allSettled(batch.map(id => bot.sendMessage(id, text, opts)));
+      await sleep(INTERVAL_MS);
+    }
+  }
+  
+  // ─── Función principal actualizada ───
+  async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
     if (!forceCheck) processedSignatures.add(signature);
   
@@ -1826,11 +1850,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Pre‑creación de ATAs (fire‑and‑forget)
+    // Pre-creación de ATAs (fire-and-forget)
     preCreateATAsForToken(mintData.mintAddress)
-      .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
+      .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
   
-    // ——— AUTO‑BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
+    // ——— AUTO-BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
     for (const [chatId, user] of Object.entries(users)) {
       if (
         user.subscribed &&
@@ -1840,8 +1864,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-  
-        // Desactivar auto‑buy para no repetirlo
+        // Desactivar auto-buy para no repetirlo
         user.autoBuyEnabled = false;
         saveUsers();
   
@@ -1849,7 +1872,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           // Mensaje inicial
           const sent      = await bot.sendMessage(
             chatId,
-            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
           const messageId = sent.message_id;
   
@@ -1857,7 +1880,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
             await bot.editMessageText(
-              `❌ Auto‑Buy failed for ${mint}.`,
+              `❌ Auto-Buy failed for ${mint}.`,
               { chat_id: chatId, message_id }
             );
             continue;
@@ -1867,27 +1890,27 @@ async function analyzeTransaction(signature, forceCheck = false) {
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
         } catch (err) {
-          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
-          await bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
         }
       }
     }
   
     // ——— Resto del flujo manual de análisis ———
-    const alertMessages = {};
-    for (const userId in users) {
-      const user = users[userId];
-      if (user.subscribed && user.privateKey) {
-        try {
-          const msg = await bot.sendMessage(
-            userId,
-            "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
-            { parse_mode: "Markdown" }
-          );
-          alertMessages[userId] = msg.message_id;
-          setTimeout(() => bot.deleteMessage(userId, msg.message_id).catch(() => {}), 60_000);
-        } catch (_) {}
-      }
+    const alertTargets = Object.entries(users)
+      .filter(([, user]) => user.subscribed && user.privateKey)
+      .map(([id]) => Number(id));
+  
+    // Envío paralelo a 28 msgs/s
+    await broadcastMessage(
+      alertTargets,
+      "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
+      { parse_mode: "Markdown" }
+    );
+  
+    // Eliminamos cada alerta tras 60s (igual que antes)
+    for (const userId of alertTargets) {
+      setTimeout(() => bot.deleteMessage(userId, /*message_id no disponible*/).catch(() => {}), 60_000);
     }
   
     // 3) Obtener datos en SolanaTracker → Moralis → RugCheck
@@ -1912,7 +1935,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
   
-    // ——— AUTO‑BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
+    // ——— AUTO-BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
     for (const [chatId, user] of Object.entries(users)) {
       if (
         user.subscribed &&
@@ -1922,8 +1945,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-  
-        // Desactivar auto‑buy para no repetirlo
+        // Desactivar auto-buy para no repetirlo
         user.autoBuyEnabled = false;
         saveUsers();
   
@@ -1931,7 +1953,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           // Mensaje inicial
           const sent      = await bot.sendMessage(
             chatId,
-            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
           const messageId = sent.message_id;
   
@@ -1939,7 +1961,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
             await bot.editMessageText(
-              `❌ Auto‑Buy failed for ${mint}.`,
+              `❌ Auto-Buy failed for ${mint}.`,
               { chat_id: chatId, message_id }
             );
             continue;
@@ -1949,8 +1971,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
         } catch (err) {
-          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
-          await bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
         }
       }
     }
