@@ -1836,8 +1836,8 @@ function sleep(ms) {
     }
   }
   
-  // ─── Función principal actualizada ───
-  async function analyzeTransaction(signature, forceCheck = false) {
+ // ─── Función principal actualizada ───
+async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
     if (!forceCheck) processedSignatures.add(signature);
   
@@ -1897,58 +1897,54 @@ function sleep(ms) {
     }
   
     // ——— Resto del flujo manual de análisis ———
-
-// 1) Preparamos la lista de targets
-const alertTargets = Object.entries(users)
-.filter(([, user]) => user.subscribed && user.privateKey)
-.map(([id]) => Number(id));
-
-// 2) Disparamos todos los sendMessage en paralelo (28/s) y capturamos los message_id
-const sendPromises = alertTargets.map(chatId =>
-bot.sendMessage(
-  chatId,
-  "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
-  { parse_mode: "Markdown" }
-)
-.then(msg => ({ chatId, messageId: msg.message_id }))
-.catch(err => {
-  console.warn(`No pude alertar a ${chatId}:`, err.message);
-  return null;
-})
-);
-
-// 3) Esperamos que terminen todos los envíos
-const results = await Promise.all(sendPromises);
-
-// 4) Programamos el borrado de cada alerta tras 60 s
-for (const res of results) {
-if (res) {
-  setTimeout(() => {
-    bot.deleteMessage(res.chatId, res.messageId).catch(() => {});
-  }, 60_000);
-}
-}
-
-// ——— Ahora continúa el flow de datos y análisis ———
-const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
-if (!pairAddress) return;
-
-const dexData = await getDexScreenerData(pairAddress);
-if (!dexData) {
-// Si falla el dexData, podemos reutilizar `results` para editar individualmente
-for (const res of results) {
-  if (!res) continue;
-  await bot.editMessageText(
-    "⚠️ Token discarded due to insufficient info for analysis.",
-    {
-      chat_id: res.chatId,
-      message_id: res.messageId,
-      parse_mode: "Markdown"
+    // 1) Preparamos targets
+    const alertTargets = Object.entries(users)
+      .filter(([, u]) => u.subscribed && u.privateKey)
+      .map(([id]) => Number(id));
+  
+    // 2) Envío paralelo y capturamos {chatId,messageId}
+    const sendPromises = alertTargets.map(chatId =>
+      bot.sendMessage(
+        chatId,
+        "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
+        { parse_mode: "Markdown" }
+      )
+      .then(msg => ({ chatId, messageId: msg.message_id }))
+      .catch(() => null)
+    );
+    const alertResults = await Promise.all(sendPromises);
+  
+    // 3) Programamos borrado a los 60 s
+    for (const res of alertResults) {
+      if (res) {
+        setTimeout(() => {
+          bot.deleteMessage(res.chatId, res.messageId).catch(() => {});
+        }, 60_000);
+      }
     }
-  ).catch(() => {});
-}
-return;
-}
+  
+    // 4) Obtener datos en SolanaTracker → Moralis → RugCheck
+    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+    if (!pairAddress) return;
+  
+    const dexData = await getDexScreenerData(pairAddress);
+    if (!dexData) {
+      // si no hay dexData, editamos cada alerta
+      for (const res of alertResults) {
+        if (res) {
+          await bot.editMessageText(
+            "⚠️ Token discarded due to insufficient info for analysis.",
+            {
+              chat_id: res.chatId,
+              message_id: res.messageId,
+              parse_mode: "Markdown"
+            }
+          ).catch(() => {});
+        }
+      }
+      return;
+    }
+  
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
   
