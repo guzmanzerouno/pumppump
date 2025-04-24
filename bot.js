@@ -2035,7 +2035,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-        { text: "📊 Chart+Txns", url: `https://gemsniping.com/solana/${mint}` }
+        { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
       ],
       [
         { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
@@ -2445,7 +2445,7 @@ bot.onText(/\/autobuy/, async (msg) => {
           inline_keyboard: [
             [
                 { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-                { text: "📊 Chart+Txns", url: `https://gemsniping.com/solana/${mint}` }
+                { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
               ],
               [
                 { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
@@ -3007,7 +3007,7 @@ bot.on("callback_query", async (query) => {
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
-            { text: "📈 📊 Chart+Txns", url: `https://gemsniping.com/solana/${receivedTokenMint}` }
+            { text: "📈 📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${receivedTokenMint}` }
           ]
         ]
       }
@@ -3208,7 +3208,7 @@ async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
               { text: "💯 Sell MAX",  callback_data: `sell_${tokenMint}_100` }
             ],
             [
-              { text: "📊 Chart+Txns", url: `https://gemsniping.com/solana/${tokenMint}` }
+              { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${tokenMint}` }
             ]
           ]
         }
