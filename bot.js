@@ -2075,6 +2075,131 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   }
 
+  // En tu scope global
+const followers = {
+    // leaderChatId: Set([followerChatId, ...])
+  };
+
+  function getParticipants(leaderId) {
+    const set = followers[leaderId] || new Set();
+    return [ leaderId, ...Array.from(set) ];
+  }
+
+// /follow <leaderId>
+bot.onText(/\/follow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId] ||= new Set();
+    followers[leaderId].add(followerId);
+    bot.sendMessage(followerId, `✅ Now following ${leaderId}.`);
+  });
+  
+  // /unfollow <leaderId>
+  bot.onText(/\/unfollow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId]?.delete(followerId);
+    bot.sendMessage(followerId, `❌ Unfollowed ${leaderId}.`);
+  });
+
+// Ejecuta compra en paralelo para todos los participantes
+async function executeParallelBuy(participants, mint, amountSOL) {
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar compra
+        const txSignature = await buyToken(chatId, mint, amountSOL);
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ The purchase could not be completed.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Fetch swap details
+        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+        if (!swapDetails) {
+          return bot.editMessageText(
+            `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        await confirmBuy(chatId, swapDetails, messageId, txSignature);
+  
+      } catch (error) {
+        console.error(`Error in parallel buy for ${chatId}:`, error);
+        await bot.sendMessage(chatId, `❌ Purchase error: ${error.message || error}`);
+      }
+    }));
+  }
+  
+  // Ejecuta venta en paralelo para todos los participantes
+  async function executeParallelSell(participants, mint, sellType) {
+    const label = sellType === "50" ? "50%" : "100%";
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🔄 Processing sale of ${label} of your ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar la venta (con reintentos si quieres replicar tu lógica original)
+        let txSignature = null;
+        for (let i = 0; i < 3 && !txSignature; i++) {
+          txSignature = await sellToken(chatId, mint, sellType);
+          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ Sell failed for ${mint}. Please check server logs.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Obtener detalles (hasta 5 intentos)
+        let sellDetails = null;
+        for (let i = 0; i < 5 && !sellDetails; i++) {
+          sellDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!sellDetails) {
+          return bot.editMessageText(
+            `⚠️ Sell details could not be retrieved.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        // (si necesitas pasar el soldAmount, extráelo tal como en el handler individual)
+        await confirmSell(chatId, sellDetails, null, messageId, txSignature, mint);
+  
+      } catch (err) {
+        console.error(`Error in parallel sell for ${chatId}:`, err);
+        await bot.sendMessage(chatId, `❌ Sell error: ${err.message || err}`);
+      }
+    }));
+  }
+
  // Comando /autobuy
 bot.onText(/\/autobuy/, async (msg) => {
     const chatId   = msg.chat.id;
@@ -2487,10 +2612,18 @@ bot.on("callback_query", async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
   
-    // deshabilitar spinner inmediatamente
+    // quita el spinner
     await bot.answerCallbackQuery(query.id);
   
     const [_, expectedTokenMint, sellType] = data.split("_");
+  
+    // 1) Si tiene seguidores, hacemos parallel sell y salimos
+    const participants = getParticipants(chatId);
+    if (participants.length > 1) {
+      return executeParallelSell(participants, expectedTokenMint, sellType);
+    }
+  
+    // … de aquí en adelante, tu flujo individual EXACTO …
   
     // asegurarnos de que exista la clave
     if (!users[chatId]?.privateKey) {
@@ -2503,7 +2636,7 @@ bot.on("callback_query", async (query) => {
     if (!msgId) {
       const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
       msgId = m.message_id;
-      buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
+      buyReferenceMap[chatId] = users[chatId] = users[chatId] || {};
       buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
       buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
     }
@@ -2520,10 +2653,10 @@ bot.on("callback_query", async (query) => {
       rpcUrl = getNextRpc();
       const connection = new Connection(rpcUrl, "processed");
   
-      // 2) Ya no chequeamos ni creamos la ATA, omitimos ensureAssociatedTokenAccount
+      // 2) Omitimos ensureAssociatedTokenAccount
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
   
-      // 3) Decimales y balance (seguimos usando getTokenBalance si lo necesitas)
+      // 3) Decimales y balance
       const decimals = await getTokenDecimals(expectedTokenMint);
       const balance  = await getTokenBalance(chatId, expectedTokenMint);
       if (!balance || balance <= 0) {
@@ -2724,24 +2857,41 @@ async function confirmSell(
     await bot.answerCallbackQuery(query.id);
   });
 
-  bot.on("callback_query", async (query) => {
+
+// ——— Handler para compras (buy_) ———
+bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
     if (data.startsWith("buy_")) {
+      // 1) Quitar spinner
+      await bot.answerCallbackQuery(query.id);
+  
       const [_, mint, amountStr] = data.split("_");
       const amountSOL = parseFloat(amountStr);
-      const messageId = (await bot.sendMessage(
-        chatId,
-        `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
-      )).message_id;
   
+      // 2) Si tiene seguidores, lanzamos compras en paralelo y salimos
+      const participants = getParticipants(chatId);
+      if (participants.length > 1) {
+        await executeParallelBuy(participants, mint, amountSOL);
+        return;
+      }
+  
+      // ——— De aquí en adelante tu flujo individual EXACTO ———
+  
+      // Enviar mensaje de “processing”
+      const sentMsg = await bot.sendMessage(
+        chatId,
+        `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+      );
+      const messageId = sentMsg.message_id;
+  
+      // Validar privateKey
       if (!users[chatId]?.privateKey) {
-        await bot.editMessageText("⚠️ You don't have a registered private key. Use /start to register.", {
-          chat_id: chatId,
-          message_id
-        });
-        await bot.answerCallbackQuery(query.id);
+        await bot.editMessageText(
+          "⚠️ You don't have a registered private key. Use /start to register.",
+          { chat_id: chatId, message_id }
+        );
         return;
       }
   
@@ -2749,11 +2899,10 @@ async function confirmSell(
         // 1) Send order
         const txSignature = await buyToken(chatId, mint, amountSOL);
         if (!txSignature) {
-          await bot.editMessageText(`❌ The purchase could not be completed.`, {
-            chat_id: chatId,
-            message_id
-          });
-          await bot.answerCallbackQuery(query.id);
+          await bot.editMessageText(
+            `❌ The purchase could not be completed.`,
+            { chat_id: chatId, message_id }
+          );
           return;
         }
   
@@ -2769,11 +2918,10 @@ async function confirmSell(
               disable_web_page_preview: true
             }
           );
-          await bot.answerCallbackQuery(query.id);
           return;
         }
   
-        // 3) Final confirmation (updates the same message to the full summary)
+        // 3) Final confirmation
         await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
       } catch (error) {
@@ -2788,8 +2936,6 @@ async function confirmSell(
           message_id
         });
       }
-  
-      await bot.answerCallbackQuery(query.id);
     }
   });
 
