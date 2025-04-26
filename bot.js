@@ -2838,11 +2838,11 @@ async function confirmSell(
     expectedTokenMint
   ) {
     const solPrice = await getSolPriceUSD();
-  
+
     // — Parsear cantidades —
     const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
     const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
-  
+
     // — Calcular PnL —
     let pnlDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
@@ -2856,7 +2856,7 @@ async function confirmSell(
           : ""
         );
     }
-  
+
     // — Precio medio y hora —
     const tokenPrice = soldTokens > 0
       ? (gotSol / soldTokens).toFixed(9)
@@ -2865,7 +2865,7 @@ async function confirmSell(
     const utcTime   = new Date(now).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
     const estTime   = new Date(now).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-  
+
     // — Balance de la wallet —
     const rpcUrl     = getNextRpc();
     const connection = new Connection(rpcUrl, "processed");
@@ -2873,12 +2873,12 @@ async function confirmSell(
     releaseRpc(rpcUrl);
     const walletSol = balLam / 1e9;
     const walletUsd = solPrice != null ? (walletSol * solPrice).toFixed(2) : "N/A";
-  
+
     // — Símbolo —
     const tokenSymbol = escapeMarkdown(
       getTokenInfo(expectedTokenMint).symbol || "Unknown"
     );
-  
+
     // — 1) Mensaje completo para Telegram —
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
@@ -2892,7 +2892,7 @@ async function confirmSell(
       `🌑 *Wallet Balance:* ${walletSol.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-  
+
     // — 2) Texto corto para compartir en X/WhatsApp —
     let shareText =
       `✅ Sell completed ${tokenSymbol}/SOL\n` +
@@ -2902,16 +2902,14 @@ async function confirmSell(
       `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
       `🔗 https://solscan.io/tx/${txSignature}\n\n` +
       `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
-  
-    // Normalizar y quitar surrogates huérfanos
+
     shareText = shareText
       .normalize('NFC')
       .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
-  
-    // URLs de compartir
+
     const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
     const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-  
+
     // — 3) Editamos el mensaje y añadimos botones —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
@@ -2921,13 +2919,13 @@ async function confirmSell(
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🚀 Share on X",      url: tweetUrl },
-            { text: "💬 WhatsApp", url: waUrl }
+            { text: "🚀 Share on X", url: tweetUrl },
+            { text: "💬 WhatsApp",    url: waUrl }
           ]
         ]
       }
     });
-  
+
     // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
@@ -2946,13 +2944,19 @@ async function confirmSell(
       Wallet:       sellDetails.walletAddress,
       messageText:  confirmationMessage
     });
+
+    // — 5) Limpiar el flag de “en trade” para que pauseDuringTrade vuelva a notificar —
+    try {
+      if (buyReferenceMap[chatId] && buyReferenceMap[chatId][expectedTokenMint]) {
+        delete buyReferenceMap[chatId][expectedTokenMint];
+        if (Object.keys(buyReferenceMap[chatId]).length === 0) {
+          delete buyReferenceMap[chatId];
+        }
+      }
+    } catch (e) {
+      console.warn("Error limpiando buyReferenceMap:", e);
+    }
   }
-  
-  // ——— Listener general de callback_query ———
-  bot.on("callback_query", async (query) => {
-    // …otros handlers…
-    await bot.answerCallbackQuery(query.id);
-  });
 
 
   bot.on("callback_query", async (query) => {
