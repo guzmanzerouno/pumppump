@@ -1841,24 +1841,21 @@ function sleep(ms) {
     const chatId   = msg.chat.id;
     const cmdMsgId = msg.message_id;
   
-    // 1) Borrar el mensaje del comando
     try {
       await bot.deleteMessage(chatId, cmdMsgId);
-    } catch (e) {
-      console.warn("Could not delete /notifications message:", e.message);
-    }
+    } catch {}
   
-    // 2) Mostrar menú de notificaciones
-    return bot.sendMessage(chatId,
+    return bot.sendMessage(
+      chatId,
       "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
       "You can pause alerts during a buy/sell process to avoid distractions,  \n" +
       "or turn them off completely and re-enable whenever you like.",
       {
         reply_markup: {
           inline_keyboard: [
-            [ { text: "✅ Always On",        callback_data: "notif_always" } ],
-            [ { text: "⏸ Pause During Trade", callback_data: "notif_pause" } ],
-            [ { text: "❌ Turn Off",         callback_data: "notif_off" } ]
+            [ { text: "✅ Always On",         callback_data: "notif_always" } ],
+            [ { text: "⏸ Pause During Trade", callback_data: "notif_pause"  } ],
+            [ { text: "❌ Turn Off",          callback_data: "notif_off"    } ]
           ]
         }
       }
@@ -1876,35 +1873,35 @@ function sleep(ms) {
         "You can pause alerts during a buy/sell process to avoid distractions,  \n" +
         "or turn them off completely and re-enable whenever you like.",
         {
-          chat_id,
-          message_id: query.message.message_id,
+          chat_id: chatId,                         // 👈 aquí
+          message_id: query.message.message_id,    // 👈 y aquí
           reply_markup: {
             inline_keyboard: [
-              [ { text: "✅ Always On",        callback_data: "notif_always" } ],
-              [ { text: "⏸ Pause During Trade", callback_data: "notif_pause" } ],
-              [ { text: "❌ Turn Off",         callback_data: "notif_off" } ]
+              [ { text: "✅ Always On",         callback_data: "notif_always" } ],
+              [ { text: "⏸ Pause During Trade", callback_data: "notif_pause"  } ],
+              [ { text: "❌ Turn Off",          callback_data: "notif_off"    } ]
             ]
           }
         }
       );
     }
   
-    if (["notif_always", "notif_pause", "notif_off"].includes(data)) {
-      users[chatId] = users[chatId] || {};
+    if (["notif_always","notif_pause","notif_off"].includes(data)) {
+      users[chatId] = users[chatId]||{};
       users[chatId].newTokenNotif =
-        data === "notif_always" ? "always" :
-        data === "notif_pause"  ? "pauseDuringTrade" :
-        "off";
+        data === "notif_always"       ? "always" :
+        data === "notif_pause"        ? "pauseDuringTrade" :
+                                        "off";
       saveUsers();
   
       const labels = {
-        always:             "✅ Notifications always on",
-        pauseDuringTrade:   "⏸ Notifications paused during trade",
-        off:                "❌ Notifications turned off"
+        always:           "✅ Notifications always on",
+        pauseDuringTrade: "⏸ Notifications paused during trade",
+        off:              "❌ Notifications turned off"
       };
       await bot.editMessageText(labels[users[chatId].newTokenNotif], {
-        chat_id,
-        message_id: query.message.message_id,
+        chat_id:   chatId,                            // 👈 aquí también
+        message_id: query.message.message_id,         // 👈 y aquí
         parse_mode: "Markdown"
       });
       return bot.answerCallbackQuery();
