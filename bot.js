@@ -959,9 +959,10 @@ bot.onText(/\/status/, async (msg) => {
 bot.setMyCommands([
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
+    { command: 'notifications', description: '🔔 Configure New Token alerts' },
     { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
     { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
-    { command: 'payments',  description: '💳 Show your payment history' },
+    { command: 'payments',  description: '💳 Show your payment history' }
 ]);
 
 // 🔹 Conexión WebSocket con reconexión automática
@@ -1835,7 +1836,83 @@ function sleep(ms) {
       await sleep(INTERVAL_MS);
     }
   }
+
+  bot.onText(/\/notifications/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
   
+    // 1) Borrar el mensaje del comando
+    try {
+      await bot.deleteMessage(chatId, cmdMsgId);
+    } catch (e) {
+      console.warn("Could not delete /notifications message:", e.message);
+    }
+  
+    // 2) Mostrar menú de notificaciones
+    return bot.sendMessage(chatId,
+      "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
+      "You can pause alerts during a buy/sell process to avoid distractions,  \n" +
+      "or turn them off completely and re-enable whenever you like.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [ { text: "✅ Always On",        callback_data: "notif_always" } ],
+            [ { text: "⏸ Pause During Trade", callback_data: "notif_pause" } ],
+            [ { text: "❌ Turn Off",         callback_data: "notif_off" } ]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.on("callback_query", async query => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    if (data === "open_new_token_notif") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageText(
+        "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
+        "You can pause alerts during a buy/sell process to avoid distractions,  \n" +
+        "or turn them off completely and re-enable whenever you like.",
+        {
+          chat_id,
+          message_id: query.message.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [ { text: "✅ Always On",        callback_data: "notif_always" } ],
+              [ { text: "⏸ Pause During Trade", callback_data: "notif_pause" } ],
+              [ { text: "❌ Turn Off",         callback_data: "notif_off" } ]
+            ]
+          }
+        }
+      );
+    }
+  
+    if (["notif_always", "notif_pause", "notif_off"].includes(data)) {
+      users[chatId] = users[chatId] || {};
+      users[chatId].newTokenNotif =
+        data === "notif_always" ? "always" :
+        data === "notif_pause"  ? "pauseDuringTrade" :
+        "off";
+      saveUsers();
+  
+      const labels = {
+        always:             "✅ Notifications always on",
+        pauseDuringTrade:   "⏸ Notifications paused during trade",
+        off:                "❌ Notifications turned off"
+      };
+      await bot.editMessageText(labels[users[chatId].newTokenNotif], {
+        chat_id,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery();
+    }
+  
+    // …otros callbacks…
+  });
+
  // ─── Función principal actualizada ───
 async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
@@ -1898,9 +1975,22 @@ async function analyzeTransaction(signature, forceCheck = false) {
   
     // ——— Resto del flujo manual de análisis ———
     // 1) Preparamos targets
-    const alertTargets = Object.entries(users)
-      .filter(([, u]) => u.subscribed && u.privateKey)
-      .map(([id]) => Number(id));
+const alertTargets = Object.entries(users)
+.filter(([id, u]) => {
+  if (!u.subscribed || !u.privateKey) return false;
+  switch (u.newTokenNotif) {
+    case "always":
+      return true;
+    case "pauseDuringTrade":
+      // No notificar si hay un trade en curso para este usuario
+      return !buyReferenceMap[id];
+    case "off":
+      return false;
+    default:
+      return true;
+  }
+})
+.map(([id]) => Number(id));
   
     // 2) Envío paralelo y capturamos {chatId,messageId}
     const sendPromises = alertTargets.map(chatId =>
