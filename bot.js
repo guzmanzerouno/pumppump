@@ -2125,7 +2125,7 @@ const alertTargets = Object.entries(users)
         { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
       ],
       [
-        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+        { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
         { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
         { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
       ],
