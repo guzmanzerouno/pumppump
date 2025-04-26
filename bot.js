@@ -2858,8 +2858,7 @@ async function confirmSell(
   });
 
 
-// ——— Handler para compras (buy_) ———
-bot.on("callback_query", async (query) => {
+  bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
@@ -2877,26 +2876,44 @@ bot.on("callback_query", async (query) => {
         return;
       }
   
-      // ——— De aquí en adelante tu flujo individual EXACTO ———
+      // ——— Flujo individual ———
   
-      // Enviar mensaje de “processing”
+      // 🔒 2a) Validar privateKey antes de mostrar “Processing”
+      if (!users[chatId]?.privateKey) {
+        return bot.sendMessage(
+          chatId,
+          "⚠️ You don't have a registered private key. Use /start to register."
+        );
+      }
+  
+      // 💰 2b) Chequeo de balance antes de “Processing”
+      try {
+        const connection = new Connection(SOLANA_RPC_URL, "processed");
+        const balanceLam = await connection.getBalance(
+          new PublicKey(users[chatId].walletPublicKey)
+        );
+        const balanceSOL = balanceLam / 1e9;
+        if (balanceSOL < amountSOL) {
+          return bot.sendMessage(
+            chatId,
+            `❌ Not enough SOL. Balance: ${balanceSOL.toFixed(4)} SOL, Required: ${amountSOL} SOL`,
+            { parse_mode: "Markdown" }
+          );
+        }
+      } catch (err) {
+        console.error("Error checking balance:", err);
+        // Si el RPC falla, seguimos al flujo normal:
+      }
+  
+      // 3) Enviar mensaje de “processing”
       const sentMsg = await bot.sendMessage(
         chatId,
         `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
       );
       const messageId = sentMsg.message_id;
   
-      // Validar privateKey
-      if (!users[chatId]?.privateKey) {
-        await bot.editMessageText(
-          "⚠️ You don't have a registered private key. Use /start to register.",
-          { chat_id: chatId, message_id }
-        );
-        return;
-      }
-  
       try {
-        // 1) Send order
+        // 4) Send order
         const txSignature = await buyToken(chatId, mint, amountSOL);
         if (!txSignature) {
           await bot.editMessageText(
@@ -2906,7 +2923,7 @@ bot.on("callback_query", async (query) => {
           return;
         }
   
-        // 2) Fetch swap details once
+        // 5) Fetch swap details once
         const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
         if (!swapDetails) {
           await bot.editMessageText(
@@ -2921,7 +2938,7 @@ bot.on("callback_query", async (query) => {
           return;
         }
   
-        // 3) Final confirmation
+        // 6) Final confirmation
         await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
       } catch (error) {
