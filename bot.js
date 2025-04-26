@@ -2069,62 +2069,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
       }
     }
   
-    // ——— Preparar mensaje final ———
-    const priceChange24h = dexData.priceChange24h !== "N/A"
-      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-      : "N/A";
-    // … calculas age, liquidity24hFormatted, etc …
-    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
-  
-    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-    // … armas el resto de `message` …
-  
-    // 5) Filtrar destinatarios para la notificación final:
-    const finalTargets = Object.entries(users)
-      .filter(([id, u]) => {
-        if (!u.subscribed || !u.privateKey) return false;
-        switch (u.newTokenNotif || "always") {
-          case "always":
-            return true;
-          case "pauseDuringTrade":
-            return !buyReferenceMap[id];
-          case "off":
-            return false;
-          default:
-            return true;
-        }
-      })
-      .map(([id]) => Number(id));
-  
-    // 6) Enviar el mensaje final sólo a esos finalTargets
-    for (const chatId of finalTargets) {
-      try {
-        if (dexData.tokenLogo) {
-          await bot.sendPhoto(chatId, dexData.tokenLogo, {
-            caption: message,
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                // tu keyboard habitual aquí
-              ]
-            }
-          });
-        } else {
-          await bot.sendMessage(chatId, message, {
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                // tu keyboard habitual aquí
-              ]
-            }
-          });
-        }
-      } catch (err) {
-        console.error(`❌ Error enviando final notification a ${chatId}:`, err);
-      }
-    }
-  }
-  
     // ——— Continuar con tu flujo de notificaciones ———
     const priceChange24h = dexData.priceChange24h !== "N/A"
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
@@ -2167,15 +2111,16 @@ async function analyzeTransaction(signature, forceCheck = false) {
       console.error("⚠️ Mint inválido, no se enviará notificación.");
       return;
     }
+  
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-        { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
+        { text: "📊 Chart+Txns",   url: `https://app.gemsniping.com/solana/${mint}` }
       ],
       [
         { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-        { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-        { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
+        { text: "💰 0.2 Sol",  callback_data: `buy_${mint}_0.2` },
+        { text: "💰 0.3 Sol",  callback_data: `buy_${mint}_0.3` }
       ],
       [
         { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
@@ -2186,26 +2131,43 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
       ]
     ];
-    for (const userId in users) {
-      const user = users[userId];
-      if (!user || !user.subscribed || !user.privateKey) continue;
+  
+    // 1) Construir array de destinatarios filtrados
+    const targets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            // Si está en medio de un trade para este usuario, NO notificar
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => id);
+  
+    // 2) Envío sólo a esos targets
+    for (const chatId of targets) {
       try {
-        let sentMsg;
         if (imageUrl) {
-          sentMsg = await bot.sendPhoto(userId, imageUrl, {
+          await bot.sendPhoto(chatId, imageUrl, {
             caption: message,
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         } else {
-          sentMsg = await bot.sendMessage(userId, message, {
+          await bot.sendMessage(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         }
-        console.log(`✅ Mensaje enviado a ${userId}`);
+        console.log(`✅ Mensaje final enviado a ${chatId}`);
       } catch (error) {
-        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+        console.error(`❌ Error enviando mensaje final a ${chatId}:`, error);
       }
     }
   }
