@@ -1910,7 +1910,7 @@ function sleep(ms) {
     // …otros callbacks…
   });
 
- // ─── Función principal actualizada ───
+// ─── Función principal actualizada ───
 async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
     if (!forceCheck) processedSignatures.add(signature);
@@ -1938,19 +1938,16 @@ async function analyzeTransaction(signature, forceCheck = false) {
       ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-        // Desactivar auto-buy para no repetirlo
         user.autoBuyEnabled = false;
         saveUsers();
   
         try {
-          // Mensaje inicial
           const sent      = await bot.sendMessage(
             chatId,
             `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
           const messageId = sent.message_id;
   
-          // Ejecutar compra
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
             await bot.editMessageText(
@@ -1960,7 +1957,6 @@ async function analyzeTransaction(signature, forceCheck = false) {
             continue;
           }
   
-          // Obtener detalles y confirmar
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
         } catch (err) {
@@ -1971,26 +1967,26 @@ async function analyzeTransaction(signature, forceCheck = false) {
     }
   
     // ——— Resto del flujo manual de análisis ———
-    // 1) Preparamos targets
-const alertTargets = Object.entries(users)
-.filter(([id, u]) => {
-  if (!u.subscribed || !u.privateKey) return false;
-  switch (u.newTokenNotif) {
-    case "always":
-      return true;
-    case "pauseDuringTrade":
-      // No notificar si hay un trade en curso para este usuario
-      return !buyReferenceMap[id];
-    case "off":
-      return false;
-    default:
-      return true;
-  }
-})
-.map(([id]) => Number(id));
   
-    // 2) Envío paralelo y capturamos {chatId,messageId}
-    const sendPromises = alertTargets.map(chatId =>
+    // 1) Filtrar destinatarios para la alerta inicial:
+    const alertTargets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => Number(id));
+  
+    // 2) Enviar “🚨 Token incoming…” sólo a esos targets
+    const alertPromises = alertTargets.map(chatId =>
       bot.sendMessage(
         chatId,
         "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
@@ -1999,9 +1995,9 @@ const alertTargets = Object.entries(users)
       .then(msg => ({ chatId, messageId: msg.message_id }))
       .catch(() => null)
     );
-    const alertResults = await Promise.all(sendPromises);
+    const alertResults = await Promise.all(alertPromises);
   
-    // 3) Programamos borrado a los 60 s
+    // 3) Borrar cada alerta tras 60s
     for (const res of alertResults) {
       if (res) {
         setTimeout(() => {
@@ -2016,7 +2012,7 @@ const alertTargets = Object.entries(users)
   
     const dexData = await getDexScreenerData(pairAddress);
     if (!dexData) {
-      // si no hay dexData, editamos cada alerta
+      // si no hay dexData, editar cada alerta existente
       for (const res of alertResults) {
         if (res) {
           await bot.editMessageText(
@@ -2045,19 +2041,16 @@ const alertTargets = Object.entries(users)
       ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-        // Desactivar auto-buy para no repetirlo
         user.autoBuyEnabled = false;
         saveUsers();
   
         try {
-          // Mensaje inicial
           const sent      = await bot.sendMessage(
             chatId,
             `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
           const messageId = sent.message_id;
   
-          // Ejecutar compra
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
             await bot.editMessageText(
@@ -2067,7 +2060,6 @@ const alertTargets = Object.entries(users)
             continue;
           }
   
-          // Obtener detalles y confirmar
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
         } catch (err) {
@@ -2076,6 +2068,62 @@ const alertTargets = Object.entries(users)
         }
       }
     }
+  
+    // ——— Preparar mensaje final ———
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
+      : "N/A";
+    // … calculas age, liquidity24hFormatted, etc …
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+  
+    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+    // … armas el resto de `message` …
+  
+    // 5) Filtrar destinatarios para la notificación final:
+    const finalTargets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => Number(id));
+  
+    // 6) Enviar el mensaje final sólo a esos finalTargets
+    for (const chatId of finalTargets) {
+      try {
+        if (dexData.tokenLogo) {
+          await bot.sendPhoto(chatId, dexData.tokenLogo, {
+            caption: message,
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                // tu keyboard habitual aquí
+              ]
+            }
+          });
+        } else {
+          await bot.sendMessage(chatId, message, {
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                // tu keyboard habitual aquí
+              ]
+            }
+          });
+        }
+      } catch (err) {
+        console.error(`❌ Error enviando final notification a ${chatId}:`, err);
+      }
+    }
+  }
   
     // ——— Continuar con tu flujo de notificaciones ———
     const priceChange24h = dexData.priceChange24h !== "N/A"
