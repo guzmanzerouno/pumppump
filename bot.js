@@ -1848,8 +1848,7 @@ function sleep(ms) {
     return bot.sendMessage(
       chatId,
       "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
-      "You can pause alerts during a buy/sell process to avoid distractions,  \n" +
-      "or turn them off completely and re-enable whenever you like.",
+      "You can pause alerts during a buy/sell process to avoid distractions, or turn them off completely and re-enable whenever you like.",
       {
         reply_markup: {
           inline_keyboard: [
