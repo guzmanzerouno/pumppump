@@ -3259,9 +3259,19 @@ async function confirmSell(
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    if (data.startsWith("buy_")) {
-      // 1) Quitar spinner
+    // 0) Intentar quitar el spinner, pero ignorar el 400 de "query is too old"
+    try {
       await bot.answerCallbackQuery(query.id);
+    } catch (err) {
+      const description = err.response?.body?.description;
+      if (err.response?.body?.error_code !== 400 || !description?.includes("query is too old")) {
+        console.error("Error en answerCallbackQuery:", err);
+      }
+      // si es 400 y dice "query is too old", simplemente pasamos
+    }
+  
+    if (data.startsWith("buy_")) {
+      // 1) Ya hicimos answerCallbackQuery arriba
   
       const [_, mint, amountStr] = data.split("_");
       const amountSOL = parseFloat(amountStr);
@@ -3341,6 +3351,7 @@ async function confirmSell(
         });
       }
     }
+  
   });
 
   async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
