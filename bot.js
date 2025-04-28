@@ -880,11 +880,12 @@ Copy the long string and paste here.`,
         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
         `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
         `⏳ *Status:* ${activeStatus}`;
+        `🎟️ *Limited:* ${limitedText}`;
   
       await bot.deleteMessage(chatId, msgId).catch(() => {});
       return bot.sendPhoto(
         chatId,
-        "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+        "hhttps://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
         {
           caption: confirmation,
           parse_mode: "Markdown",
