@@ -1144,27 +1144,42 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
 }
 
-// ─────────────────────────────────────────────
-// 2) Listener único para todos los callbacks
-// ─────────────────────────────────────────────
-bot.on("callback_query", (query) => {
+bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // 1) responde YA al callback (sin await)
-    bot.answerCallbackQuery(query.id).catch(() => {});
+    // 1) answer the callback ASAP, but catch and swallow stale-query errors
+    try {
+      await bot.answerCallbackQuery(query.id);
+    } catch (err) {
+      // Telegram returns a 400 with this exact message for expired callbacks
+      if (
+        err.response &&
+        err.response.body &&
+        err.response.body.description &&
+        err.response.body.description.includes("query is too old")
+      ) {
+        // do nothing
+      } else {
+        console.error("answerCallbackQuery failed:", err);
+      }
+    }
   
-    // 2) enrutado de acciones
+    // 2) now handle routing
     switch (data) {
       case "status_close":
-        return bot.deleteMessage(chatId, query.message.message_id)
-          .catch(() => {});
+        try {
+          await bot.deleteMessage(chatId, query.message.message_id);
+        } catch (e) {
+          // message was already gone or too old
+        }
+        break;
   
-      // ... otros callbacks aquí ...
+      // … other cases here …
   
       default:
-        // ni te molestes en hacer nada
-        return;
+        // nothing to do
+        break;
     }
   });
 
