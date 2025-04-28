@@ -422,7 +422,7 @@ function showPaymentButtons(chatId) {
         {
           type: "photo",
           media:
-            "https://framerusercontent.com/images/vzrp9O3xHWGHvsHeoWYF28il6ck.gif",
+            "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
           caption: fullConfirmation,
           parse_mode: "Markdown"
         },
@@ -723,7 +723,7 @@ bot.onText(/\/start/, async (msg) => {
   
     const help = await bot.sendPhoto(
       chatId,
-      "https://framerusercontent.com/images/k30di08VYuJGL4Xl3E8rNP8bc.gif",
+      "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
       {
         caption:
 `1. Open Phantom  
@@ -813,7 +813,7 @@ Copy the long string and paste here.`,
       // enviamos como foto + botón “How to use”
       await bot.sendPhoto(
         chatId,
-        "https://framerusercontent.com/images/vzrp9O3xHWGHvsHeoWYF28il6ck.gif",
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
         {
           caption: fullConfirmation,
           parse_mode: "Markdown",
