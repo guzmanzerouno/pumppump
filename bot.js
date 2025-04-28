@@ -2713,31 +2713,62 @@ bot.onText(/\/autobuy/, async (msg) => {
   });
 
   bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
+    const chatId    = query.message.chat.id;
     const messageId = query.message.message_id;
-    const data = query.data;
+    const data      = query.data;
+  
+    // ─────────────────────────────────────────────
+    // 1) Intentamos quitar el spinner (ignorando el 400 "query is too old")
+    // ─────────────────────────────────────────────
+    try {
+      await bot.answerCallbackQuery(query.id);
+    } catch (err) {
+      const code = err.response?.body?.error_code;
+      const desc = err.response?.body?.description || "";
+      if (!(code === 400 && desc.includes("query is too old"))) {
+        console.error("Error en answerCallbackQuery inicial:", err);
+      }
+    }
   
     try {
       // ─────────────────────────────────────────────
-      // REFRESH DE CONFIRMACIÓN DE COMPRA
+      // 2) REFRESH DE CONFIRMACIÓN DE COMPRA
       // ─────────────────────────────────────────────
       if (data.startsWith("refresh_buy_")) {
         const tokenMint = data.split("_")[2];
         await refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-        await bot.answerCallbackQuery(query.id, { text: "✅ Purchase updated." });
+  
+        // confirmamos al usuario, ignorando el 400 si es muy viejo
+        try {
+          await bot.answerCallbackQuery(query.id, { text: "✅ Purchase updated." });
+        } catch (err) {
+          const code = err.response?.body?.error_code;
+          const desc = err.response?.body?.description || "";
+          if (!(code === 400 && desc.includes("query is too old"))) {
+            console.error("Error en answerCallbackQuery after refresh_buy:", err);
+          }
+        }
         return;
       }
   
       // ─────────────────────────────────────────────
-      // REFRESH DE INFO GENERAL DE TOKEN
+      // 3) REFRESH DE INFO GENERAL DE TOKEN
       // ─────────────────────────────────────────────
       if (data.startsWith("refresh_")) {
         const mint = data.split("_")[1];
   
-        // Se obtienen los datos guardados (estáticos) en tokens.json
+        // … tu mismo bloque de validaciones y fetches …
         const originalTokenData = getTokenInfo(mint);
         if (!originalTokenData) {
-          await bot.answerCallbackQuery(query.id, { text: "Token not found." });
+          try {
+            await bot.answerCallbackQuery(query.id, { text: "Token not found." });
+          } catch (err) {
+            const code = err.response?.body?.error_code;
+            const desc = err.response?.body?.description || "";
+            if (!(code === 400 && desc.includes("query is too old"))) {
+              console.error("Error en answerCallbackQuery token not found:", err);
+            }
+          }
           return;
         }
   
