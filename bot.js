@@ -124,15 +124,18 @@ let ataAutoCreationEnabled = false;
 /**
  * Cierra todas las ATAs vacías de un usuario (en batchs de 25).
  * @param {string|number} chatId - ID de Telegram / clave en users[]
- * @returns {Promise<number>} total de ATAs cerradas
+ * @returns {Promise<{ closedTotal: number, lastSig: string|null }>}
  */
 async function closeEmptyATAs(chatId) {
   const user = users[chatId];
-  if (!user?.privateKey || !user.walletPublicKey) return 0;
+  if (!user?.privateKey || !user.walletPublicKey) {
+    return { closedTotal: 0, lastSig: null };
+  }
 
   const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
   const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   let closedTotal = 0;
+  let lastSig     = null;
 
   while (true) {
     const { value } = await connection.getParsedTokenAccountsByOwner(
@@ -153,11 +156,18 @@ async function closeEmptyATAs(chatId) {
         new PublicKey(user.walletPublicKey)
       ));
     }
-    await sendAndConfirmTransaction(connection, tx, [keypair]);
-    closedTotal += empties.length;
+
+    try {
+      const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+      lastSig = sig;
+      closedTotal += empties.length;
+    } catch (err) {
+      console.error(`[closeEmptyATAs] Error closing batch:`, err.message);
+      break;
+    }
   }
 
-  return closedTotal;
+  return { closedTotal, lastSig };
 }
 
 // ─────────────────────────────────────────────
@@ -193,54 +203,58 @@ bot.onText(/\/ata/, async (msg) => {
 
 // 2) Handler para los botones ON / OFF
 bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const data   = query.data;
-
-  if (data === "ata_on") {
-    users[chatId] = users[chatId] || {};
-    users[chatId].ataAutoCreationEnabled = true;
-    saveUsers();
-
-    await bot.editMessageText("✅ Auto‑creation of ATAs is now *ENABLED*", {
-      chat_id: chatId,
-      message_id: query.message.message_id,
-      parse_mode: "Markdown"
-    });
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data === "ata_off") {
-    users[chatId] = users[chatId] || {};
-    users[chatId].ataAutoCreationEnabled = false;
-    saveUsers();
-
-    // Confirmación inmediata
-    await bot.editMessageText("❌ Auto‑creation of ATAs is now *DISABLED*", {
-      chat_id: chatId,
-      message_id: query.message.message_id,
-      parse_mode: "Markdown"
-    });
-    await bot.answerCallbackQuery(query.id);
-
-    // ➡️ Cerrar ATAs vacías
-    const closed = await closeEmptyATAs(chatId);
-    if (closed > 0) {
-      await bot.sendMessage(chatId,
-        `✅ Closed *${closed}* empty ATA account${closed !== 1 ? 's' : ''}. Rent deposits refunded!`,
-        { parse_mode: 'Markdown' }
-      );
-    } else {
-      await bot.sendMessage(chatId,
-        `⚠️ No empty ATA accounts were found to close.`,
-        { parse_mode: 'Markdown' }
-      );
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    if (data === "ata_on") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = true;
+      saveUsers();
+  
+      await bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery(query.id);
     }
-    return;
-  }
-
-  // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
-  return bot.answerCallbackQuery(query.id);
-});
+  
+    if (data === "ata_off") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = false;
+      saveUsers();
+  
+      await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown"
+      });
+      await bot.answerCallbackQuery(query.id);
+  
+      // ➡️ Cerrar ATAs vacías y capturar firma
+      const { closedTotal, lastSig } = await closeEmptyATAs(chatId);
+  
+      if (closedTotal > 0) {
+        let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
+        if (lastSig) {
+          text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+        }
+        await bot.sendMessage(chatId, text, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
+      } else {
+        await bot.sendMessage(chatId,
+          `⚠️ No empty ATA accounts were found to close.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+      return;
+    }
+  
+    // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
+    return bot.answerCallbackQuery(query.id);
+  });
 
 // ─────────────────────────────────────────────
 // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
@@ -3618,74 +3632,80 @@ bot.onText(/\/close/, async (msg) => {
     }
   
     // 2.2) Close ATAs
-    if (data === 'ata_close') {
-      await bot.answerCallbackQuery(query.id);
+if (data === 'ata_close') {
+    await bot.answerCallbackQuery(query.id);
   
-      const user    = users[chatId];
-      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const user    = users[chatId];
+    const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
   
-      let closedTotal = 0;
-      let iteration   = 0;
+    let closedTotal = 0;
+    let iteration   = 0;
+    let lastSig     = null;  // ← guardaremos aquí la última firma
   
-      try {
-        while (true) {
-          iteration++;
-          const accounts = await connection.getParsedTokenAccountsByOwner(
+    try {
+      while (true) {
+        iteration++;
+        const accounts = await connection.getParsedTokenAccountsByOwner(
+          new PublicKey(user.walletPublicKey),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+  
+        const empties = accounts.value
+          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+          .slice(0, 25);
+  
+        console.log(`[ata_close][iter ${iteration}] Found ${empties.length} empty ATAs:`,
+          empties.map(a => a.pubkey.toBase58())
+        );
+  
+        if (empties.length === 0) break;
+  
+        const tx = new Transaction();
+        for (let { pubkey } of empties) {
+          tx.add(createCloseAccountInstruction(
+            pubkey,
             new PublicKey(user.walletPublicKey),
-            { programId: TOKEN_PROGRAM_ID }
-          );
-  
-          const empties = accounts.value
-            .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
-            .slice(0, 25);
-  
-          console.log(`[ata_close][iter ${iteration}] Found ${empties.length} empty ATAs:`,
-            empties.map(a => a.pubkey.toBase58())
-          );
-  
-          if (empties.length === 0) break;
-  
-          const tx = new Transaction();
-          for (let { pubkey } of empties) {
-            tx.add(createCloseAccountInstruction(
-              pubkey,
-              new PublicKey(user.walletPublicKey),
-              new PublicKey(user.walletPublicKey)
-            ));
-          }
-  
-          try {
-            const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
-            closedTotal += empties.length;
-            console.log(`[ata_close][iter ${iteration}] Closed ${empties.length} ATAs, txSig=${sig}`);
-          } catch (err) {
-            console.error(
-              `[ata_close][iter ${iteration}] Error closing ATAs:`,
-              err.message
-            );
-            if (err.transactionLogs) {
-              console.error('[ata_close] transactionLogs:', err.transactionLogs);
-            }
-            break;  // salimos del loop ante error
-          }
+            new PublicKey(user.walletPublicKey)
+          ));
         }
-      } catch (err) {
-        console.error('[ata_close] Unexpected error:', err);
+  
+        try {
+          const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+          lastSig = sig;                        // ← actualizamos la última firma
+          closedTotal += empties.length;
+          console.log(`[ata_close][iter ${iteration}] Closed ${empties.length} ATAs, txSig=${sig}`);
+        } catch (err) {
+          console.error(
+            `[ata_close][iter ${iteration}] Error closing ATAs:`,
+            err.message
+          );
+          break;  // salimos del loop ante error
+        }
       }
-  
-      const finalText = closedTotal > 0
-        ? `✅ Closed *${closedTotal}* ATA account${closedTotal !== 1 ? 's' : ''}. All rent deposits have been returned!`
-        : '⚠️ No empty ATA accounts found to close.';
-  
-      return bot.editMessageText(finalText, {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: 'Markdown'
-      });
+    } catch (err) {
+      console.error('[ata_close] Unexpected error:', err);
     }
   
-    // responder cualquier otro callback para quitar spinner
-    await bot.answerCallbackQuery(query.id);
+    let finalText;
+    if (closedTotal > 0) {
+      finalText = `✅ Closed *${closedTotal}* ATA account${closedTotal !== 1 ? 's' : ''}. All rent deposits have been returned!`;
+      if (lastSig) {
+        finalText += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+      }
+    } else {
+      finalText = '⚠️ No empty ATA accounts found to close.';
+    }
+  
+    return bot.editMessageText(finalText, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    });
+  }
+  
+  // responder cualquier otro callback para quitar spinner
+  await bot.answerCallbackQuery(query.id);
   });
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
