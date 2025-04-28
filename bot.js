@@ -630,59 +630,63 @@ bot.onText(/\/start/, async (msg) => {
         });
         break;
   
-      case 4:
-        // mostramos ayuda primero
-        await bot.editMessageText(
-          "🔑 Please enter your *Solana Private Key* or tap for help:",
-          {
-            chat_id: chatId,
-            message_id: msgId,
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }]
-              ]
-            }
-          }
-        );
-        user.step = 4.1;
-        saveUsers();
-        break;
-  
-      case 4.1:
-        // borramos el mensaje de ayuda e input
-        if (user.tempHelpMsgId) {
-          await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
-          delete user.tempHelpMsgId;
-        }
-        // validamos la key
-        try {
-          const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-          user.privateKey      = text;
-          user.walletPublicKey = keypair.publicKey.toBase58();
-          user.step = 5;
-          saveUsers();
-  
-          // preguntamos por referral o trial
-          await bot.sendMessage(
-            chatId,
-            "🎟️ Do you have a *referral code*?",
-            {
-              parse_mode: "Markdown",
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: "✅ YES", callback_data: "referral_yes" }],
-                  [{ text: "❌ NO",  callback_data: "referral_no"  }]
-                ]
+        case 4:
+            // enviamos el prompt *con* el botón de ayuda
+            await bot.editMessageText(
+              "🔑 Please enter your *Solana Private Key* or tap for help:",
+              {
+                chat_id: chatId,
+                message_id: msgId,
+                parse_mode: "Markdown",
+                reply_markup: {
+                  inline_keyboard: [
+                    [ { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" } ]
+                  ]
+                }
               }
+            );
+            // movemos el usuario a un paso intermedio
+            user.step = 4.1;
+            saveUsers();
+            break;
+        
+          case 4.1:
+            // en este punto *ya* el usuario ha visto el botón y ahora envía la llave
+            // borramos primero el mensaje de ayuda si existe
+            if (user.tempHelpMsgId) {
+              await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
+              delete user.tempHelpMsgId;
             }
-          );
-        } catch (err) {
-          await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
-          user.step = 4;
-          saveUsers();
-        }
-        break;
+            // y borramos también el texto que acaba de enviar
+            await bot.deleteMessage(chatId, messageId).catch(() => {});
+        
+            try {
+              const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+              user.privateKey      = text;
+              user.walletPublicKey = keypair.publicKey.toBase58();
+              user.step            = 5;
+              saveUsers();
+        
+              // seguimos con la pregunta de referral/trial…
+              await bot.sendMessage(
+                chatId,
+                "🎟️ Do you have a *referral code*?",
+                {
+                  parse_mode: "Markdown",
+                  reply_markup: {
+                    inline_keyboard: [
+                      [ { text: "✅ YES", callback_data: "referral_yes" } ],
+                      [ { text: "❌ NO",   callback_data: "referral_no"  } ]
+                    ]
+                  }
+                }
+              );
+            } catch (err) {
+              await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
+              user.step = 4;  // volvemos a mostrar el botón de ayuda
+              saveUsers();
+            }
+            break;
   
       // … resto de pasos de registro …
     }
