@@ -1164,43 +1164,38 @@ const statusGifs = [
     "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExZnhpcDdvaGwwbnBkMmtidjRyOWZza3NrbTdsdm82a3JuaDhtcjk2ayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9tZhPkNjSMpqTekDhT/giphy.gif",
     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
   ];
+  const extraGifs  = [
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXRmMnl5MWliOGI3ZDB1MWpyeXRqa3Jnand5aTMyNDBrdzd0YmwwZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ie4CIIvQS0bk3zwZlM/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3Z3bDYydWZpMmNyM3N2MXljdTV6dGFzcmRuN3B5YTh1OG4yMG40aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/IzXiddo2twMmdmU8Lv/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExazBiamsyenIyeHlzaTF0N3h1bngxczVscXVyZjE3MmYwMGNmMXdpNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SYo1DFS8NLhhqzzjMU/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
+  ];
   
-// ─────────────────────────────────────────────
-// /status with random GIF, user name, help & close buttons
-// ─────────────────────────────────────────────
-bot.onText(/\/status/, async (msg) => {
+  bot.onText(/\/status/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
-  
-    // 0) Borra el mensaje del comando
-    try {
-      await bot.deleteMessage(chatId, commandMsgId);
-    } catch (e) {
-      console.warn("Could not delete /status message:", e.message);
-    }
+    try { await bot.deleteMessage(chatId, commandMsgId) } catch {}
   
     const user = users[chatId];
     if (!user || !user.walletPublicKey) {
       return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
     }
   
-    // ¿Es el usuario especial?
     const isSpecial = chatId.toString() === "1631313738";
   
-    // 1) GIF aleatorio: si es especial, mezclamos los generales + extras
-    const extraGifs = [
-      "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXRmMnl5MWliOGI3ZDB1MWpyeXRqa3Jnand5aTMyNDBrdzd0YmwwZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ie4CIIvQS0bk3zwZlM/giphy.gif",
-      "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3Z3bDYydWZpMmNyM3N2MXljdTV6dGFzcmRuN3B5YTh1OG4yMG40aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/IzXiddo2twMmdmU8Lv/giphy.gif",
-      "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExazBiamsyenIyeHlzaTF0N3h1bngxczVscXVyZjE3MmYwMGNmMXdpNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SYo1DFS8NLhhqzzjMU/giphy.gif",
-      "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
-    ];
-    const pool = isSpecial
-      ? statusGifs.concat(extraGifs)
-      : statusGifs;
-    const gifUrl = pool[Math.floor(Math.random() * pool.length)];
+    // Selección weighed:
+    let gifUrl;
+    if (isSpecial) {
+      // 60% chance extraGifs, 40% chance statusGifs
+      if (Math.random() < 0.6) {
+        gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
+      } else {
+        gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+      }
+    } else {
+      gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+    }
   
-    // 2) Construir texto de estado
-    // Si es especial, forzamos “Popochita”
     const displayName = isSpecial
       ? "Popochita"
       : (msg.from.first_name || "there");
@@ -1226,54 +1221,43 @@ bot.onText(/\/status/, async (msg) => {
       lines.push(`📅 *Expired On:* ${expiredOn}`);
     }
   
-    // Swap limit
     let swapInfo = "N/A";
     if (user.swapLimit === Infinity) swapInfo = "Unlimited";
     else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
   
-    // Auto-ATA
     const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
     lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
   
-    // Auto-Buy
     let autobuyStatus = "Off ❌";
     if (user.autoBuyEnabled) {
       const amt = user.autoBuyAmount;
-      const trg = user.autoBuyTrigger === "detect"
-        ? "on Detect"
-        : "on Notify";
+      const trg = user.autoBuyTrigger === "detect" ? "on Detect" : "on Notify";
       autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
     }
     lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
   
     const caption = lines.join("\n");
   
-    // 3) Enviar animación con dos botones en columnas separadas
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
-          [ { text: "❌ Close", callback_data: "status_close"        } ]
+          [ { text: "❔ Help", url: "https://gemsniping.com/docs" } ],
+          [ { text: "❌ Close", callback_data: "status_close" } ]
         ]
       }
     });
   });
-
-// ─────────────────────────────────────────────
-// callback para cerrar el mensaje de /status
-// ─────────────────────────────────────────────
-bot.on("callback_query", async query => {
-  if (query.data === "status_close") {
-    const chatId = query.message.chat.id;
-    const msgId  = query.message.message_id;
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-  }
-  // (no olvides responder siempre para quita spinner)
-  await bot.answerCallbackQuery(query.id);
-});
+  
+  bot.on("callback_query", async query => {
+    if (query.data === "status_close") {
+      const { chat: { id: c }, message: { message_id: m } } = query;
+      await bot.deleteMessage(c, m).catch(() => {});
+    }
+    await bot.answerCallbackQuery(query.id);
+  });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
