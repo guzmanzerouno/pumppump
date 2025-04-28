@@ -1145,6 +1145,35 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
 }
 
 // ─────────────────────────────────────────────
+// 2) Listener único para todos los callbacks
+// ─────────────────────────────────────────────
+bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    // 2.a) responde lo antes posible y captura errores de timeout
+    try {
+      await bot.answerCallbackQuery(query.id);
+    } catch (e) {
+      console.debug("⚠️ answerCallbackQuery failed:", e.message);
+    }
+  
+    // 2.b) enrutado de acciones según query.data
+    switch (data) {
+      case "status_close":
+        await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+        return;
+  
+      // aquí podrías añadir otros case para:
+      // 'payments_page_X', 'payments_close', 'ata_on', 'ata_off', etc.
+  
+      default:
+        // si no es un callback que nos interesa, simplemente salimos
+        return;
+    }
+  });
+
+// ─────────────────────────────────────────────
 // /status with random GIF, user name & help button
 // ─────────────────────────────────────────────
 const statusGifs = [
@@ -1172,13 +1201,12 @@ const statusGifs = [
   ];  
   
 // ─────────────────────────────────────────────
-// /status with random GIF, user name, help & close buttons
+// 1) /status sigue igual
 // ─────────────────────────────────────────────
 bot.onText(/\/status/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
   
-    // 0) Borra el mensaje del comando
     try {
       await bot.deleteMessage(chatId, commandMsgId);
     } catch (e) {
@@ -1190,28 +1218,22 @@ bot.onText(/\/status/, async (msg) => {
       return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
     }
   
-    // ¿Es el usuario especial?
     const isSpecial = chatId.toString() === "1631313738";
-
-  // Selección weighed:
-  let gifUrl;
-  if (isSpecial) {
-    // 60% chance extraGifs, 40% chance statusGifs
-    if (Math.random() < 0.6) {
+  
+    // GIF con peso especial para el usuario
+    let gifUrl;
+    if (isSpecial && Math.random() < 0.6) {
       gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
     } else {
       gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
     }
-  } else {
-    gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-  }
-
-  const displayName = isSpecial
-    ? "Popochita"
-    : (msg.from.first_name || "there");
-
-  const now   = Date.now();
-  const lines = [];
+  
+    const displayName = isSpecial
+      ? "Popochita"
+      : (msg.from.first_name || "there");
+  
+    const now   = Date.now();
+    const lines = [];
   
     lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*\n`);
     lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
@@ -1231,54 +1253,35 @@ bot.onText(/\/status/, async (msg) => {
       lines.push(`📅 *Expired On:* ${expiredOn}`);
     }
   
-    // Swap limit
     let swapInfo = "N/A";
     if (user.swapLimit === Infinity) swapInfo = "Unlimited";
     else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
   
-    // Auto-ATA
     const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
     lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
   
-    // Auto-Buy
     let autobuyStatus = "Off ❌";
     if (user.autoBuyEnabled) {
       const amt = user.autoBuyAmount;
-      const trg = user.autoBuyTrigger === "detect"
-        ? "on Detect"
-        : "on Notify";
+      const trg = user.autoBuyTrigger === "detect" ? "on Detect" : "on Notify";
       autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
     }
     lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
   
     const caption = lines.join("\n");
   
-    // 3) Enviar animación con dos botones en columnas separadas
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
-          [ { text: "❌ Close", callback_data: "status_close"        } ]
+          [{ text: "❔ Help", url: "https://gemsniping.com/docs" }],
+          [{ text: "❌ Close", callback_data: "status_close" }]
         ]
       }
     });
   });
-
-// ─────────────────────────────────────────────
-// callback para cerrar el mensaje de /status
-// ─────────────────────────────────────────────
-bot.on("callback_query", async query => {
-  if (query.data === "status_close") {
-    const chatId = query.message.chat.id;
-    const msgId  = query.message.message_id;
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-  }
-  // (no olvides responder siempre para quita spinner)
-  await bot.answerCallbackQuery(query.id);
-});
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
