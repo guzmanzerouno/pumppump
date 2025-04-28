@@ -530,8 +530,8 @@ Your membership is now active.
     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-  // ────────────────────────────────
-// Comando /payments con paginación
+// ────────────────────────────────
+// Comando /payments con paginación (5 por página) y botón Close
 // ────────────────────────────────
 bot.onText(/\/payments/, async (msg) => {
     const chatId       = msg.chat.id;
@@ -578,15 +578,20 @@ bot.onText(/\/payments/, async (msg) => {
         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
       }
-      // Construir inline keyboard
-      const buttons = [];
+      // Construir inline keyboard: back/next + close
+      const navButtons = [];
       if (pageIndex > 0) {
-        buttons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
       }
       if (start + pageSize < userPayments.length) {
-        buttons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
       }
-      return { text, keyboard: buttons.length ? [buttons] : [] };
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      // siempre mostrar botón Close
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+  
+      return { text, keyboard };
     }
   
     // 4) Enviar la primera página (índice 0)
@@ -599,18 +604,26 @@ bot.onText(/\/payments/, async (msg) => {
   });
   
   // ────────────────────────────────
-  // Callback para paginar /payments
+  // Callback para paginar o cerrar el mensaje
   // ────────────────────────────────
   bot.on("callback_query", async (query) => {
-    const data = query.data;
-    if (!data.startsWith("payments_page_")) {
-      return bot.answerCallbackQuery(query.id);
-    }
-    const chatId   = query.message.chat.id;
-    const msgId    = query.message.message_id;
-    const pageIndex = parseInt(data.split("_").pop(), 5);
+    const data   = query.data;
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
   
-    // Releer y filtrar pagos (igual que en /payments)
+    // Cerrar el mensaje
+    if (data === "payments_close") {
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      return bot.answerCallbackQuery();
+    }
+  
+    // Paginación
+    if (!data.startsWith("payments_page_")) {
+      return bot.answerCallbackQuery();
+    }
+    const pageIndex = parseInt(data.split("_").pop(), 10);
+  
+    // Releer y filtrar pagos
     const records      = JSON.parse(fs.readFileSync("payments.json"));
     const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
@@ -627,14 +640,17 @@ bot.onText(/\/payments/, async (msg) => {
         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
       }
-      const buttons = [];
+      const navButtons = [];
       if (pageIndex > 0) {
-        buttons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
       }
       if ((pageIndex+1) * pageSize < userPayments.length) {
-        buttons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
       }
-      return { text, keyboard: buttons.length ? [buttons] : [] };
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+      return { text, keyboard };
     }
   
     const { text, keyboard } = renderPage(pageIndex);
@@ -646,7 +662,7 @@ bot.onText(/\/payments/, async (msg) => {
       reply_markup: { inline_keyboard: keyboard }
     });
   
-    await bot.answerCallbackQuery(query.id);
+    await bot.answerCallbackQuery();
   });
 
 
