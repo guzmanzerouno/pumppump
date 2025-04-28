@@ -631,62 +631,60 @@ bot.onText(/\/start/, async (msg) => {
         break;
   
         case 4:
-            // enviamos el prompt *con* el botón de ayuda
-            await bot.editMessageText(
-              "🔑 Please enter your *Solana Private Key* or tap for help:",
-              {
-                chat_id: chatId,
-                message_id: msgId,
-                parse_mode: "Markdown",
-                reply_markup: {
-                  inline_keyboard: [
-                    [ { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" } ]
-                  ]
-                }
-              }
-            );
-            // movemos el usuario a un paso intermedio
-            user.step = 4.1;
-            saveUsers();
-            break;
-        
-          case 4.1:
-            // en este punto *ya* el usuario ha visto el botón y ahora envía la llave
-            // borramos primero el mensaje de ayuda si existe
-            if (user.tempHelpMsgId) {
-              await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
-              delete user.tempHelpMsgId;
-            }
-            // y borramos también el texto que acaba de enviar
-            await bot.deleteMessage(chatId, messageId).catch(() => {});
-        
-            try {
-              const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-              user.privateKey      = text;
-              user.walletPublicKey = keypair.publicKey.toBase58();
-              user.step            = 5;
-              saveUsers();
-        
-              // seguimos con la pregunta de referral/trial…
-              await bot.sendMessage(
-                chatId,
-                "🎟️ Do you have a *referral code*?",
-                {
-                  parse_mode: "Markdown",
-                  reply_markup: {
-                    inline_keyboard: [
-                      [ { text: "✅ YES", callback_data: "referral_yes" } ],
-                      [ { text: "❌ NO",   callback_data: "referral_no"  } ]
-                    ]
-                  }
-                }
-              );
-            } catch (err) {
-              await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
-              user.step = 4;  // volvemos a mostrar el botón de ayuda
-              saveUsers();
-            }
-            break;
+    // 🔑 Prompt con botón de ayuda
+    await bot.editMessageText(
+      "🔑 Please enter your *Solana Private Key* or tap for help:",
+      {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [ { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" } ]
+          ]
+        }
+      }
+    );
+    // guardamos para borrarlo luego
+    user.tempKeyPromptId = msgId;
+    user.step = 4.1;
+    saveUsers();
+    break;
+
+  case 4.1:
+    // borramos input y el prompt de ayuda si existiera
+    if (user.tempHelpMsgId) {
+      await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
+      delete user.tempHelpMsgId;
+    }
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+    // aquí procesas la key…
+    try {
+      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+      user.privateKey      = text;
+      user.walletPublicKey = keypair.publicKey.toBase58();
+      user.step            = 5;
+      saveUsers();
+      // seguimos preguntando por referral/trial
+      await bot.sendMessage(
+        chatId,
+        "🎟️ Do you have a *referral code*?",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [ { text: "✅ YES", callback_data: "referral_yes" } ],
+              [ { text: "❌ NO",  callback_data: "referral_no"  } ]
+            ]
+          }
+        }
+      );
+    } catch (err) {
+      await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
+      user.step = 4;  // volver a mostrar el botón de ayuda
+      saveUsers();
+    }
+    break;
   
       // … resto de pasos de registro …
     }
@@ -732,39 +730,39 @@ bot.onText(/\/start/, async (msg) => {
   // ────────────────────────────────
   // 3) Handler de Yes/No para referral / trial
   // ────────────────────────────────
-  bot.on("callback_query", async (query) => {
+  bot.on("callback_query", async query => {
     const chatId = query.message.chat.id;
     const msgId  = query.message.message_id;
     const data   = query.data;
     const user   = users[chatId];
   
-    await bot.answerCallbackQuery(query.id);
-  
     if (data === "referral_yes") {
-      user.step = 6;
-      saveUsers();
-      return bot.editMessageText(
-        "🔠 Please enter your *referral code*:",
-        {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        }
-      );
+      // … tu flujo actual para pedir código …
+      return bot.answerCallbackQuery(query.id);
     }
   
     if (data === "referral_no") {
-      // otorgar trial de 1 día
+      await bot.answerCallbackQuery(query.id);
+  
+      // 1) borramos el prompt de private key
+      if (user.tempKeyPromptId) {
+        await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+        delete user.tempKeyPromptId;
+      }
+  
+      // 2) activamos trial
       const now    = Date.now();
       const oneDay = 24 * 60 * 60 * 1000;
-      user.expired    = now + oneDay;
-      user.subscribed = true;
-      user.swapLimit  = 50;  // swaps gratis de prueba
-      user.step       = 0;
+      user.expired     = now + oneDay;
+      user.subscribed  = true;
+      user.swapLimit   = 50;      // swaps gratis de prueba
+      user.step        = 0;
       saveUsers();
   
       const expDate = new Date(user.expired).toLocaleDateString();
-      return bot.editMessageText(
+  
+      // 3) mensaje de trial
+      await bot.editMessageText(
         `🎉 *Free Trial Activated!* 🎉\n\n` +
         `You’ve unlocked a *1-day free trial* with *50 swaps*.\n` +
         `Trial ends on ${expDate}.\n\n` +
@@ -773,6 +771,35 @@ bot.onText(/\/start/, async (msg) => {
           chat_id: chatId,
           message_id: msgId,
           parse_mode: "Markdown"
+        }
+      );
+  
+      // 4) mensaje de confirmación completa de usuario
+      const statusLine   = `Active for 1 day`;
+      const limitedText  = `50 swaps`;
+      const fullConfirmation =
+        `✅ *User Registered!*\n` +
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* None (Trial)\n` +
+        `⏳ *Status:* ${statusLine}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
+  
+      // enviamos como foto + botón “How to use”
+      await bot.sendPhoto(
+        chatId,
+        "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+        {
+          caption: fullConfirmation,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [ { text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" } ]
+            ]
+          }
         }
       );
     }
