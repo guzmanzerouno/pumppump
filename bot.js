@@ -331,11 +331,18 @@ function showPaymentButtons(chatId) {
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
+  
     if (!data.startsWith("pay_")) {
       return bot.answerCallbackQuery(query.id);
     }
-    await bot.answerCallbackQuery(query.id); // quita spinner
+    await bot.answerCallbackQuery(query.id); // stop the spinner
   
+    // ** store the menu msg ID so we can delete it later **
+    users[chatId] = users[chatId] || {};
+    users[chatId].lastPaymentMsgId = query.message.message_id;
+    saveUsers();
+  
+    // now proceed as before
     let days, solAmount, swaps;
     switch (data) {
       case "pay_1d":
@@ -351,7 +358,6 @@ function showPaymentButtons(chatId) {
         return;
     }
   
-    // Lanza el pago, pasando también swaps
     return activateMembership(chatId, days, solAmount, swaps);
   });
   
@@ -445,9 +451,7 @@ function showPaymentButtons(chatId) {
         chatId,
 `✅ *Payment received successfully!*  
 Your membership is now active.
-  
-  ${fullConfirmation}
-  
+
 💳 *Paid:* ${solAmount} SOL for ${days} day(s)  
 🗓️ *Expires:* ${expirationDate}  
 🎟️ *Limited:* ${limitedText}  
