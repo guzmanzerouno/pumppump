@@ -1033,59 +1033,84 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
 }
 
-bot.onText(/\/status/, async (msg) => {
+// ─────────────────────────────────────────────
+// /status with random GIF, user name & help button
+// ─────────────────────────────────────────────
+const statusGifs = [
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExaXlyNXpvOXBmczFyNmo2cmZjbWZndG13d3lhOTBoOWQyN2RmNjE0dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tA4tvdOYg5lY52otNL/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExODNtOXd1MWs5bDZ4c2x6czJzbHIybml4djc1NmgwNjlydWt3OGkyYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7tXmRetra2vpFyrYpe/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXppeGs1NDhubTEyeGg0MHUxdHI2M2dlcHdxZjhwbTV0aWxjNDB3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PLjqnYlGEoQTuYrTEn/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmVyZHpqazBjaWdna3lybGtscTg1NTFxazR1c2IxemM0YTYzd3ppMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/K2tgd5hmGs7dpWZfdb/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW03OWdxbGQyZnBtc3ZrYzh6bGs3anIxZjRzdG96aG56YThiNWtjdiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9UrvmC9KFVrsPaIY7R/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMTJhZXBjbGJyY3ZsNHM0Y3c5enJwcHBvY2FwZjd3djY1cmJlNjk5aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4TYHPvIlwE3257tEQ9/giphy.gif",
+    "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExajd3amZlMHk3NHFuMmF1dWN4eTN3ajc0d3VzdThrdGRzem8xOTJzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VV9EE5TjXdnWLiyGwt/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdXoxeHd0ZnB2cXo4aDV0cmhvMWs1NGhocTkzZXE5eHdhb2V0c2hucSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/jBh6MxLLsH9ZNfYLY9/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGxkbWF0M2h6MGRtZXpyeWZ5enBiNWJ2YmVmZnFzcXdodWx1MGthayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VRKheDy4DkBMrQm66p/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWxxNm9laHIzY3c3eHpvbHdlZjV1MmloZTRtZjR4dDB6cTFyYTRpbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/qcLaYD4EIPJabpN16c/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
+  ];
+  
+  bot.onText(/\/status/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
   
-    // 0) Borramos el mensaje de comando para no dejar rastro
+    // 0) Delete the command message
     try {
       await bot.deleteMessage(chatId, commandMsgId);
     } catch (e) {
-      // puede fallar si ya expiró o no tienes permiso, pero seguimos de todos modos
       console.warn("Could not delete /status message:", e.message);
     }
   
     const user = users[chatId];
     if (!user || !user.walletPublicKey) {
-      return bot.sendMessage(
-        chatId,
-        "❌ You are not registered. Use /start to begin."
-      );
+      return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
     }
   
-    const now = Date.now();
-    let message = `👤 *Account Status*\n\n`;
-    message += `💼 Wallet: \`${user.walletPublicKey}\`\n`;
+    // Pick a random GIF
+    const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
   
-    // Estado de la suscripción
+    // Build the status text
+    const firstName = msg.from.first_name || "there";
+    const now = Date.now();
+    let lines = [];
+    lines.push(`👋 Hello *${firstName}*!\n👤 *Account Status*\n`);
+    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
+  
     if (user.expired === "never") {
-      message += `✅ *Status:* Unlimited Membership\n`;
+      lines.push(`✅ *Status:* Unlimited Membership`);
     } else if (user.expired && now < user.expired) {
       const expirationDate = new Date(user.expired).toLocaleDateString();
-      const remainingDays  = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
-      message +=
-        `✅ *Status:* Active\n` +
-        `📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)\n`;
+      const daysLeft       = Math.ceil((user.expired - now) / (1000*60*60*24));
+      lines.push(`✅ *Status:* Active`);
+      lines.push(`📅 *Expires:* ${expirationDate} (${daysLeft} day(s) left)`);
     } else {
-      const expiredDate = user.expired
+      const expiredOn = user.expired
         ? new Date(user.expired).toLocaleDateString()
         : "N/A";
-      message +=
-        `❌ *Status:* Expired\n` +
-        `📅 *Expired On:* ${expiredDate}\n`;
+      lines.push(`❌ *Status:* Expired`);
+      lines.push(`📅 *Expired On:* ${expiredOn}`);
     }
   
-    // Límite de swaps
     let swapInfo = "N/A";
     if (user.swapLimit === Infinity) {
       swapInfo = "Unlimited";
     } else if (typeof user.swapLimit === "number") {
       swapInfo = `${user.swapLimit} swaps`;
     }
-    message += `🔄 *Swap Limit:* ${swapInfo}`;
+    lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
   
-    // Enviamos el estado
-    await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
+    const caption = lines.join("\n");
+  
+    // 1) Send the GIF + caption
+    await bot.sendAnimation(chatId, gifUrl, {
+      caption,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [ { text: "❔ Help", url: "https://gemsniping.com/docs" } ]
+        ]
+      }
+    });
   });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
