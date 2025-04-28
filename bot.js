@@ -1155,11 +1155,14 @@ const statusGifs = [
     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
   ];
   
-  bot.onText(/\/status/, async (msg) => {
+// ─────────────────────────────────────────────
+// /status with random GIF, user name, help & close buttons
+// ─────────────────────────────────────────────
+bot.onText(/\/status/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
   
-    // 0) Delete the command message
+    // 0) Borra el mensaje del comando
     try {
       await bot.deleteMessage(chatId, commandMsgId);
     } catch (e) {
@@ -1171,23 +1174,24 @@ const statusGifs = [
       return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
     }
   
-    // Pick a random GIF
+    // 1) GIF aleatorio
     const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
   
-    // Build the status text
+    // 2) Construir texto de estado
     const firstName = msg.from.first_name || "there";
-    const now = Date.now();
-    let lines = [];
+    const now       = Date.now();
+    const lines     = [];
+  
     lines.push(`👋 Hello *${firstName}*!\n👤 *Account Status*\n`);
     lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
   
     if (user.expired === "never") {
       lines.push(`✅ *Status:* Unlimited Membership`);
     } else if (user.expired && now < user.expired) {
-      const expirationDate = new Date(user.expired).toLocaleDateString();
-      const daysLeft       = Math.ceil((user.expired - now) / (1000*60*60*24));
+      const expDate = new Date(user.expired).toLocaleDateString();
+      const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
       lines.push(`✅ *Status:* Active`);
-      lines.push(`📅 *Expires:* ${expirationDate} (${daysLeft} day(s) left)`);
+      lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
     } else {
       const expiredOn = user.expired
         ? new Date(user.expired).toLocaleDateString()
@@ -1196,26 +1200,55 @@ const statusGifs = [
       lines.push(`📅 *Expired On:* ${expiredOn}`);
     }
   
+    // Swap limit
     let swapInfo = "N/A";
-    if (user.swapLimit === Infinity) {
-      swapInfo = "Unlimited";
-    } else if (typeof user.swapLimit === "number") {
-      swapInfo = `${user.swapLimit} swaps`;
-    }
+    if (user.swapLimit === Infinity) swapInfo = "Unlimited";
+    else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
+  
+    // Auto-ATA
+    const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
+    lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
+  
+    // Auto-Buy
+    let autobuyStatus = "Off ❌";
+    if (user.autoBuyEnabled) {
+      const amt = user.autoBuyAmount;
+      const trg = user.autoBuyTrigger === "detect"
+        ? "on Detect"
+        : "on Notify";
+      autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
+    }
+    lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
   
     const caption = lines.join("\n");
   
-    // 1) Send the GIF + caption
+    // 3) Enviar animación con dos botones: Help y Close
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [ { text: "❔ Help", url: "https://gemsniping.com/docs" } ]
+          [
+            { text: "❔ Help", url: "https://gemsniping.com/docs" },
+            { text: "❌ Close", callback_data: "status_close" }
+          ]
         ]
       }
     });
+  });
+  
+  // ─────────────────────────────────────────────
+  // callback para cerrar el mensaje de /status
+  // ─────────────────────────────────────────────
+  bot.on("callback_query", async query => {
+    if (query.data === "status_close") {
+      const chatId = query.message.chat.id;
+      const msgId  = query.message.message_id;
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+    }
+    // (no olvides responder siempre para quita spinner)
+    await bot.answerCallbackQuery(query.id);
   });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
