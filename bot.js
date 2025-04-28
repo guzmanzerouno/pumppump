@@ -567,7 +567,7 @@ bot.onText(/\/payments/, async (msg) => {
   
     // Función auxiliar para renderizar una página
     function renderPage(pageIndex) {
-      const pageSize = 10;
+      const pageSize = 5;
       const start    = pageIndex * pageSize;
       const slice    = userPayments.slice(start, start + pageSize);
       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
@@ -608,7 +608,7 @@ bot.onText(/\/payments/, async (msg) => {
     }
     const chatId   = query.message.chat.id;
     const msgId    = query.message.message_id;
-    const pageIndex = parseInt(data.split("_").pop(), 10);
+    const pageIndex = parseInt(data.split("_").pop(), 5);
   
     // Releer y filtrar pagos (igual que en /payments)
     const records      = JSON.parse(fs.readFileSync("payments.json"));
@@ -616,7 +616,7 @@ bot.onText(/\/payments/, async (msg) => {
   
     // Renderizar la página solicitada
     function renderPage(pageIndex) {
-      const pageSize = 10;
+      const pageSize = 5;
       const start    = pageIndex * pageSize;
       const slice    = userPayments.slice(start, start + pageSize);
       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
@@ -649,7 +649,7 @@ bot.onText(/\/payments/, async (msg) => {
     await bot.answerCallbackQuery(query.id);
   });
 
-  
+
 // ────────────────────────────────
 // 1) Comando /start y paso inicial
 // ────────────────────────────────
