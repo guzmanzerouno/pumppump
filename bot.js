@@ -1185,7 +1185,7 @@ bot.onText(/\/status/, async (msg) => {
     }
   
     // ¿Es el usuario especial?
-    const isSpecial = chatId.toString() === "1631313738";
+    const isSpecial = chatId.toString() === "472101348";
   
     // 1) GIF aleatorio: si es especial, mezclamos los generales + extras
     const extraGifs = [
