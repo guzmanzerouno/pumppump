@@ -1191,7 +1191,7 @@ bot.onText(/\/status/, async (msg) => {
     }
   
     // ¿Es el usuario especial?
-    const isSpecial = chatId.toString() === "472101348";
+    const isSpecial = chatId.toString() === "1631313738";
 
   // Selección weighed:
   let gifUrl;
