@@ -1147,28 +1147,23 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
 // ─────────────────────────────────────────────
 // 2) Listener único para todos los callbacks
 // ─────────────────────────────────────────────
-bot.on("callback_query", async (query) => {
+bot.on("callback_query", (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // 2.a) responde lo antes posible y captura errores de timeout
-    try {
-      await bot.answerCallbackQuery(query.id);
-    } catch (e) {
-      console.debug("⚠️ answerCallbackQuery failed:", e.message);
-    }
+    // 1) responde YA al callback (sin await)
+    bot.answerCallbackQuery(query.id).catch(() => {});
   
-    // 2.b) enrutado de acciones según query.data
+    // 2) enrutado de acciones
     switch (data) {
       case "status_close":
-        await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
-        return;
+        return bot.deleteMessage(chatId, query.message.message_id)
+          .catch(() => {});
   
-      // aquí podrías añadir otros case para:
-      // 'payments_page_X', 'payments_close', 'ata_on', 'ata_off', etc.
+      // ... otros callbacks aquí ...
   
       default:
-        // si no es un callback que nos interesa, simplemente salimos
+        // ni te molestes en hacer nada
         return;
     }
   });
