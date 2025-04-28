@@ -243,11 +243,15 @@ bot.on("callback_query", async (query) => {
           parse_mode: 'Markdown',
           disable_web_page_preview: true
         });
-      } else {
-        await bot.sendMessage(chatId,
+    } else {
+        // enviamos el aviso y programamos su borrado a los 15s
+        const sent = await bot.sendMessage(chatId,
           `⚠️ No empty ATA accounts were found to close.`,
           { parse_mode: 'Markdown' }
         );
+        setTimeout(() => {
+          bot.deleteMessage(chatId, sent.message_id).catch(() => {});
+        }, 15_000);
       }
       return;
     }
@@ -1159,97 +1163,95 @@ const statusGifs = [
 // /status with random GIF, user name, help & close buttons
 // ─────────────────────────────────────────────
 bot.onText(/\/status/, async (msg) => {
-    const chatId       = msg.chat.id;
-    const commandMsgId = msg.message_id;
-  
-    // 0) Borra el mensaje del comando
-    try {
-      await bot.deleteMessage(chatId, commandMsgId);
-    } catch (e) {
-      console.warn("Could not delete /status message:", e.message);
-    }
-  
-    const user = users[chatId];
-    if (!user || !user.walletPublicKey) {
-      return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
-    }
-  
-    // 1) GIF aleatorio
-    const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-  
-    // 2) Construir texto de estado
-    const firstName = msg.from.first_name || "there";
-    const now       = Date.now();
-    const lines     = [];
-  
-    lines.push(`👋 Hello *${firstName}*!\n👤 *Account Status*\n`);
-    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
-  
-    if (user.expired === "never") {
-      lines.push(`✅ *Status:* Unlimited Membership`);
-    } else if (user.expired && now < user.expired) {
-      const expDate = new Date(user.expired).toLocaleDateString();
-      const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
-      lines.push(`✅ *Status:* Active`);
-      lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
-    } else {
-      const expiredOn = user.expired
-        ? new Date(user.expired).toLocaleDateString()
-        : "N/A";
-      lines.push(`❌ *Status:* Expired`);
-      lines.push(`📅 *Expired On:* ${expiredOn}`);
-    }
-  
-    // Swap limit
-    let swapInfo = "N/A";
-    if (user.swapLimit === Infinity) swapInfo = "Unlimited";
-    else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
-    lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
-  
-    // Auto-ATA
-    const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
-    lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
-  
-    // Auto-Buy
-    let autobuyStatus = "Off ❌";
-    if (user.autoBuyEnabled) {
-      const amt = user.autoBuyAmount;
-      const trg = user.autoBuyTrigger === "detect"
-        ? "on Detect"
-        : "on Notify";
-      autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
-    }
-    lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
-  
-    const caption = lines.join("\n");
-  
-    // 3) Enviar animación con dos botones: Help y Close
+  const chatId       = msg.chat.id;
+  const commandMsgId = msg.message_id;
+
+  // 0) Borra el mensaje del comando
+  try {
+    await bot.deleteMessage(chatId, commandMsgId);
+  } catch (e) {
+    console.warn("Could not delete /status message:", e.message);
+  }
+
+  const user = users[chatId];
+  if (!user || !user.walletPublicKey) {
+    return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
+  }
+
+  // 1) GIF aleatorio
+  const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+
+  // 2) Construir texto de estado
+  const firstName = msg.from.first_name || "there";
+  const now       = Date.now();
+  const lines     = [];
+
+  lines.push(`👋 Hello *${firstName}*!\n👤 *Account Status*\n`);
+  lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
+
+  if (user.expired === "never") {
+    lines.push(`✅ *Status:* Unlimited Membership`);
+  } else if (user.expired && now < user.expired) {
+    const expDate = new Date(user.expired).toLocaleDateString();
+    const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
+    lines.push(`✅ *Status:* Active`);
+    lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
+  } else {
+    const expiredOn = user.expired
+      ? new Date(user.expired).toLocaleDateString()
+      : "N/A";
+    lines.push(`❌ *Status:* Expired`);
+    lines.push(`📅 *Expired On:* ${expiredOn}`);
+  }
+
+  // Swap limit
+  let swapInfo = "N/A";
+  if (user.swapLimit === Infinity) swapInfo = "Unlimited";
+  else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
+  lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
+
+  // Auto-ATA
+  const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
+  lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
+
+  // Auto-Buy
+  let autobuyStatus = "Off ❌";
+  if (user.autoBuyEnabled) {
+    const amt = user.autoBuyAmount;
+    const trg = user.autoBuyTrigger === "detect"
+      ? "on Detect"
+      : "on Notify";
+    autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
+  }
+  lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
+
+  const caption = lines.join("\n");
+
+  // 3) Enviar animación con dos botones en columnas separadas
     await bot.sendAnimation(chatId, gifUrl, {
-      caption,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "❔ Help", url: "https://gemsniping.com/docs" },
-            { text: "❌ Close", callback_data: "status_close" }
-          ]
-        ]
-      }
-    });
-  });
-  
-  // ─────────────────────────────────────────────
-  // callback para cerrar el mensaje de /status
-  // ─────────────────────────────────────────────
-  bot.on("callback_query", async query => {
-    if (query.data === "status_close") {
-      const chatId = query.message.chat.id;
-      const msgId  = query.message.message_id;
-      await bot.deleteMessage(chatId, msgId).catch(() => {});
+    caption,
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
+        [ { text: "❌ Close", callback_data: "status_close"        } ]
+      ]
     }
-    // (no olvides responder siempre para quita spinner)
-    await bot.answerCallbackQuery(query.id);
   });
+});
+
+// ─────────────────────────────────────────────
+// callback para cerrar el mensaje de /status
+// ─────────────────────────────────────────────
+bot.on("callback_query", async query => {
+  if (query.data === "status_close") {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    await bot.deleteMessage(chatId, msgId).catch(() => {});
+  }
+  // (no olvides responder siempre para quita spinner)
+  await bot.answerCallbackQuery(query.id);
+});
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
