@@ -312,7 +312,7 @@ function isUserActive(user) {
 // ─────────────────────────────────────────────
 function showPaymentButtons(chatId) {
     return bot.sendPhoto(chatId,
-      "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
+      "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png", {
         caption: "💳 Please select a subscription plan:",
         reply_markup: {
           inline_keyboard: [
