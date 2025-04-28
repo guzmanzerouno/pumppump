@@ -530,7 +530,10 @@ Your membership is now active.
     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-  bot.onText(/\/payments/, async (msg) => {
+  // ────────────────────────────────
+// Comando /payments con paginación
+// ────────────────────────────────
+bot.onText(/\/payments/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
   
@@ -550,35 +553,103 @@ Your membership is now active.
       );
     }
   
-    // 3) Leer archivo de pagos
+    // 3) Leer archivo de pagos y filtrar
     const paymentsFile = "payments.json";
     if (!fs.existsSync(paymentsFile)) {
       return bot.sendMessage(chatId, "📭 No payment records found.");
     }
-  
     const records      = JSON.parse(fs.readFileSync(paymentsFile));
-    const userPayments = records.filter(p => p.chatId === chatId);
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
     if (userPayments.length === 0) {
       return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
     }
   
-    // 4) Construir el mensaje de historial
-    let message = `📜 *Your Payment History:*\n\n`;
-    for (const p of userPayments.reverse()) {
-      const date = new Date(p.timestamp).toLocaleDateString();
-      message += `🗓️ *${date}*\n`;
-      message += `💼 Wallet: \`${p.wallet}\`\n`;
-      message += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-      message += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+    // Función auxiliar para renderizar una página
+    function renderPage(pageIndex) {
+      const pageSize = 10;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      // Construir inline keyboard
+      const buttons = [];
+      if (pageIndex > 0) {
+        buttons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if (start + pageSize < userPayments.length) {
+        buttons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      return { text, keyboard: buttons.length ? [buttons] : [] };
     }
   
-    // 5) Enviar el historial
-    await bot.sendMessage(chatId, message, {
+    // 4) Enviar la primera página (índice 0)
+    const { text, keyboard } = renderPage(0);
+    await bot.sendMessage(chatId, text, {
       parse_mode: "Markdown",
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
     });
   });
+  
+  // ────────────────────────────────
+  // Callback para paginar /payments
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const data = query.data;
+    if (!data.startsWith("payments_page_")) {
+      return bot.answerCallbackQuery(query.id);
+    }
+    const chatId   = query.message.chat.id;
+    const msgId    = query.message.message_id;
+    const pageIndex = parseInt(data.split("_").pop(), 10);
+  
+    // Releer y filtrar pagos (igual que en /payments)
+    const records      = JSON.parse(fs.readFileSync("payments.json"));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
+  
+    // Renderizar la página solicitada
+    function renderPage(pageIndex) {
+      const pageSize = 10;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      const buttons = [];
+      if (pageIndex > 0) {
+        buttons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if ((pageIndex+1) * pageSize < userPayments.length) {
+        buttons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      return { text, keyboard: buttons.length ? [buttons] : [] };
+    }
+  
+    const { text, keyboard } = renderPage(pageIndex);
+    await bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  
+    await bot.answerCallbackQuery(query.id);
+  });
+
+  
 // ────────────────────────────────
 // 1) Comando /start y paso inicial
 // ────────────────────────────────
