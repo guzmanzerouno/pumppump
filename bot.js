@@ -203,20 +203,24 @@ bot.onText(/\/ata/, async (msg) => {
 
 // 2) Handler para los botones ON / OFF
 bot.on("callback_query", async (query) => {
-    const chatId = query.message.chat.id;
-    const data   = query.data;
+    const { id, data, message } = query;
+    const chatId = message.chat.id;
+    const msgId  = message.message_id;
   
+    // 1) Responder el callback de Telegram lo antes posible
+    await bot.answerCallbackQuery(id);
+  
+    // 2) Ahora ya puedes procesar la acción
     if (data === "ata_on") {
       users[chatId] = users[chatId] || {};
       users[chatId].ataAutoCreationEnabled = true;
       saveUsers();
   
-      await bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
+      return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
         chat_id: chatId,
-        message_id: query.message.message_id,
+        message_id: msgId,
         parse_mode: "Markdown"
       });
-      return bot.answerCallbackQuery(query.id);
     }
   
     if (data === "ata_off") {
@@ -226,38 +230,40 @@ bot.on("callback_query", async (query) => {
   
       await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
         chat_id: chatId,
-        message_id: query.message.message_id,
+        message_id: msgId,
         parse_mode: "Markdown"
       });
-      await bot.answerCallbackQuery(query.id);
   
-      // ➡️ Cerrar ATAs vacías y capturar firma
-      const { closedTotal, lastSig } = await closeEmptyATAs(chatId);
-  
-      if (closedTotal > 0) {
-        let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
-        if (lastSig) {
-          text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+      // 3) Cierra ATAs en background, sin bloquear el callback
+      closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
+        if (closedTotal > 0) {
+          let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
+          if (lastSig) {
+            text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+          }
+          bot.sendMessage(chatId, text, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          });
+        } else {
+          bot.sendMessage(chatId,
+            `⚠️ No empty ATA accounts were found to close.`,
+            { parse_mode: 'Markdown' }
+          ).then(sent => {
+            setTimeout(() => {
+              bot.deleteMessage(chatId, sent.message_id).catch(() => {});
+            }, 15_000);
+          });
         }
-        await bot.sendMessage(chatId, text, {
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true
-        });
-    } else {
-        // enviamos el aviso y programamos su borrado a los 15s
-        const sent = await bot.sendMessage(chatId,
-          `⚠️ No empty ATA accounts were found to close.`,
-          { parse_mode: 'Markdown' }
-        );
-        setTimeout(() => {
-          bot.deleteMessage(chatId, sent.message_id).catch(() => {});
-        }, 15_000);
-      }
+      }).catch(err => {
+        console.error("Error cerrando ATAs:", err);
+      });
+  
       return;
     }
   
-    // ... aquí seguirían otros callback_queries (buy_, sell_, etc.)
-    return bot.answerCallbackQuery(query.id);
+    // En caso de otros callbacks...
+    // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
   });
 
 // ─────────────────────────────────────────────
@@ -2713,62 +2719,31 @@ bot.onText(/\/autobuy/, async (msg) => {
   });
 
   bot.on("callback_query", async (query) => {
-    const chatId    = query.message.chat.id;
+    const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
-    const data      = query.data;
-  
-    // ─────────────────────────────────────────────
-    // 1) Intentamos quitar el spinner (ignorando el 400 "query is too old")
-    // ─────────────────────────────────────────────
-    try {
-      await bot.answerCallbackQuery(query.id);
-    } catch (err) {
-      const code = err.response?.body?.error_code;
-      const desc = err.response?.body?.description || "";
-      if (!(code === 400 && desc.includes("query is too old"))) {
-        console.error("Error en answerCallbackQuery inicial:", err);
-      }
-    }
+    const data = query.data;
   
     try {
       // ─────────────────────────────────────────────
-      // 2) REFRESH DE CONFIRMACIÓN DE COMPRA
+      // REFRESH DE CONFIRMACIÓN DE COMPRA
       // ─────────────────────────────────────────────
       if (data.startsWith("refresh_buy_")) {
         const tokenMint = data.split("_")[2];
         await refreshBuyConfirmationV2(chatId, messageId, tokenMint);
-  
-        // confirmamos al usuario, ignorando el 400 si es muy viejo
-        try {
-          await bot.answerCallbackQuery(query.id, { text: "✅ Purchase updated." });
-        } catch (err) {
-          const code = err.response?.body?.error_code;
-          const desc = err.response?.body?.description || "";
-          if (!(code === 400 && desc.includes("query is too old"))) {
-            console.error("Error en answerCallbackQuery after refresh_buy:", err);
-          }
-        }
+        await bot.answerCallbackQuery(query.id, { text: "✅ Purchase updated." });
         return;
       }
   
       // ─────────────────────────────────────────────
-      // 3) REFRESH DE INFO GENERAL DE TOKEN
+      // REFRESH DE INFO GENERAL DE TOKEN
       // ─────────────────────────────────────────────
       if (data.startsWith("refresh_")) {
         const mint = data.split("_")[1];
   
-        // … tu mismo bloque de validaciones y fetches …
+        // Se obtienen los datos guardados (estáticos) en tokens.json
         const originalTokenData = getTokenInfo(mint);
         if (!originalTokenData) {
-          try {
-            await bot.answerCallbackQuery(query.id, { text: "Token not found." });
-          } catch (err) {
-            const code = err.response?.body?.error_code;
-            const desc = err.response?.body?.description || "";
-            if (!(code === 400 && desc.includes("query is too old"))) {
-              console.error("Error en answerCallbackQuery token not found:", err);
-            }
-          }
+          await bot.answerCallbackQuery(query.id, { text: "Token not found." });
           return;
         }
   
@@ -3290,19 +3265,9 @@ async function confirmSell(
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // 0) Intentar quitar el spinner, pero ignorar el 400 de "query is too old"
-    try {
-      await bot.answerCallbackQuery(query.id);
-    } catch (err) {
-      const description = err.response?.body?.description;
-      if (err.response?.body?.error_code !== 400 || !description?.includes("query is too old")) {
-        console.error("Error en answerCallbackQuery:", err);
-      }
-      // si es 400 y dice "query is too old", simplemente pasamos
-    }
-  
     if (data.startsWith("buy_")) {
-      // 1) Ya hicimos answerCallbackQuery arriba
+      // 1) Quitar spinner
+      await bot.answerCallbackQuery(query.id);
   
       const [_, mint, amountStr] = data.split("_");
       const amountSOL = parseFloat(amountStr);
@@ -3382,7 +3347,6 @@ async function confirmSell(
         });
       }
     }
-  
   });
 
   async function confirmBuy(chatId, swapDetails, messageId, txSignature) {
