@@ -872,7 +872,6 @@ Copy the long string and paste here.`,
         : `✅ Active for ${Math.ceil((result.expiration - Date.now())/(1000*60*60*24))} day(s)`;
   
       const confirmation =
-        `✅ *User Registered!*\n` +
         `👤 *Name:* ${user.name}\n` +
         `📱 *Phone:* ${user.phone}\n` +
         `📧 *Email:* ${user.email}\n` +
@@ -880,7 +879,7 @@ Copy the long string and paste here.`,
         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
         `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
         `⏳ *Status:* ${activeStatus}`;
-        `🎟️ *Limited:* ${limitedText}`;
+        `🎟️ *Limited:* 50 swaps`;
   
       await bot.deleteMessage(chatId, msgId).catch(() => {});
       return bot.sendPhoto(
