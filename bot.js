@@ -759,63 +759,58 @@ Copy the long string and paste here.`,
     saveUsers();
   });
   
-  // ────────────────────────────────
-  // 3) Handler de Yes/No para referral / trial
-  // ────────────────────────────────
-  bot.on("callback_query", async query => {
+// ────────────────────────────────
+// 3) Handler de Yes/No para referral / trial
+// ────────────────────────────────
+bot.on("callback_query", async query => {
     const chatId = query.message.chat.id;
     const msgId  = query.message.message_id;
     const data   = query.data;
     const user   = users[chatId];
   
-    // YES: pedimos el código
+    // YES: guardamos msgId y pedimos el código
     if (data === "referral_yes") {
-        user.step = 6;
-        saveUsers();
-        await bot.editMessageText("🔠 Please enter your *referral code*:", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-        return bot.answerCallbackQuery(query.id);
-      }
+      user.step  = 6;
+      user.msgId = msgId;         // ◀️ guardamos este prompt para borrarlo luego
+      saveUsers();
   
+      await bot.editMessageText("🔠 Please enter your *referral code*:", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery(query.id);
+    }
+  
+    // NO: borramos prompt de Private Key (si queda), activamos trial…
     if (data === "referral_no") {
       await bot.answerCallbackQuery(query.id);
   
-      // 1) borramos el prompt de private key
       if (user.tempKeyPromptId) {
         await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
         delete user.tempKeyPromptId;
       }
   
-      // 2) activamos trial
       const now    = Date.now();
       const oneDay = 24 * 60 * 60 * 1000;
-      user.expired     = now + oneDay;
-      user.subscribed  = true;
-      user.swapLimit   = 50;      // swaps gratis de prueba
-      user.step        = 0;
+      user.expired    = now + oneDay;
+      user.subscribed = true;
+      user.swapLimit  = 50;
+      user.step       = 0;
       saveUsers();
   
       const expDate = new Date(user.expired).toLocaleDateString();
-  
-      // 3) mensaje de trial
       await bot.editMessageText(
         `🎉 *Free Trial Activated!* 🎉\n\n` +
         `You’ve unlocked a *1-day free trial* with *50 swaps*.\n` +
         `Trial ends on ${expDate}.\n\n` +
         `Let’s start sniping!`,
-        {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        }
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
       );
   
-      // 4) mensaje de confirmación completa de usuario
-      const statusLine   = `Active for 1 day`;
-      const limitedText  = `50 swaps`;
+      // luego enviamos confirmación completa
+      const statusLine      = `Active for 1 day`;
+      const limitedText     = `50 swaps`;
       const fullConfirmation =
         `👤 *Name:* ${user.name}\n` +
         `📱 *Phone:* ${user.phone}\n` +
@@ -826,7 +821,6 @@ Copy the long string and paste here.`,
         `⏳ *Status:* ${statusLine}\n` +
         `🎟️ *Limited:* ${limitedText}`;
   
-      // enviamos como foto + botón “How to use”
       await bot.sendPhoto(
         chatId,
         "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
@@ -835,31 +829,41 @@ Copy the long string and paste here.`,
           parse_mode: "Markdown",
           reply_markup: {
             inline_keyboard: [
-              [ { text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" } ]
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
             ]
           }
         }
       );
+      return;
     }
-    // otros callbacks…
+  
+    await bot.answerCallbackQuery(query.id);
   });
   
   // ────────────────────────────────
   // 4) Handler de referral code (step 6)
   // ────────────────────────────────
   bot.on("message", async (msg) => {
-    const chatId   = msg.chat.id;
-    const text     = msg.text?.trim();
-    const messageId= msg.message_id;
-    const user     = users[chatId];
+    const chatId    = msg.chat.id;
+    const text      = msg.text?.trim();
+    const messageId = msg.message_id;
+    const user      = users[chatId];
+  
     if (!user || user.step !== 6) return;
   
+    // borramos input del usuario
     await bot.deleteMessage(chatId, messageId).catch(() => {});
-    const msgId = user.msgId;
+  
+    // borramos el prompt “Please enter your referral code”
+    if (user.msgId) {
+      await bot.deleteMessage(chatId, user.msgId).catch(() => {});
+      delete user.msgId;
+      saveUsers();
+    }
   
     const result = validateReferralCode(text);
     if (result.valid) {
-      // actualizar datos
+      // actualizamos usuario
       user.referrer   = result.referrer;
       user.rcode      = result.code;
       user.expired    = result.expiration;
@@ -869,7 +873,10 @@ Copy the long string and paste here.`,
   
       const activeStatus = result.expiration === "never"
         ? "✅ Unlimited"
-        : `✅ Active for ${Math.ceil((result.expiration - Date.now())/(1000*60*60*24))} day(s)`;
+        : `✅ Active for ${Math.ceil((result.expiration - Date.now()) / (1000*60*60*24))} day(s)`;
+      const limitedText = typeof user.swapLimit === "number"
+        ? `${user.swapLimit} swaps`
+        : "Unlimited";
   
       const confirmation =
         `👤 *Name:* ${user.name}\n` +
@@ -878,13 +885,12 @@ Copy the long string and paste here.`,
         `🆔 *Username:* ${user.username}\n` +
         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
         `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
-        `⏳ *Status:* ${activeStatus}`;
-        `🎟️ *Limited:* 50 swaps`;
+        `⏳ *Status:* ${activeStatus}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
   
-      await bot.deleteMessage(chatId, msgId).catch(() => {});
       return bot.sendPhoto(
         chatId,
-        "hhttps://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
         {
           caption: confirmation,
           parse_mode: "Markdown",
@@ -903,11 +909,7 @@ Copy the long string and paste here.`,
       saveUsers();
       await bot.editMessageText(
         "⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.",
-        {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        }
+        { chat_id: chatId, message_id: msg.message_id, parse_mode: "Markdown" }
       );
       return showPaymentButtons(chatId);
     }
