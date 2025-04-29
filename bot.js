@@ -4106,45 +4106,52 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
 });
 
 // Handle user’s token address reply
-bot.on("message", async msg => {
-  const chatId = msg.chat.id;
-  if (!waitingSwapQuery.has(chatId)) return;
-  waitingSwapQuery.delete(chatId);
-
-  const token    = msg.text.trim();
-  const tokenMsg = msg.message_id;
-  await bot.deleteMessage(chatId, tokenMsg).catch(() => {});
-
-  const wallet   = users[chatId]?.walletPublicKey;
-  const allSwaps = loadAllSwaps();
-
-  const userSwaps = allSwaps.filter(s =>
-    s.Wallet === wallet &&
-    (s["Received Token Address"] === token || s.Pair?.includes(token))
-  );
-
-  if (userSwaps.length === 0) {
-    return bot.sendMessage(chatId,
-      `📭 No swaps found for token \`${token}\`.`,
-      { parse_mode: "Markdown" }
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    if (!waitingSwapQuery.has(chatId)) return;
+    waitingSwapQuery.delete(chatId);
+  
+    // 1) Borrar el mensaje donde envió el token
+    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+  
+    const token  = msg.text.trim();
+    const wallet = users[chatId]?.walletPublicKey;
+    const allSwaps = loadAllSwaps();
+  
+    // 2) Filtrar solo los swaps de este wallet y este token
+    const userSwaps = allSwaps.filter(s =>
+      s.Wallet === wallet &&
+      (s["Received Token Address"] === token || s.Pair?.includes(token))
     );
-  }
-
-  const blocks = userSwaps.map(s => "```json\n" +
-    JSON.stringify(s, null, 2) +
-    "\n```"
-  ).join("\n");
-
-  await bot.sendMessage(chatId, blocks, {
-    parse_mode: "Markdown",
-    disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "❌ Close", callback_data: "swaps_close" }
-      ]]
+  
+    if (userSwaps.length === 0) {
+      return bot.sendMessage(chatId,
+        `📭 No swaps found for token \`${token}\`.`,
+        { parse_mode: "Markdown" }
+      );
     }
+  
+    // 3) Tomar únicamente los campos messageText y unirlos
+    const content = userSwaps
+      .map(s => s.messageText)
+      .join("\n\n");
+  
+    // 4) Construir URL para compartir por WhatsApp
+    const waUrl = `https://api.whatsapp.com/send?text=` +
+      encodeURIComponent(content);
+  
+    // 5) Enviar un único mensaje con todos los swaps + botones
+    await bot.sendMessage(chatId, content, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "💬 Share on WhatsApp", url: waUrl },
+          { text: "❌ Close", callback_data: "swaps_close" }
+        ]]
+      }
+    });
   });
-});
 
 
 // ────────────────────────────────
