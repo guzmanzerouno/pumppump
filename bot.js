@@ -3946,15 +3946,6 @@ if (data === 'ata_close') {
       return [];
     }
   }
-  
-  function saveSwaps(swaps) {
-    try {
-      fs.writeFileSync(SWAPS_FILE, JSON.stringify(swaps, null, 2));
-      console.log("📂 Swaps actualizados.");
-    } catch (err) {
-      console.error("❌ Error guardando swaps:", err);
-    }
-  }
 
 // ────────────────────────────────
 // /swaps command with PnL & token-lookup (updated with detailed SOL-based PnL + win/lose counts)
