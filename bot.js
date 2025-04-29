@@ -170,101 +170,101 @@ async function closeEmptyATAs(chatId) {
   return { closedTotal, lastSig };
 }
 
-// ─────────────────────────────────────────────
-// Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
-// ─────────────────────────────────────────────
-bot.onText(/\/ata/, async (msg) => {
-  const chatId   = msg.chat.id;
-  const cmdMsgId = msg.message_id;
+// // ─────────────────────────────────────────────
+// // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
+// // ─────────────────────────────────────────────
+// bot.onText(/\/ata/, async (msg) => {
+//   const chatId   = msg.chat.id;
+//   const cmdMsgId = msg.message_id;
 
-  try {
-    await bot.deleteMessage(chatId, cmdMsgId);
-  } catch (err) {
-    console.warn("Could not delete /ata command message:", err.message);
-  }
+//   try {
+//     await bot.deleteMessage(chatId, cmdMsgId);
+//   } catch (err) {
+//     console.warn("Could not delete /ata command message:", err.message);
+//   }
 
-  const text =
-    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
-    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
-    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+//   const text =
+//     "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+//     "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
+//     "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
 
-  await bot.sendMessage(chatId, text, {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ ON",  callback_data: "ata_on"  },
-          { text: "❌ OFF", callback_data: "ata_off" }
-        ]
-      ]
-    }
-  });
-});
+//   await bot.sendMessage(chatId, text, {
+//     parse_mode: 'Markdown',
+//     reply_markup: {
+//       inline_keyboard: [
+//         [
+//           { text: "✅ ON",  callback_data: "ata_on"  },
+//           { text: "❌ OFF", callback_data: "ata_off" }
+//         ]
+//       ]
+//     }
+//   });
+// });
 
-// 2) Handler para los botones ON / OFF
-bot.on("callback_query", async (query) => {
-    const { id, data, message } = query;
-    const chatId = message.chat.id;
-    const msgId  = message.message_id;
+// // 2) Handler para los botones ON / OFF
+// bot.on("callback_query", async (query) => {
+//     const { id, data, message } = query;
+//     const chatId = message.chat.id;
+//     const msgId  = message.message_id;
   
-    // 1) Responder el callback de Telegram lo antes posible
-    await bot.answerCallbackQuery(id);
+//     // 1) Responder el callback de Telegram lo antes posible
+//     await bot.answerCallbackQuery(id);
   
-    // 2) Ahora ya puedes procesar la acción
-    if (data === "ata_on") {
-      users[chatId] = users[chatId] || {};
-      users[chatId].ataAutoCreationEnabled = true;
-      saveUsers();
+//     // 2) Ahora ya puedes procesar la acción
+//     if (data === "ata_on") {
+//       users[chatId] = users[chatId] || {};
+//       users[chatId].ataAutoCreationEnabled = true;
+//       saveUsers();
   
-      return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
-    }
+//       return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
+//         chat_id: chatId,
+//         message_id: msgId,
+//         parse_mode: "Markdown"
+//       });
+//     }
   
-    if (data === "ata_off") {
-      users[chatId] = users[chatId] || {};
-      users[chatId].ataAutoCreationEnabled = false;
-      saveUsers();
+//     if (data === "ata_off") {
+//       users[chatId] = users[chatId] || {};
+//       users[chatId].ataAutoCreationEnabled = false;
+//       saveUsers();
   
-      await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
+//       await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
+//         chat_id: chatId,
+//         message_id: msgId,
+//         parse_mode: "Markdown"
+//       });
   
-      // 3) Cierra ATAs en background, sin bloquear el callback
-      closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
-        if (closedTotal > 0) {
-          let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
-          if (lastSig) {
-            text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
-          }
-          bot.sendMessage(chatId, text, {
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-          });
-        } else {
-          bot.sendMessage(chatId,
-            `⚠️ No empty ATA accounts were found to close.`,
-            { parse_mode: 'Markdown' }
-          ).then(sent => {
-            setTimeout(() => {
-              bot.deleteMessage(chatId, sent.message_id).catch(() => {});
-            }, 15_000);
-          });
-        }
-      }).catch(err => {
-        console.error("Error cerrando ATAs:", err);
-      });
+//       // 3) Cierra ATAs en background, sin bloquear el callback
+//       closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
+//         if (closedTotal > 0) {
+//           let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
+//           if (lastSig) {
+//             text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+//           }
+//           bot.sendMessage(chatId, text, {
+//             parse_mode: 'Markdown',
+//             disable_web_page_preview: true
+//           });
+//         } else {
+//           bot.sendMessage(chatId,
+//             `⚠️ No empty ATA accounts were found to close.`,
+//             { parse_mode: 'Markdown' }
+//           ).then(sent => {
+//             setTimeout(() => {
+//               bot.deleteMessage(chatId, sent.message_id).catch(() => {});
+//             }, 15_000);
+//           });
+//         }
+//       }).catch(err => {
+//         console.error("Error cerrando ATAs:", err);
+//       });
   
-      return;
-    }
+//       return;
+//     }
   
-    // En caso de otros callbacks...
-    // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
-  });
+//     // En caso de otros callbacks...
+//     // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
+//   });
 
 // ─────────────────────────────────────────────
 // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
@@ -1144,141 +1144,141 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
 }
 
-// // ─────────────────────────────────────────────
-// // /status with random GIF, user name & help button
-// // ─────────────────────────────────────────────
-// const statusGifs = [
-//     "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExaXlyNXpvOXBmczFyNmo2cmZjbWZndG13d3lhOTBoOWQyN2RmNjE0dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tA4tvdOYg5lY52otNL/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExODNtOXd1MWs5bDZ4c2x6czJzbHIybml4djc1NmgwNjlydWt3OGkyYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7tXmRetra2vpFyrYpe/giphy.gif",
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXppeGs1NDhubTEyeGg0MHUxdHI2M2dlcHdxZjhwbTV0aWxjNDB3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PLjqnYlGEoQTuYrTEn/giphy.gif",
-//     "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmVyZHpqazBjaWdna3lybGtscTg1NTFxazR1c2IxemM0YTYzd3ppMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/K2tgd5hmGs7dpWZfdb/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW03OWdxbGQyZnBtc3ZrYzh6bGs3anIxZjRzdG96aG56YThiNWtjdiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9UrvmC9KFVrsPaIY7R/giphy.gif",
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMTJhZXBjbGJyY3ZsNHM0Y3c5enJwcHBvY2FwZjd3djY1cmJlNjk5aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4TYHPvIlwE3257tEQ9/giphy.gif",
-//     "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExajd3amZlMHk3NHFuMmF1dWN4eTN3ajc0d3VzdThrdGRzem8xOTJzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VV9EE5TjXdnWLiyGwt/giphy.gif",
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdXoxeHd0ZnB2cXo4aDV0cmhvMWs1NGhocTkzZXE5eHdhb2V0c2hucSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/jBh6MxLLsH9ZNfYLY9/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGxkbWF0M2h6MGRtZXpyeWZ5enBiNWJ2YmVmZnFzcXdodWx1MGthayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VRKheDy4DkBMrQm66p/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWxxNm9laHIzY3c3eHpvbHdlZjV1MmloZTRtZjR4dDB6cTFyYTRpbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/qcLaYD4EIPJabpN16c/giphy.gif",
-//     "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXg4emp4aG91dGtwaGZkdXp6OHpnOTlzeGZyMzhuNnczc2NpOWw3ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/NffRIeuF3yPYuYS1xt/giphy.gif",
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNjFycmgxaHF5bTRiZWFyaGNnOXdkZ3lwZTNleWVidmw1bWU3cDMwMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XGOu1Ppbi43yqquqb1/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbGM4eDMwcjdwNmVndXY3NHFucTFrc2cxc3hocHowNnZkcnhucWJudyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1zkpgntA5oRjxUVkOM/giphy.gif",
-//     "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExZnhpcDdvaGwwbnBkMmtidjRyOWZza3NrbTdsdm82a3JuaDhtcjk2ayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9tZhPkNjSMpqTekDhT/giphy.gif",
-//     "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
-//   ];
-//   const extraGifs  = [
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXRmMnl5MWliOGI3ZDB1MWpyeXRqa3Jnand5aTMyNDBrdzd0YmwwZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ie4CIIvQS0bk3zwZlM/giphy.gif",
-//     "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3Z3bDYydWZpMmNyM3N2MXljdTV6dGFzcmRuN3B5YTh1OG4yMG40aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/IzXiddo2twMmdmU8Lv/giphy.gif",
-//     "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExazBiamsyenIyeHlzaTF0N3h1bngxczVscXVyZjE3MmYwMGNmMXdpNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SYo1DFS8NLhhqzzjMU/giphy.gif",
-//     "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
-//   ];  
+// ─────────────────────────────────────────────
+// /status with random GIF, user name & help button
+// ─────────────────────────────────────────────
+const statusGifs = [
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExaXlyNXpvOXBmczFyNmo2cmZjbWZndG13d3lhOTBoOWQyN2RmNjE0dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tA4tvdOYg5lY52otNL/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExODNtOXd1MWs5bDZ4c2x6czJzbHIybml4djc1NmgwNjlydWt3OGkyYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7tXmRetra2vpFyrYpe/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXppeGs1NDhubTEyeGg0MHUxdHI2M2dlcHdxZjhwbTV0aWxjNDB3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PLjqnYlGEoQTuYrTEn/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmVyZHpqazBjaWdna3lybGtscTg1NTFxazR1c2IxemM0YTYzd3ppMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/K2tgd5hmGs7dpWZfdb/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW03OWdxbGQyZnBtc3ZrYzh6bGs3anIxZjRzdG96aG56YThiNWtjdiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9UrvmC9KFVrsPaIY7R/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMTJhZXBjbGJyY3ZsNHM0Y3c5enJwcHBvY2FwZjd3djY1cmJlNjk5aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4TYHPvIlwE3257tEQ9/giphy.gif",
+    "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExajd3amZlMHk3NHFuMmF1dWN4eTN3ajc0d3VzdThrdGRzem8xOTJzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VV9EE5TjXdnWLiyGwt/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdXoxeHd0ZnB2cXo4aDV0cmhvMWs1NGhocTkzZXE5eHdhb2V0c2hucSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/jBh6MxLLsH9ZNfYLY9/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGxkbWF0M2h6MGRtZXpyeWZ5enBiNWJ2YmVmZnFzcXdodWx1MGthayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VRKheDy4DkBMrQm66p/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWxxNm9laHIzY3c3eHpvbHdlZjV1MmloZTRtZjR4dDB6cTFyYTRpbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/qcLaYD4EIPJabpN16c/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXg4emp4aG91dGtwaGZkdXp6OHpnOTlzeGZyMzhuNnczc2NpOWw3ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/NffRIeuF3yPYuYS1xt/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNjFycmgxaHF5bTRiZWFyaGNnOXdkZ3lwZTNleWVidmw1bWU3cDMwMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XGOu1Ppbi43yqquqb1/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbGM4eDMwcjdwNmVndXY3NHFucTFrc2cxc3hocHowNnZkcnhucWJudyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1zkpgntA5oRjxUVkOM/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExZnhpcDdvaGwwbnBkMmtidjRyOWZza3NrbTdsdm82a3JuaDhtcjk2ayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9tZhPkNjSMpqTekDhT/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
+  ];
+  const extraGifs  = [
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXRmMnl5MWliOGI3ZDB1MWpyeXRqa3Jnand5aTMyNDBrdzd0YmwwZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ie4CIIvQS0bk3zwZlM/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3Z3bDYydWZpMmNyM3N2MXljdTV6dGFzcmRuN3B5YTh1OG4yMG40aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/IzXiddo2twMmdmU8Lv/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExazBiamsyenIyeHlzaTF0N3h1bngxczVscXVyZjE3MmYwMGNmMXdpNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SYo1DFS8NLhhqzzjMU/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
+  ];  
   
-// // ─────────────────────────────────────────────
-// // /status with random GIF, user name, help & close buttons
-// // ─────────────────────────────────────────────
-// bot.onText(/\/status/, async (msg) => {
-//     const chatId       = msg.chat.id;
-//     const commandMsgId = msg.message_id;
+// ─────────────────────────────────────────────
+// /status with random GIF, user name, help & close buttons
+// ─────────────────────────────────────────────
+bot.onText(/\/status/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
   
-//     // 0) Borra el mensaje del comando
-//     try {
-//       await bot.deleteMessage(chatId, commandMsgId);
-//     } catch (e) {
-//       console.warn("Could not delete /status message:", e.message);
-//     }
+    // 0) Borra el mensaje del comando
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /status message:", e.message);
+    }
   
-//     const user = users[chatId];
-//     if (!user || !user.walletPublicKey) {
-//       return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
-//     }
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
+    }
   
-//     // ¿Es el usuario especial?
-//     const isSpecial = chatId.toString() === "1631313738";
+    // ¿Es el usuario especial?
+    const isSpecial = chatId.toString() === "1631313738";
 
-//   // Selección weighed:
-//   let gifUrl;
-//   if (isSpecial) {
-//     // 60% chance extraGifs, 40% chance statusGifs
-//     if (Math.random() < 0.6) {
-//       gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
-//     } else {
-//       gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-//     }
-//   } else {
-//     gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-//   }
+  // Selección weighed:
+  let gifUrl;
+  if (isSpecial) {
+    // 60% chance extraGifs, 40% chance statusGifs
+    if (Math.random() < 0.6) {
+      gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
+    } else {
+      gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+    }
+  } else {
+    gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+  }
 
-//   const displayName = isSpecial
-//     ? "Popochita"
-//     : (msg.from.first_name || "there");
+  const displayName = isSpecial
+    ? "Popochita"
+    : (msg.from.first_name || "there");
 
-//   const now   = Date.now();
-//   const lines = [];
+  const now   = Date.now();
+  const lines = [];
   
-//     lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*\n`);
-//     lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
+    lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*\n`);
+    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
   
-//     if (user.expired === "never") {
-//       lines.push(`✅ *Status:* Unlimited Membership`);
-//     } else if (user.expired && now < user.expired) {
-//       const expDate  = new Date(user.expired).toLocaleDateString();
-//       const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
-//       lines.push(`✅ *Status:* Active`);
-//       lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
-//     } else {
-//       const expiredOn = user.expired
-//         ? new Date(user.expired).toLocaleDateString()
-//         : "N/A";
-//       lines.push(`❌ *Status:* Expired`);
-//       lines.push(`📅 *Expired On:* ${expiredOn}`);
-//     }
+    if (user.expired === "never") {
+      lines.push(`✅ *Status:* Unlimited Membership`);
+    } else if (user.expired && now < user.expired) {
+      const expDate  = new Date(user.expired).toLocaleDateString();
+      const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
+      lines.push(`✅ *Status:* Active`);
+      lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
+    } else {
+      const expiredOn = user.expired
+        ? new Date(user.expired).toLocaleDateString()
+        : "N/A";
+      lines.push(`❌ *Status:* Expired`);
+      lines.push(`📅 *Expired On:* ${expiredOn}`);
+    }
   
-//     // Swap limit
-//     let swapInfo = "N/A";
-//     if (user.swapLimit === Infinity) swapInfo = "Unlimited";
-//     else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
-//     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
+    // Swap limit
+    let swapInfo = "N/A";
+    if (user.swapLimit === Infinity) swapInfo = "Unlimited";
+    else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
+    lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
   
-//     // Auto-ATA
-//     const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
-//     lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
+    // Auto-ATA
+    const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
+    lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
   
-//     // Auto-Buy
-//     let autobuyStatus = "Off ❌";
-//     if (user.autoBuyEnabled) {
-//       const amt = user.autoBuyAmount;
-//       const trg = user.autoBuyTrigger === "detect"
-//         ? "on Detect"
-//         : "on Notify";
-//       autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
-//     }
-//     lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
+    // Auto-Buy
+    let autobuyStatus = "Off ❌";
+    if (user.autoBuyEnabled) {
+      const amt = user.autoBuyAmount;
+      const trg = user.autoBuyTrigger === "detect"
+        ? "on Detect"
+        : "on Notify";
+      autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
+    }
+    lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
   
-//     const caption = lines.join("\n");
+    const caption = lines.join("\n");
   
-//     // 3) Enviar animación con dos botones en columnas separadas
-//     await bot.sendAnimation(chatId, gifUrl, {
-//       caption,
-//       parse_mode: "Markdown",
-//       reply_markup: {
-//         inline_keyboard: [
-//           [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
-//           [ { text: "❌ Close", callback_data: "status_close"        } ]
-//         ]
-//       }
-//     });
-//   });
+    // 3) Enviar animación con dos botones en columnas separadas
+    await bot.sendAnimation(chatId, gifUrl, {
+      caption,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
+          [ { text: "❌ Close", callback_data: "status_close"        } ]
+        ]
+      }
+    });
+  });
 
-// // ─────────────────────────────────────────────
-// // callback para cerrar el mensaje de /status
-// // ─────────────────────────────────────────────
-// bot.on("callback_query", async query => {
-//   if (query.data === "status_close") {
-//     const chatId = query.message.chat.id;
-//     const msgId  = query.message.message_id;
-//     await bot.deleteMessage(chatId, msgId).catch(() => {});
-//   }
-//   // (no olvides responder siempre para quita spinner)
-//   await bot.answerCallbackQuery(query.id);
-// });
+// ─────────────────────────────────────────────
+// callback para cerrar el mensaje de /status
+// ─────────────────────────────────────────────
+bot.on("callback_query", async query => {
+  if (query.data === "status_close") {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    await bot.deleteMessage(chatId, msgId).catch(() => {});
+  }
+  // (no olvides responder siempre para quita spinner)
+  await bot.answerCallbackQuery(query.id);
+});
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
