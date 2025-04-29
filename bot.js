@@ -3991,57 +3991,56 @@ bot.on("callback_query", async query => {
   }
 
   // View PnL (SOL-based + win/lose counts)
-  if (data === "swaps_view_pnl") {
+  // View PnL (SOL-based + win/lose counts via USD PnL)
+if (data === "swaps_view_pnl") {
     const displayName = query.from.first_name || query.from.username || "there";
     const wallet      = users[chatId]?.walletPublicKey;
     const allSwaps    = loadAllSwaps();
-    // Separate buys and sells
     const buys  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
     const sells = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
-
+  
     // Sum SOL amounts
     const sumSpent = buys.reduce((sum, s) => {
       const val = parseFloat((s.Spent || "0").split(" ")[0]);
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
-    const sumGot   = sells.reduce((sum, s) => {
-      const val = parseFloat((s.Got   || "0").split(" ")[0]);
+    const sumGot = sells.reduce((sum, s) => {
+      const val = parseFloat((s.Got || "0").split(" ")[0]);
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
-
-    // Count wins vs losses from SOL PnL
+  
+    // Count wins vs losses based on USD part of PnL
     let winCount = 0, lossCount = 0;
     sells.forEach(s => {
-      const pnlField = s["SOL PnL"] || "";
-      const m = pnlField.match(/([+-]?\d+\.?\d*)/);
+      const txt = s["SOL PnL"] || "";
+      const m = txt.match(/USD\s*([+-]\\$\\d+(?:\\.\\d+)?)/);
       if (m) {
-        const v = parseFloat(m[1]);
-        if (v > 0) winCount++;
-        else if (v < 0) lossCount++;
+        if (m[1].startsWith("+")) winCount++;
+        else if (m[1].startsWith("-")) lossCount++;
       }
     });
-
-    // Calculate PnL
-    const pnlSol = sumGot - sumSpent;
-    const totalTx = buys.length + sells.length;
-    // Get SOL price in USD
-    const solPrice   = await getSolPriceUSD();
+  
+    // Calculate overall PnL
+    const pnlSol   = sumGot - sumSpent;
+    const totalTx  = buys.length + sells.length;
+    const solPrice = await getSolPriceUSD();
     const investUSD  = sumSpent * solPrice;
     const recoverUSD = sumGot   * solPrice;
     const pnlUSD     = pnlSol   * solPrice;
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
-
+  
     const result =
-      `👋 Hello *${displayName}*!\n` +
-      `📊 *Profit and Loss*\n\n` +
-      `💼 Wallet: \`${wallet}\`\n` +
-      `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
-      `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
-      `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
-      `📈 Percentage: ${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%\n` +
-      `✅ Wins: ${winCount}  🔻 Losses: ${lossCount}\n` +
-      `🔄 Total Transactions: ${totalTx}`;
-
+`👋 Hello *${displayName}*!  
+💼 Wallet: \`${wallet}\`
+  
+📊 *Profit and Loss*
+💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
+💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
+🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
+📈 Percentage: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
+✅ Wins: ${winCount}  🔻 Losses: ${lossCount}  
+🔄 Total Transactions: ${totalTx}`;
+  
     return bot.editMessageText(result, {
       chat_id:    chatId,
       message_id: msgId,
