@@ -4028,22 +4028,22 @@ bot.on("callback_query", async query => {
     const pnlUSD     = pnlSol   * solPrice;
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
 
-    let shareText =
-`👋 Hey Human, check my PnL on GemSniping
+// 6) Preparar texto para compartir
+let shareText =
+  `👋 Hey Human, check my PnL on GemSniping\n\n` +
+  `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
+  `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
+  `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
+  `✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%\n` +
+  `🔄 Total Pairs: ${totalPairs}\n\n` +
+  `Best bot on Solana! https://gemsniping.com`;
 
-💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})
-💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})
-🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})
-✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%
-🔄 Total Pairs: ${totalPairs}
+shareText = shareText
+  .normalize('NFC')
+  .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
 
-Best bot on Solana! https://gemsniping.com`;
-
-    // limpiar posibles emojis mal formados
-    shareText = shareText.normalize('NFC').replace(/[^\u0000-\uD7FF\uE000-\uFFFF]/g, '');
-
-    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
 
     const result =
 `👋 Hello *${displayName}*!  
@@ -4124,6 +4124,8 @@ bot.on("message", async (msg) => {
     reply_markup: {
       inline_keyboard: [[
         { text: "💬 Share on WhatsApp", url: waUrl },
+    ],
+    [
         { text: "❌ Close",            callback_data: "swaps_close" }
       ]]
     }
