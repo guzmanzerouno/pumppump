@@ -3983,7 +3983,7 @@ bot.on("callback_query", async query => {
   // Helper to load and normalize swaps.json
   function loadAllSwaps() {
     try {
-      const raw = JSON.parse(fs.readFileSync("swaps.json"));
+      const raw = JSON.parse(fs.readFileSync(SWAPS_FILE, "utf8"));
       return Array.isArray(raw) ? raw : Object.values(raw).flat();
     } catch {
       return [];
@@ -4001,23 +4001,23 @@ bot.on("callback_query", async query => {
 
     // Sum SOL amounts
     const sumSpent = buys.reduce((sum, s) => {
-      const lam = parseFloat((s.Spent || "0").split(" ")[0]);
-      return sum + (isNaN(lam) ? 0 : lam);
+      const val = parseFloat((s.Spent || "0").split(" ")[0]);
+      return sum + (isNaN(val) ? 0 : val);
     }, 0);
     const sumGot   = sells.reduce((sum, s) => {
-      const lam = parseFloat((s.Got   || "0").split(" ")[0]);
-      return sum + (isNaN(lam) ? 0 : lam);
+      const val = parseFloat((s.Got   || "0").split(" ")[0]);
+      return sum + (isNaN(val) ? 0 : val);
     }, 0);
 
     // Calculate PnL
     const pnlSol = sumGot - sumSpent;
     const totalTx = buys.length + sells.length;
     // Get SOL price in USD
-    const solPrice = await getSolPriceUSD();
-    const investUSD = sumSpent * solPrice;
-    const recoverUSD = sumGot * solPrice;
-    const pnlUSD = pnlSol * solPrice;
-    const percent = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
+    const solPrice   = await getSolPriceUSD();
+    const investUSD  = sumSpent * solPrice;
+    const recoverUSD = sumGot   * solPrice;
+    const pnlUSD     = pnlSol   * solPrice;
+    const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
 
     const result =
       `👋 Hello *${displayName}*!\n` +
@@ -4071,7 +4071,7 @@ bot.on("message", async msg => {
   const tokenMsg = msg.message_id;
   await bot.deleteMessage(chatId, tokenMsg).catch(() => {});
 
-  const wallet = users[chatId]?.walletPublicKey;
+  const wallet   = users[chatId]?.walletPublicKey;
   const allSwaps = loadAllSwaps();
 
   const userSwaps = allSwaps.filter(s =>
@@ -4106,53 +4106,45 @@ bot.on("message", async msg => {
 // /clear_swaps command to remove all swap entries for a wallet
 // ────────────────────────────────
 bot.onText(/^\/clear_swaps(?:\s+(\S+))?$/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const cmdId  = msg.message_id;
-    // Delete the command message
-    await bot.deleteMessage(chatId, cmdId).catch(() => {});
-  
-    // Determine target wallet
-    const target = match[1] || users[chatId]?.walletPublicKey;
-    if (!target) {
-      return bot.sendMessage(chatId,
-        "❌ No wallet specified and you are not registered."
-      );
-    }
-  
-    // Load swaps.json
-    let raw;
-    try {
-      raw = JSON.parse(fs.readFileSync("swaps.json"));
-    } catch {
-      return bot.sendMessage(chatId,
-        "⚠️ Could not read swaps.json or file is empty."
-      );
-    }
-  
-    // Filter out entries
-    const newRaw = {};
-    let removedCount = 0;
-    for (const [uid, arr] of Object.entries(raw)) {
-      if (Array.isArray(arr)) {
-        const filtered = arr.filter(s => s.Wallet !== target);
-        removedCount += arr.length - filtered.length;
-        if (filtered.length) newRaw[uid] = filtered;
-      }
-    }
-  
-    // Write back
-    try {
-      fs.writeFileSync("swaps.json", JSON.stringify(newRaw, null, 2));
-    } catch (e) {
-      return bot.sendMessage(chatId,
-        `❌ Failed to write swaps.json: ${e.message}`
-      );
-    }
-  
+  const chatId = msg.chat.id;
+  const cmdId  = msg.message_id;
+  // Delete the command message
+  await bot.deleteMessage(chatId, cmdId).catch(() => {});
+
+  // Determine target wallet
+  const targetWallet = match[1] || users[chatId]?.walletPublicKey;
+  if (!targetWallet) {
     return bot.sendMessage(chatId,
-      `✅ Removed ${removedCount} swap entries for wallet \`${target}\`.`
-    , { parse_mode: "Markdown" });
-  });
+      "❌ No wallet specified and you are not registered."
+    );
+  }
+
+  // Load current swaps object
+  const swapsObj = loadSwaps();
+  let removedCount = 0;
+
+  // Filter out entries for targetWallet
+  for (const uid in swapsObj) {
+    const arr = swapsObj[uid];
+    if (Array.isArray(arr)) {
+      const beforeCount = arr.length;
+      const filtered    = arr.filter(s => s.Wallet !== targetWallet);
+      const afterCount  = filtered.length;
+      removedCount    += (beforeCount - afterCount);
+      if (afterCount > 0) swapsObj[uid] = filtered;
+      else delete swapsObj[uid];
+    }
+  }
+
+  // Save back to file
+  saveSwaps(swapsObj);
+
+  // Confirm to user
+  return bot.sendMessage(chatId,
+    `✅ Removed ${removedCount} swap entr${removedCount === 1 ? 'y' : 'ies'} for wallet \`${targetWallet}\`.`,
+    { parse_mode: "Markdown" }
+  );
+});
 
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
