@@ -29,8 +29,91 @@ const proxyPort = "33335";
 const baseUsername = "brd-customer-hl_7a7f0241-zone-datacenter_proxy1";
 const proxyPassword = "i75am5xil518";
 
+// Lista de tus endpoints
+const RPC_ENDPOINTS = [
+    "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35",
+    "https://mainnet.helius-rpc.com/?api-key=1b6d8190-08a4-48dd-8dbd-1a0f5861fa61",
+    "https://mainnet.helius-rpc.com/?api-key=c42de7e4-9d4b-4d03-a866-9ce503b19b46",
+    "https://mainnet.helius-rpc.com/?api-key=c62c4420-5caa-4e75-a727-7f1ca0925142"
+  ];
+  
+  // Puntero para el siguiente endpoint a usar
+  let nextRpcIndex = 0;
+  // Set de endpoints ya asignados en la tanda concurrente
+  const inUseRpc = new Set();
+  
+  function getNextRpc() {
+    // Intentamos encontrar uno libre
+    for (let i = 0; i < RPC_ENDPOINTS.length; i++) {
+      const idx = (nextRpcIndex + i) % RPC_ENDPOINTS.length;
+      const url = RPC_ENDPOINTS[idx];
+      if (!inUseRpc.has(url)) {
+        // lo reservamos
+        inUseRpc.add(url);
+        nextRpcIndex = (idx + 1) % RPC_ENDPOINTS.length;
+        return url;
+      }
+    }
+    // Si todos están “in use”, simplemente usamos round‑robin sin bloqueo
+    const url = RPC_ENDPOINTS[nextRpcIndex];
+    nextRpcIndex = (nextRpcIndex + 1) % RPC_ENDPOINTS.length;
+    return url;
+  }
+  
+  function releaseRpc(url) {
+    inUseRpc.delete(url);
+  }
+
 let ws;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+
+/**
+ * Cierra en background todas las ATAs vacías de un usuario SIN NOTIFICAR.
+ * Diseñada para invocarse tras una venta.
+ */
+async function closeEmptyATAsAfterSell(chatId) {
+    try {
+      const user = users[chatId];
+      if (!user?.privateKey || !user.walletPublicKey) return;
+  
+      const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      const connection = new Connection(
+        "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+        "confirmed"
+      );
+  
+      while (true) {
+        const { value } = await connection.getParsedTokenAccountsByOwner(
+          new PublicKey(user.walletPublicKey),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+        const empties = value
+          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+          .slice(0, 25);
+  
+        if (empties.length === 0) break;
+  
+        const tx = new Transaction();
+        for (let { pubkey } of empties) {
+          tx.add(createCloseAccountInstruction(
+            pubkey,
+            new PublicKey(user.walletPublicKey),
+            new PublicKey(user.walletPublicKey)
+          ));
+        }
+  
+        // Enviamos usando sendAndConfirmTransaction, que añade blockhash y feePayer
+        await sendAndConfirmTransaction(
+          connection,
+          tx,
+          [keypair],
+          { skipPreflight: true }
+        );
+      }
+    } catch (e) {
+      console.error("closeEmptyATAsAfterSell error:", e);
+    }
+  }
 
 // ==========================================
 // VARIABLE GLOBAL PARA AUTO CREACIÓN DE ATA
@@ -38,71 +121,188 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 // ==========================================
 let ataAutoCreationEnabled = false;
 
+/**
+ * Cierra todas las ATAs vacías de un usuario (en batchs de 25).
+ * @param {string|number} chatId - ID de Telegram / clave en users[]
+ * @returns {Promise<{ closedTotal: number, lastSig: string|null }>}
+ */
+async function closeEmptyATAs(chatId) {
+  const user = users[chatId];
+  if (!user?.privateKey || !user.walletPublicKey) {
+    return { closedTotal: 0, lastSig: null };
+  }
+
+  const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+  const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  let closedTotal = 0;
+  let lastSig     = null;
+
+  while (true) {
+    const { value } = await connection.getParsedTokenAccountsByOwner(
+      new PublicKey(user.walletPublicKey),
+      { programId: TOKEN_PROGRAM_ID }
+    );
+    const empties = value
+      .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+      .slice(0, 25);
+
+    if (empties.length === 0) break;
+
+    const tx = new Transaction();
+    for (let { pubkey } of empties) {
+      tx.add(createCloseAccountInstruction(
+        pubkey,
+        new PublicKey(user.walletPublicKey),
+        new PublicKey(user.walletPublicKey)
+      ));
+    }
+
+    try {
+      const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+      lastSig = sig;
+      closedTotal += empties.length;
+    } catch (err) {
+      console.error(`[closeEmptyATAs] Error closing batch:`, err.message);
+      break;
+    }
+  }
+
+  return { closedTotal, lastSig };
+}
+
 // ─────────────────────────────────────────────
 // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
 // ─────────────────────────────────────────────
-bot.onText(/\/ata_(on|off)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const command = match[1].toLowerCase(); // "on" o "off"
+bot.onText(/\/ata/, async (msg) => {
+  const chatId   = msg.chat.id;
+  const cmdMsgId = msg.message_id;
+
+  try {
+    await bot.deleteMessage(chatId, cmdMsgId);
+  } catch (err) {
+    console.warn("Could not delete /ata command message:", err.message);
+  }
+
+  const text =
+    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
+    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+
+  await bot.sendMessage(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ ON",  callback_data: "ata_on"  },
+          { text: "❌ OFF", callback_data: "ata_off" }
+        ]
+      ]
+    }
+  });
+});
+
+// 2) Handler para los botones ON / OFF
+bot.on("callback_query", async (query) => {
+    const { id, data, message } = query;
+    const chatId = message.chat.id;
+    const msgId  = message.message_id;
   
-    if (!users[chatId]) users[chatId] = {};
+    // 1) Responder el callback de Telegram lo antes posible
+    await bot.answerCallbackQuery(id);
   
-    if (command === 'off') {
-      try {
-        await closeAllATAs(chatId);
-        await bot.sendMessage(chatId, "✅ Auto‑creation disabled and your empty ATAs have been closed (rent returned).");
-      } catch (err) {
-        console.error("❌ Error cerrando ATAs al apagar:", err);
-        await bot.sendMessage(chatId, "❌ Auto‑creation disabled, but error closing ATAs. Check logs.");
-      }
+    // 2) Ahora ya puedes procesar la acción
+    if (data === "ata_on") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = true;
+      saveUsers();
+  
+      return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
     }
   
-    users[chatId].ataAutoCreationEnabled = (command === 'on');
-    saveUsers();
+    if (data === "ata_off") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = false;
+      saveUsers();
   
-    const statusText = command === 'on'
-      ? '✅ Auto‑creation of ATAs is now *ENABLED* for you.'
-      : '❌ Auto‑creation of ATAs is now *DISABLED* for you.';
-    await bot.sendMessage(chatId, statusText, { parse_mode: 'Markdown' });
-  });
+      await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
   
-  // ─────────────────────────────────────────────
-  // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
-  // ─────────────────────────────────────────────
-  async function preCreateATAsForToken(mintAddress) {
-    console.log(`Iniciando pre-creación de ATA para el token: ${mintAddress}`);
-  
-    const usersToProcess = Object.entries(users)
-      .filter(([, user]) =>
-        user.subscribed &&
-        user.privateKey &&
-        user.ataAutoCreationEnabled
-      );
-  
-    await Promise.all(usersToProcess.map(async ([chatId, user]) => {
-      try {
-        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35", "confirmed");
-        const ata = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
-        const ataInfo = await connection.getAccountInfo(ata);
-        if (ataInfo === null) {
-          console.log(`Creando ATA para usuario ${chatId}: ${ata.toBase58()}`);
-          const tx = new Transaction().add(
-            createAssociatedTokenAccountInstruction(
-              keypair.publicKey,
-              ata,
-              keypair.publicKey,
-              new PublicKey(mintAddress)
-            )
-          );
-          const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
-          console.log(`✅ ATA creada para ${chatId}. TX: ${sig}`);
+      // 3) Cierra ATAs en background, sin bloquear el callback
+      closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
+        if (closedTotal > 0) {
+          let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
+          if (lastSig) {
+            text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+          }
+          bot.sendMessage(chatId, text, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          });
+        } else {
+          bot.sendMessage(chatId,
+            `⚠️ No empty ATA accounts were found to close.`,
+            { parse_mode: 'Markdown' }
+          ).then(sent => {
+            setTimeout(() => {
+              bot.deleteMessage(chatId, sent.message_id).catch(() => {});
+            }, 15_000);
+          });
         }
-      } catch (err) {
-        console.error(`❌ Error al crear ATA para ${chatId}:`, err);
+      }).catch(err => {
+        console.error("Error cerrando ATAs:", err);
+      });
+  
+      return;
+    }
+  
+    // En caso de otros callbacks...
+    // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
+  });
+
+// ─────────────────────────────────────────────
+// preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
+// ─────────────────────────────────────────────
+async function preCreateATAsForToken(mintAddress) {
+  const usersToProcess = Object.entries(users)
+    .filter(([, user]) =>
+      user.subscribed &&
+      user.privateKey &&
+      user.ataAutoCreationEnabled
+    );
+
+  await Promise.all(usersToProcess.map(async ([chatId, user]) => {
+    const rpcUrl     = getNextRpc();
+    const keypair    = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const connection = new Connection(rpcUrl, "processed");
+
+    try {
+      const ata     = await getAssociatedTokenAddress(new PublicKey(mintAddress), keypair.publicKey);
+      const ataInfo = await connection.getAccountInfo(ata);
+      if (ataInfo === null) {
+        const tx = new Transaction().add(
+          createAssociatedTokenAccountInstruction(
+            keypair.publicKey,
+            ata,
+            keypair.publicKey,
+            new PublicKey(mintAddress)
+          )
+        );
+        await sendAndConfirmTransaction(connection, tx, [keypair]);
       }
-    }));
-  }
+    } catch (err) {
+      console.error(`❌ Error al crear ATA para ${chatId} usando ${rpcUrl}:`, err);
+    } finally {
+      releaseRpc(rpcUrl);
+    }
+  }));
+}
 
 // 🔥 Cargar usuarios desde el archivo JSON
 function loadUsers() {
@@ -131,384 +331,745 @@ function isUserActive(user) {
   return active;
 }
 
+// ─────────────────────────────────────────────
+// 1) Mostrar planes de pago con swaps incluidos
+// ─────────────────────────────────────────────
 function showPaymentButtons(chatId) {
-  return bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-    caption: "💳 Please select a subscription plan:",
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "1 Day - 0.05 SOL", callback_data: "pay_1d" }],
-        [{ text: "15 Days - 0.60 SOL", callback_data: "pay_15d" }],
-        [{ text: "1 Month - 1.10 SOL", callback_data: "pay_month" }],
-        [{ text: "6 Months - 6.00 SOL", callback_data: "pay_6m" }],
-        [{ text: "1 Year - 11.00 SOL", callback_data: "pay_year" }]
-      ]
-    }
-  });
-}
-
-async function activateMembership(chatId, days, solAmount) {
-  const user = users[chatId];
-  const now = Date.now();
-  const expiration = now + days * 24 * 60 * 60 * 1000;
-
-  const sender = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-  const receiver = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
-
-  const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-
-  // ✅ Verificamos fondos suficientes
-  const balance = await connection.getBalance(sender.publicKey);
-  if (balance < solAmount * 1e9) {
-    return bot.sendMessage(chatId, `❌ *Insufficient funds.*\nYour wallet has ${(balance / 1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`, {
-      parse_mode: "Markdown"
-    });
-  }
-
-  // ✅ Mostramos "Processing Payment..."
-  const processingMsg = await bot.sendMessage(chatId, "🕐 *Processing your payment...*", {
-    parse_mode: "Markdown"
-  });
-
-  try {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: sender.publicKey,
-        toPubkey: receiver,
-        lamports: solAmount * 1e9
-      })
+    return bot.sendPhoto(chatId,
+      "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png", {
+        caption: "💳 Please select a subscription plan:",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "1 Day 10 Swaps – 0.05 SOL", callback_data: "pay_1d"    }],
+            [{ text: "1 Month 300 Swaps – 1.00 SOL", callback_data: "pay_month" }],
+            [{ text: "1 Month Unlimited – 1.25 SOL", callback_data: "pay_un"    }]
+          ]
+        }
+      }
     );
+  }
+  
+  // ─────────────────────────────────────────────
+  // 2) Capturar la selección de pago y lanzar el flujo
+  // ─────────────────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    if (!data.startsWith("pay_")) {
+      return bot.answerCallbackQuery(query.id);
+    }
+    await bot.answerCallbackQuery(query.id); // stop the spinner
+  
+    // ** store the menu msg ID so we can delete it later **
+    users[chatId] = users[chatId] || {};
+    users[chatId].lastPaymentMsgId = query.message.message_id;
+    saveUsers();
+  
+    // now proceed as before
+    let days, solAmount, swaps;
+    switch (data) {
+      case "pay_1d":
+        days = 1; solAmount = 0.05; swaps = 10;
+        break;
+      case "pay_month":
+        days = 30; solAmount = 1.00; swaps = 300;
+        break;
+      case "pay_un":
+        days = 30; solAmount = 1.25; swaps = "Unlimited";
+        break;
+      default:
+        return;
+    }
+  
+    return activateMembership(chatId, days, solAmount, swaps);
+  });
+  
+  // ─────────────────────────────────────────────
+  // 3) Flujo de activación de membresía (ahora con swaps)
+  // ─────────────────────────────────────────────
+  async function activateMembership(chatId, days, solAmount, swaps) {
+    const user = users[chatId];
+    const now = Date.now();
+    const expiration = now + days * 24 * 60 * 60 * 1000;
+  
+    // Guardamos el límite de swaps en el usuario
+    user.swapLimit = swaps;
+    saveUsers();
+  
+    const sender     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const receiver   = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
+    const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+  
+    // Verificar fondos
+    const balance = await connection.getBalance(sender.publicKey);
+    if (balance < solAmount * 1e9) {
+      return bot.sendMessage(chatId,
+        `❌ *Insufficient funds.*\nYour wallet has ${(balance/1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`,
+        { parse_mode: "Markdown" }
+      );
+    }
+  
+    // Mensaje de “processing”
+    const processingMsg = await bot.sendMessage(chatId,
+      "🕐 *Processing your payment...*", { parse_mode: "Markdown" }
+    );
+  
+    try {
+      // Ejecutar transferencia
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: sender.publicKey,
+          toPubkey:   receiver,
+          lamports:   solAmount * 1e9
+        })
+      );
+      const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
+  
+      // Actualizar usuario
+      user.expired    = expiration;
+      user.subscribed = true;
+      saveUsers();
+      savePaymentRecord(chatId, sig, days, solAmount);
+  
+      const expirationDate = new Date(expiration).toLocaleDateString();
+      const statusLine     = `✅ Active for ${Math.round((expiration - now)/(1000*60*60*24))} day(s)`;
+      const limitedText    = typeof swaps === "number" ? `${swaps} Swaps` : "Unlimited";
+  
+      // Construir caption con “Limited”
+      const fullConfirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* ${user.rcode || "None"}\n` +
+        `⏳ *Status:* ${statusLine}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
+  
+      // Editar el mensaje con solo “How to Use the Bot”
+      await bot.editMessageMedia(
+        {
+          type: "photo",
+          media:
+            "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+          caption: fullConfirmation,
+          parse_mode: "Markdown"
+        },
+        {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }
+              ]
+            ]
+          }
+        }
+      );
+  
+      // ─────────────────────────────────────────────
+      // Mensaje final al usuario con todos los detalles
+      await bot.sendMessage(
+        chatId,
+`✅ *Payment received successfully!*  
+Your membership is now active.
 
-    const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
-
-user.expired = expiration;
-user.subscribed = true;
-saveUsers();
-savePaymentRecord(chatId, sig, days, solAmount);
-
-const expirationDate = new Date(expiration).toLocaleDateString();
-const now = Date.now();
-const statusLine = expiration === "never"
-  ? "✅ Unlimited"
-  : `✅ Active for ${Math.round((expiration - now) / (1000 * 60 * 60 * 24))} day(s)`;
-
-// ✅ Texto final unificado para el caption del mensaje con imagen
-const fullConfirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${user.rcode || "None"}
-⏳ *Status:* ${statusLine}`;
-
-// ✅ Editamos el mensaje anterior con una imagen + caption
-await bot.editMessageMedia(
-  {
-    type: "photo",
-    media: "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016",
-    caption: fullConfirmation,
-    parse_mode: "Markdown"
-  },
-  {
-    chat_id: chatId,
-    message_id: processingMsg.message_id,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-        [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
-      ]
+💳 *Paid:* ${solAmount} SOL for ${days} day(s)  
+🗓️ *Expires:* ${expirationDate}  
+🎟️ *Limited:* ${limitedText}  
+🔗 [View Tx](https://solscan.io/tx/${sig})`,
+        {
+          parse_mode: "Markdown",
+          disable_web_page_preview: true
+        }
+      );
+      // ─────────────────────────────────────────────
+  
+      // Borrar menú de pago antiguo
+      if (user.lastPaymentMsgId) {
+        try {
+          await bot.deleteMessage(chatId, user.lastPaymentMsgId);
+          user.lastPaymentMsgId = null;
+          saveUsers();
+        } catch {}
+      }
+  
+      // Notificar al admin
+      const adminMsg =
+        `✅ *Payment received successfully!*\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username}\n` +
+        `💳 *Paid:* ${solAmount} SOL for ${days} day(s)\n` +
+        `🗓️ *Expires:* ${expirationDate}\n` +
+        `🎟️ *Limited:* ${limitedText}\n` +
+        `🔗 [View Tx](https://solscan.io/tx/${sig})`;
+  
+      await bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true
+      });
+  
+    } catch (err) {
+      // Error en la transacción
+      await bot.editMessageText(
+        `❌ Transaction failed: ${err.message}`,
+        { chat_id: chatId, message_id: processingMsg.message_id }
+      );
     }
   }
-);
 
-// ✅ Eliminar mensaje de botones de pago anterior si existe
-if (user.lastPaymentMsgId) {
-  try {
-    await bot.deleteMessage(chatId, user.lastPaymentMsgId);
-    user.lastPaymentMsgId = null;
-    saveUsers();
-  } catch (err) {
-    console.error("⚠️ No se pudo borrar el mensaje de pago:", err.message);
-  }
-}
-
-// ✅ Notificación al admin
-const adminMsg = `✅ *Payment received successfully!*
-👤 *User:* ${user.name || "Unknown"}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-💳 *Paid:* ${solAmount} SOL for ${days} days
-🗓️ *Expires:* ${expirationDate}
-🔗 [View Tx](https://solscan.io/tx/${sig})`;
-
-bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
-  parse_mode: "Markdown",
-  disable_web_page_preview: true
-});
-
-  } catch (err) {
-    bot.editMessageText(`❌ Transaction failed: ${err.message}`, {
-      chat_id: chatId,
-      message_id: processingMsg.message_id
+  function savePaymentRecord(chatId, txId, days, solAmount) {
+    const paymentsFile = "payments.json";
+    let records = [];
+  
+    if (fs.existsSync(paymentsFile)) {
+      records = JSON.parse(fs.readFileSync(paymentsFile));
+    }
+  
+    records.push({
+      chatId,
+      wallet: users[chatId].walletPublicKey,
+      tx: txId,
+      amountSol: solAmount,
+      days,
+      timestamp: Date.now()
     });
-  }
-}
-
-function savePaymentRecord(chatId, txId, days, solAmount) {
-  const paymentsFile = "payments.json";
-  let records = [];
-
-  if (fs.existsSync(paymentsFile)) {
-    records = JSON.parse(fs.readFileSync(paymentsFile));
+  
+    fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-  records.push({
-    chatId,
-    wallet: users[chatId].walletPublicKey,
-    tx: txId,
-    amountSol: solAmount,
-    days,
-    timestamp: Date.now()
-  });
-
-  fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
-}
-
-bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  if (!users[chatId] || !users[chatId].walletPublicKey || !users[chatId].privateKey) {
-    return bot.sendMessage(chatId, "❌ You must complete registration before paying.");
-  }
-
-  switch (data) {
-    case "pay_1d":
-      await activateMembership(chatId, 1, 0.05);
-      break;
-    case "pay_15d":
-      await activateMembership(chatId, 15, 0.60);
-      break;
-    case "pay_month":
-      await activateMembership(chatId, 30, 1.10);
-      break;
-    case "pay_6m":
-      await activateMembership(chatId, 180, 6.00);
-      break;
-    case "pay_year":
-      await activateMembership(chatId, 365, 11.00);
-      break;
-    case "pay_menu":
-      showPaymentButtons(chatId);
-      break;
-  }
-});
-
-bot.onText(/\/payments/, (msg) => {
-  const chatId = msg.chat.id;
-
-  if (!users[chatId] || !users[chatId].walletPublicKey) {
-    return bot.sendMessage(chatId, "❌ You must be registered to view your payment history.");
-  }
-
-  const paymentsFile = "payments.json";
-  if (!fs.existsSync(paymentsFile)) {
-    return bot.sendMessage(chatId, "📭 No payment records found.");
-  }
-
-  const records = JSON.parse(fs.readFileSync(paymentsFile));
-  const userPayments = records.filter(p => p.chatId === chatId);
-
-  if (userPayments.length === 0) {
-    return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
-  }
-
-  let message = `📜 *Your Payment History:*\n\n`;
-
-  for (let p of userPayments.reverse()) {
-    const date = new Date(p.timestamp).toLocaleDateString();
-    message += `🗓️ *${date}*\n`;
-    message += `💼 Wallet: \`${p.wallet}\`\n`;
-    message += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-    message += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-  }
-
-  bot.sendMessage(chatId, message, { parse_mode: "Markdown", disable_web_page_preview: true });
-});
-
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
-  const firstName = msg.from.first_name || "there";
-
-  if (users[chatId]?.walletPublicKey) {
-    const expired = users[chatId].expired;
-    const stillActive = expired === "never" || (expired && Date.now() < expired);
-
-    users[chatId].subscribed = stillActive; // Actualizar el campo subscribed
-    saveUsers();
-
-    if (stillActive) {
-      return bot.sendMessage(chatId, `✅ You are already registered, *${firstName}*!`, {
-        parse_mode: "Markdown"
-      });
+// ────────────────────────────────
+// Comando /payments con paginación (5 por página) y botón Close
+// ────────────────────────────────
+bot.onText(/\/payments/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
+  
+    // 1) Borrar el mensaje del comando inmediatamente
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /payments message:", e.message);
     }
-
-    return bot.sendMessage(chatId, `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`, {
-      parse_mode: "Markdown"
-    }).then(() => showPaymentButtons(chatId));
-  }
-
-  users[chatId] = { step: 1, name: firstName };
-  saveUsers();
-
-  const sent = await bot.sendMessage(chatId, `👋 Hello *${firstName}*! Welcome to *PUMPUltra.fun Bot*.\n\n📱 Please enter your *phone number*:`, {
-    parse_mode: "Markdown"
-  });
-
-  users[chatId].msgId = sent.message_id;
-  saveUsers();
-});
-
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text?.trim();
-  const messageId = msg.message_id;
-
-  if (!users[chatId] || !users[chatId].step) return;
-
-  bot.deleteMessage(chatId, messageId).catch(() => {});
-
-  const user = users[chatId];
-  const msgId = user.msgId;
-
-  switch (user.step) {
-    case 1:
-      user.phone = text;
-      user.step = 2;
-      saveUsers();
-      bot.editMessageText("📧 Please enter your *email address*:", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
-      break;
-
-    case 2:
-      user.email = text;
-      user.step = 3;
-      saveUsers();
-      bot.editMessageText("🔑 Please enter your *Solana Private Key*:", {
-        chat_id: chatId,
-        message_id: msgId,
-        parse_mode: "Markdown"
-      });
-      break;
-
-    case 3:
-      try {
-        const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-        user.privateKey = text;
-        user.walletPublicKey = keypair.publicKey.toBase58();
-        user.step = 4;
-        saveUsers();
-
-        bot.editMessageText("🎟️ Do you have a *referral code*? Reply with Yes or No.", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-      } catch (err) {
-        bot.editMessageText("❌ Invalid private key. Please try again:", {
-          chat_id: chatId,
-          message_id: msgId
-        });
+  
+    // 2) Comprobar registro del usuario
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(
+        chatId,
+        "❌ You must be registered to view your payment history."
+      );
+    }
+  
+    // 3) Leer archivo de pagos y filtrar
+    const paymentsFile = "payments.json";
+    if (!fs.existsSync(paymentsFile)) {
+      return bot.sendMessage(chatId, "📭 No payment records found.");
+    }
+    const records      = JSON.parse(fs.readFileSync(paymentsFile));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
+  
+    if (userPayments.length === 0) {
+      return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+    }
+  
+    // Función auxiliar para renderizar una página
+    function renderPage(pageIndex) {
+      const pageSize = 5;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
       }
-      break;
-
-    case 4:
-      if (/^yes$/i.test(text)) {
-        user.step = 5;
-        saveUsers();
-        bot.editMessageText("🔠 Please enter your *referral code*:", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-      } else {
-        user.expired = null;
-        user.step = 0;
-        user.subscribed = false;
-        saveUsers();
-    
-        // 🔄 Primero editamos el mensaje actual con advertencia
-        await bot.editMessageText("⚠️ No referral code provided. Please *purchase a subscription* to activate your account.", {
-          chat_id: chatId,
-          message_id: msgId,
-          parse_mode: "Markdown"
-        });
-    
-        // 💳 Mostramos el mensaje con los planes y guardamos el message_id
-        const paymentMsg = await showPaymentButtons(chatId);
-        user.lastPaymentMsgId = paymentMsg.message_id;
-        saveUsers();
-    
-        // ⏳ Pausa breve para evitar conflictos al borrar
-        await new Promise(res => setTimeout(res, 300));
-    
-        // 🗑️ Borramos el mensaje anterior (el de advertencia)
-        await bot.deleteMessage(chatId, msgId);
+      // Construir inline keyboard: back/next + close
+      const navButtons = [];
+      if (pageIndex > 0) {
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
       }
-      break;
-
-      case 5:
-  const result = validateReferralCode(text);
-  if (result.valid) {
-    user.referrer = result.referrer || "Unknown";
-    user.rcode = result.code;
-    user.expired = result.expiration;
-    user.step = 0;
-    user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
-
-    saveUsers();
-
-    const activeStatus = result.expiration === "never"
-      ? "✅ Unlimited"
-      : `✅ Active for ${Math.round((result.expiration - Date.now()) / (1000 * 60 * 60 * 24))} day(s)`;
-
-    const confirmation = `✅ *User Registered!*
-👤 *Name:* ${user.name}
-📱 *Phone:* ${user.phone}
-📧 *Email:* ${user.email}
-💼 *Wallet:* \`${user.walletPublicKey}\`
-🔐 *Referral:* ${result.code} (${user.referrer})
-⏳ *Status:* ${activeStatus}`;
-
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-
-    bot.sendPhoto(chatId, "https://cdn.shopify.com/s/files/1/0784/6966/0954/files/pumppay.jpg?v=1743797016", {
-      caption: confirmation,
+      if (start + pageSize < userPayments.length) {
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      // siempre mostrar botón Close
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+  
+      return { text, keyboard };
+    }
+  
+    // 4) Enviar la primera página (índice 0)
+    const { text, keyboard } = renderPage(0);
+    await bot.sendMessage(chatId, text, {
       parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "⚙️ Settings", callback_data: "settings_menu" }],
-          [{ text: "📘 How to Use the Bot", url: "https://pumpultra.fun/docs" }]
-        ]
-      }
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
     });
-
-  } else {
-    user.expired = null;
-    user.step = 0;
-    user.subscribed = false;
-    saveUsers();
-
-    bot.editMessageText("⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.", {
+  });
+  
+  // ────────────────────────────────
+  // Callback para paginar o cerrar el mensaje
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const data   = query.data;
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+  
+    // Cerrar el mensaje
+    if (data === "payments_close") {
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      return bot.answerCallbackQuery();
+    }
+  
+    // Paginación
+    if (!data.startsWith("payments_page_")) {
+      return bot.answerCallbackQuery();
+    }
+    const pageIndex = parseInt(data.split("_").pop(), 10);
+  
+    // Releer y filtrar pagos
+    const records      = JSON.parse(fs.readFileSync("payments.json"));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
+  
+    // Renderizar la página solicitada
+    function renderPage(pageIndex) {
+      const pageSize = 5;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      const navButtons = [];
+      if (pageIndex > 0) {
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if ((pageIndex+1) * pageSize < userPayments.length) {
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+      return { text, keyboard };
+    }
+  
+    const { text, keyboard } = renderPage(pageIndex);
+    await bot.editMessageText(text, {
       chat_id: chatId,
       message_id: msgId,
-      parse_mode: "Markdown"
-    }).then(() => showPaymentButtons(chatId));
-  }
-  break;
-  }
-});
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  
+    await bot.answerCallbackQuery();
+  });
+
+
+// ────────────────────────────────
+// 1) Comando /start y paso inicial
+// ────────────────────────────────
+bot.onText(/\/start/, async (msg) => {
+    const chatId    = msg.chat.id;
+    const firstName = msg.from.first_name || "there";
+    const commandMsgId = msg.message_id;
+  
+    // 1.a) borramos el /start
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /start message:", e.message);
+    }
+  
+    if (users[chatId]?.walletPublicKey) {
+      const expired     = users[chatId].expired;
+      const stillActive = expired === "never" || (expired && Date.now() < expired);
+      users[chatId].subscribed = stillActive;
+      saveUsers();
+  
+      if (stillActive) {
+        return bot.sendMessage(
+          chatId,
+          `✅ You are already registered, *${firstName}*!`,
+          { parse_mode: "Markdown" }
+        );
+      }
+      return bot.sendMessage(
+        chatId,
+        `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`,
+        { parse_mode: "Markdown" }
+      ).then(() => showPaymentButtons(chatId));
+    }
+  
+    // nuevo usuario
+    users[chatId] = { step: 1, name: firstName };
+    saveUsers();
+  
+    const m = await bot.sendMessage(
+      chatId,
+      `👋 Hello *${firstName}*! Welcome to *GEMSNIPING Bot*.\n\n📱 Please enter your *phone number*:`,
+      { parse_mode: "Markdown" }
+    );
+    users[chatId].msgId = m.message_id;
+    saveUsers();
+  });
+  
+  // ────────────────────────────────
+  // 2) Handler de mensajes por paso
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId   = msg.chat.id;
+    const text     = msg.text?.trim();
+    const messageId= msg.message_id;
+    const user     = users[chatId];
+    if (!user || !user.step) return;
+  
+    // limpiamos el input del usuario
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+  
+    const msgId = user.msgId;
+    switch (user.step) {
+      case 1:
+        user.phone = text;
+        user.step  = 2;
+        saveUsers();
+        await bot.editMessageText("📧 Please enter your *email address*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
+  
+      case 2:
+        user.email = text;
+        user.step  = 3;
+        saveUsers();
+        await bot.editMessageText("🆔 Please choose a *username*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
+  
+      // — sustituimos el antiguo case 3 por este nuevo prompt con ayuda inmediata —
+      case 3:
+        user.username = text;
+        user.step     = 4;
+        saveUsers();
+        // Prompt de private key + ayuda
+        await bot.editMessageText(
+            "🔑 Please enter your *Solana Private Key* or tap for help:",
+            {
+              chat_id: chatId,
+              message_id: msgId,
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
+                  ],
+                  [
+                    { text: "📘 More Help", url: "https://gemsniping.com/docs" }
+                  ]
+                ]
+              }
+            }
+          );
+        // guardamos para borrarlo más adelante
+        user.tempKeyPromptId = msgId;
+        user.step = 4.1;
+        saveUsers();
+        break;
+  
+      case 4.1:
+        // 1) borramos el prompt de key
+        if (user.tempKeyPromptId) {
+          await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+          delete user.tempKeyPromptId;
+        }
+        // 2) borramos la imagen de ayuda si existe
+        if (user.tempHelpMsgId) {
+          await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
+          delete user.tempHelpMsgId;
+        }
+        // 3) procesar la private key
+        try {
+          const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+          user.privateKey      = text;
+          user.walletPublicKey = keypair.publicKey.toBase58();
+          user.step            = 5;
+          saveUsers();
+  
+          // 4) lanzamos la pregunta de referral
+          await bot.sendMessage(
+            chatId,
+            "🎟️ Do you have a *referral code*?",
+            {
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "✅ YES", callback_data: "referral_yes" }],
+                  [{ text: "❌ NO",  callback_data: "referral_no"  }]
+                ]
+              }
+            }
+          );
+        } catch (err) {
+          // en caso de key inválida, reiniciamos al paso 4
+          await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
+          user.step = 4;
+          saveUsers();
+        }
+        break;
+  
+      // … resto de pasos …
+    }
+  });
+  
+  // ─────────────────────────────────────────────
+  // Callback para mostrar ayuda de Phantom Key
+  // ─────────────────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    if (query.data !== "show_phantom_pk") return;
+    const chatId = query.message.chat.id;
+    await bot.answerCallbackQuery(query.id);
+  
+    const help = await bot.sendPhoto(
+      chatId,
+      "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
+      {
+        caption:
+`1. Open Phantom  
+Unlock your Phantom extension or mobile app.
+  
+2. Go to Settings  
+Tap your profile → Settings.
+  
+3. Security & Privacy  
+Select *Security & Privacy*.
+  
+4. Export Private Key  
+Scroll and tap *Export Private Key*.
+  
+5. Authenticate  
+Approve with your password or biometrics.
+  
+6. Copy & Paste
+Copy the long string and paste here.`,
+        parse_mode: "Markdown"
+      }
+    );
+    // guardamos para poder borrarlo luego en el paso 4.1
+    users[chatId].tempHelpMsgId = help.message_id;
+    saveUsers();
+  });
+  
+// ────────────────────────────────
+// 3) Handler de Yes/No para referral / trial
+// ────────────────────────────────
+bot.on("callback_query", async query => {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    const data   = query.data;
+    const user   = users[chatId];
+  
+    // YES: guardamos msgId y pedimos el código
+    if (data === "referral_yes") {
+      user.step  = 6;
+      user.msgId = msgId;         // ◀️ guardamos este prompt para borrarlo luego
+      saveUsers();
+  
+      await bot.editMessageText("🔠 Please enter your *referral code*:", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery(query.id);
+    }
+  
+    // NO: borramos prompt de Private Key (si queda), activamos trial…
+    if (data === "referral_no") {
+      await bot.answerCallbackQuery(query.id);
+  
+      if (user.tempKeyPromptId) {
+        await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+        delete user.tempKeyPromptId;
+      }
+  
+      const now    = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      user.expired    = now + oneDay;
+      user.subscribed = true;
+      user.swapLimit  = 50;
+      user.step       = 0;
+      saveUsers();
+  
+      const expDate = new Date(user.expired).toLocaleDateString();
+      await bot.editMessageText(
+        `🎉 *Free Trial Activated!* 🎉\n\n` +
+        `You’ve unlocked a *1-day free trial* with *50 swaps*.\n` +
+        `Trial ends on ${expDate}.\n\n` +
+        `Let’s start sniping!`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+      );
+  
+      // luego enviamos confirmación completa
+      const statusLine      = `Active for 1 day`;
+      const limitedText     = `50 swaps`;
+      const fullConfirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* None (Trial)\n` +
+        `⏳ *Status:* ${statusLine}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
+  
+      await bot.sendPhoto(
+        chatId,
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+        {
+          caption: fullConfirmation,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+  
+    await bot.answerCallbackQuery(query.id);
+  });
+  
+  // ────────────────────────────────
+  // 4) Handler de referral code (step 6)
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId    = msg.chat.id;
+    const text      = msg.text?.trim();
+    const messageId = msg.message_id;
+    const user      = users[chatId];
+  
+    if (!user || user.step !== 6) return;
+  
+    // borramos input del usuario
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+  
+    // borramos el prompt “Please enter your referral code”
+    if (user.msgId) {
+      await bot.deleteMessage(chatId, user.msgId).catch(() => {});
+      delete user.msgId;
+      saveUsers();
+    }
+  
+    const result = validateReferralCode(text);
+    if (result.valid) {
+      // actualizamos usuario
+      user.referrer   = result.referrer;
+      user.rcode      = result.code;
+      user.expired    = result.expiration;
+      user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
+      user.step       = 0;
+      saveUsers();
+  
+      const activeStatus = result.expiration === "never"
+        ? "✅ Unlimited"
+        : `✅ Active for ${Math.ceil((result.expiration - Date.now()) / (1000*60*60*24))} day(s)`;
+      const limitedText = typeof user.swapLimit === "number"
+        ? `${user.swapLimit} swaps`
+        : "Unlimited";
+  
+      const confirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
+        `⏳ *Status:* ${activeStatus}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
+  
+      return bot.sendPhoto(
+        chatId,
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+        {
+          caption: confirmation,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+            ]
+          }
+        }
+      );
+    } else {
+      // cupón inválido
+      user.expired    = null;
+      user.subscribed = false;
+      user.step       = 0;
+      saveUsers();
+      await bot.editMessageText(
+        "⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.",
+        { chat_id: chatId, message_id: msg.message_id, parse_mode: "Markdown" }
+      );
+      return showPaymentButtons(chatId);
+    }
+  });
+  
+  // ────────────────────────────────
+  // 5) Handler para ⚙️ Settings
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId    = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data      = query.data;
+  
+    // Mostrar mini‑menú de Settings
+    if (data === "settings_menu") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageReplyMarkup({
+        inline_keyboard: [
+          [ { text: "🚀 Auto‑Buy", callback_data: "open_autobuy" } ],
+          [ { text: "⚡️ ATA Mode", callback_data: "open_ata" } ],
+          [ { text: "🔒 Close Empty ATAs", callback_data: "open_close_atas" } ]
+        ]
+      }, {
+        chat_id: chatId,
+        message_id
+      });
+    }
+  
+    // Cada opción vuelve a disparar tu comando ya existente
+    if (data === "open_autobuy") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/autobuy");
+    }
+    if (data === "open_ata") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/ata");
+    }
+    if (data === "open_close_atas") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.sendMessage(chatId, "/close");
+    }
+  
+    // Otros callbacks siguen aquí…
+    await bot.answerCallbackQuery(query.id);
+  });
 
 // ✅ Funciones para manejo de códigos
 function loadRcodes() {
@@ -583,40 +1144,148 @@ function notifyAdminOfPayment(user, sig, days, solAmount, expiration) {
   bot.sendMessage(ADMIN_CHAT_ID, msg, { parse_mode: "Markdown", disable_web_page_preview: true });
 }
 
-bot.onText(/\/status/, (msg) => {
-  const chatId = msg.chat.id;
-  const user = users[chatId];
+bot.on("callback_query", (query) => {
+    // 1️⃣ responde AL INSTANTE y adiós
+    bot.answerCallbackQuery(query.id).catch(() => {});
+  
+    // 2️⃣ luego procesos el callback
+    const chatId = query.message.chat.id;
+    switch (query.data) {
+      case "status_close":
+        // borra el mensaje, si ya expiró lo ignoras
+        bot.deleteMessage(chatId, query.message.message_id)
+           .catch(() => {});
+        break;
+  
+      // … tus otros handlers …
+  
+      default:
+        break;
+    }
+  });
 
-  if (!user || !user.walletPublicKey) {
-    return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
-  }
-
-  const now = Date.now();
-  let message = `👤 *Account Status*\n\n`;
-  message += `💼 Wallet: \`${user.walletPublicKey}\`\n`;
-
-  if (user.expired === "never") {
-    message += `✅ *Status:* Unlimited Membership`;
-  } else if (user.expired && now < user.expired) {
-    const expirationDate = new Date(user.expired).toLocaleDateString();
-    const remainingDays = Math.ceil((user.expired - now) / (1000 * 60 * 60 * 24));
-    message += `✅ *Status:* Active\n📅 *Expires:* ${expirationDate} (${remainingDays} day(s) left)`;
-  } else {
-    const expiredDate = user.expired ? new Date(user.expired).toLocaleDateString() : "N/A";
-    message += `❌ *Status:* Expired\n📅 *Expired On:* ${expiredDate}`;
-  }
-
-  bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
-});
+// ─────────────────────────────────────────────
+// /status with random GIF, user name & help button
+// ─────────────────────────────────────────────
+const statusGifs = [
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExaXlyNXpvOXBmczFyNmo2cmZjbWZndG13d3lhOTBoOWQyN2RmNjE0dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tA4tvdOYg5lY52otNL/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExODNtOXd1MWs5bDZ4c2x6czJzbHIybml4djc1NmgwNjlydWt3OGkyYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7tXmRetra2vpFyrYpe/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXppeGs1NDhubTEyeGg0MHUxdHI2M2dlcHdxZjhwbTV0aWxjNDB3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PLjqnYlGEoQTuYrTEn/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmVyZHpqazBjaWdna3lybGtscTg1NTFxazR1c2IxemM0YTYzd3ppMCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/K2tgd5hmGs7dpWZfdb/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbW03OWdxbGQyZnBtc3ZrYzh6bGs3anIxZjRzdG96aG56YThiNWtjdiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9UrvmC9KFVrsPaIY7R/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMTJhZXBjbGJyY3ZsNHM0Y3c5enJwcHBvY2FwZjd3djY1cmJlNjk5aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/4TYHPvIlwE3257tEQ9/giphy.gif",
+    "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExajd3amZlMHk3NHFuMmF1dWN4eTN3ajc0d3VzdThrdGRzem8xOTJzeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VV9EE5TjXdnWLiyGwt/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdXoxeHd0ZnB2cXo4aDV0cmhvMWs1NGhocTkzZXE5eHdhb2V0c2hucSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/jBh6MxLLsH9ZNfYLY9/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGxkbWF0M2h6MGRtZXpyeWZ5enBiNWJ2YmVmZnFzcXdodWx1MGthayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VRKheDy4DkBMrQm66p/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExOWxxNm9laHIzY3c3eHpvbHdlZjV1MmloZTRtZjR4dDB6cTFyYTRpbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/qcLaYD4EIPJabpN16c/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXg4emp4aG91dGtwaGZkdXp6OHpnOTlzeGZyMzhuNnczc2NpOWw3ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/NffRIeuF3yPYuYS1xt/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNjFycmgxaHF5bTRiZWFyaGNnOXdkZ3lwZTNleWVidmw1bWU3cDMwMiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XGOu1Ppbi43yqquqb1/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbGM4eDMwcjdwNmVndXY3NHFucTFrc2cxc3hocHowNnZkcnhucWJudyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1zkpgntA5oRjxUVkOM/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExZnhpcDdvaGwwbnBkMmtidjRyOWZza3NrbTdsdm82a3JuaDhtcjk2ayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/9tZhPkNjSMpqTekDhT/giphy.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExemU5aXpveWExams3aHJpNDA3N240Y29leTd5eTRweXZ5c2M5MXV3MSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ha8ybobhuGnTZwrpjs/giphy.gif"
+  ];
+  // ─────────────────────────────────────────────
+// /Popochita GIF
+// ─────────────────────────────────────────────
+  const extraGifs  = [
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXRmMnl5MWliOGI3ZDB1MWpyeXRqa3Jnand5aTMyNDBrdzd0YmwwZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Ie4CIIvQS0bk3zwZlM/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3Z3bDYydWZpMmNyM3N2MXljdTV6dGFzcmRuN3B5YTh1OG4yMG40aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/IzXiddo2twMmdmU8Lv/giphy.gif",
+    "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExazBiamsyenIyeHlzaTF0N3h1bngxczVscXVyZjE3MmYwMGNmMXdpNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SYo1DFS8NLhhqzzjMU/giphy.gif",
+    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
+  ];  
+  
+// ─────────────────────────────────────────────
+// 1) /status sigue igual
+// ─────────────────────────────────────────────
+bot.onText(/\/status/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
+  
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /status message:", e.message);
+    }
+  
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
+    }
+  
+    const isSpecial = chatId.toString() === "1631313738";
+  
+    // GIF con peso especial para el Popochita
+    let gifUrl;
+    if (isSpecial && Math.random() < 0.6) {
+      gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
+    } else {
+      gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+    }
+  
+    const displayName = isSpecial
+      ? "Popochita"
+      : (msg.from.first_name || "there");
+  
+    const now   = Date.now();
+    const lines = [];
+  
+    lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*\n`);
+    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
+  
+    if (user.expired === "never") {
+      lines.push(`✅ *Status:* Unlimited Membership`);
+    } else if (user.expired && now < user.expired) {
+      const expDate  = new Date(user.expired).toLocaleDateString();
+      const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
+      lines.push(`✅ *Status:* Active`);
+      lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
+    } else {
+      const expiredOn = user.expired
+        ? new Date(user.expired).toLocaleDateString()
+        : "N/A";
+      lines.push(`❌ *Status:* Expired`);
+      lines.push(`📅 *Expired On:* ${expiredOn}`);
+    }
+  
+    let swapInfo = "N/A";
+    if (user.swapLimit === Infinity) swapInfo = "Unlimited";
+    else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
+    lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
+  
+    const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
+    lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
+  
+    let autobuyStatus = "Off ❌";
+    if (user.autoBuyEnabled) {
+      const amt = user.autoBuyAmount;
+      const trg = user.autoBuyTrigger === "detect" ? "on Detect" : "on Notify";
+      autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
+    }
+    lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
+  
+    const caption = lines.join("\n");
+  
+    await bot.sendAnimation(chatId, gifUrl, {
+      caption,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❔ Help", url: "https://gemsniping.com/docs" }],
+          [{ text: "❌ Close", callback_data: "status_close" }]
+        ]
+      }
+    });
+  });
 
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
-    { command: 'autobuy_on',  description: 'Enable auto‑buy (for a single token only)' },
-    { command: 'autobuy_off', description: 'Disable auto‑buy' },
-    { command: 'ata_on',      description: 'Accelerate ATA creation process' },
-    { command: 'ata_off',     description: 'Disable ATA creation and return rents' },
-    { command: 'close_ata',   description: 'Close any ATA and refund rents' },
-  ]);
+    { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
+    { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
+    { command: 'notifications', description: '🔔 Configure New Token alerts' },
+    { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
+    { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
+    { command: 'payments',  description: '💳 Show your payment history' }
+]);
 
 // 🔹 Conexión WebSocket con reconexión automática
 function connectWebSocket() {
@@ -1011,144 +1680,111 @@ async function getDexScreenerData(pairAddress) {
     }
   }
 
-function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
-    console.log("🔄 Intentando guardar datos en tokens.json...");
-  
+  function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
+    // Validaciones iniciales
     if (!dexData || !mintData || !rugCheckData) {
-      console.error("❌ Error: Datos inválidos, no se guardará en tokens.json");
       return;
     }
-  
-    console.log("✅ Datos validados correctamente.");
-    console.log("🔹 Datos recibidos para guardar:", JSON.stringify({ dexData, mintData, rugCheckData, age, priceChange24h }, null, 2));
-  
+
+    // Formatear la información a guardar
     const tokenInfo = {
-      // 🪙 Token
-      name: dexData.name || "Unknown",
-      symbol: dexData.symbol || "Unknown",
-      tokenAddress: dexData.tokenAddress || "N/A",
-      tokenLogo: dexData.tokenLogo || "",
-  
-      // 📊 Precios
-      USD: dexData.priceUsd || "N/A",
-      SOL: dexData.priceSol || "N/A",
-      liquidity: dexData.liquidity || "N/A",
-      liquidityChange24h: dexData.liquidityChange24h || "N/A",
-  
-      // 📈 Stats 24h
-      priceChange24h: dexData.priceChange24h || "N/A",
-      buyVolume24h: dexData.buyVolume24h || "N/A",
-      sellVolume24h: dexData.sellVolume24h || "N/A",
-      totalVolume24h: dexData.totalVolume24h || "N/A",
-      buys24h: dexData.buys24h || "0",
-      sells24h: dexData.sells24h || "0",
-      buyers24h: dexData.buyers24h || "0",
-      sellers24h: dexData.sellers24h || "0",
-  
-      // 🔐 Seguridad
-      riskLevel: rugCheckData.riskLevel || "N/A",
-      warning: rugCheckData.riskDescription || "No risks detected",
-      LPLOCKED: rugCheckData.lpLocked || "N/A",
-      freezeAuthority: rugCheckData.freezeAuthority || "N/A",
-      mintAuthority: rugCheckData.mintAuthority || "N/A",
-  
-      // 🧩 DEX info
-      chain: dexData.chain || "solana",
-      dex: dexData.dex || "N/A",
-      pair: dexData.pairAddress || "N/A",
-      pairLabel: dexData.pairLabel || "N/A",
-      exchangeAddress: dexData.exchangeAddress || "N/A",
-      exchangeLogo: dexData.exchangeLogo || "",
-  
-      // ⏱️ Metadata
-      migrationDate: typeof mintData.date === "number" ? mintData.date : null,
-      status: mintData.status || "N/A",
-      token: mintData.mintAddress || "N/A"
+      name:                 dexData.name               || "Unknown",
+      symbol:               dexData.symbol             || "Unknown",
+      tokenAddress:         dexData.tokenAddress       || "N/A",
+      tokenLogo:            dexData.tokenLogo          || "",
+      USD:                  dexData.priceUsd           || "N/A",
+      SOL:                  dexData.priceSol           || "N/A",
+      liquidity:            dexData.liquidity          || "N/A",
+      liquidityChange24h:   dexData.liquidityChange24h || "N/A",
+      priceChange24h:       dexData.priceChange24h     || "N/A",
+      buyVolume24h:         dexData.buyVolume24h       || "N/A",
+      sellVolume24h:        dexData.sellVolume24h      || "N/A",
+      totalVolume24h:       dexData.totalVolume24h     || "N/A",
+      buys24h:              dexData.buys24h            || "0",
+      sells24h:             dexData.sells24h           || "0",
+      buyers24h:            dexData.buyers24h          || "0",
+      sellers24h:           dexData.sellers24h         || "0",
+      riskLevel:            rugCheckData.riskLevel     || "N/A",
+      warning:              rugCheckData.riskDescription || "No risks detected",
+      LPLOCKED:             rugCheckData.lpLocked      || "N/A",
+      freezeAuthority:      rugCheckData.freezeAuthority || "N/A",
+      mintAuthority:        rugCheckData.mintAuthority || "N/A",
+      chain:                dexData.chain              || "solana",
+      dex:                  dexData.dex                || "N/A",
+      pair:                 dexData.pairAddress        || "N/A",
+      pairLabel:            dexData.pairLabel          || "N/A",
+      exchangeAddress:      dexData.exchangeAddress    || "N/A",
+      exchangeLogo:         dexData.exchangeLogo       || "",
+      migrationDate:        typeof mintData.date === "number" ? mintData.date : null,
+      status:               mintData.status            || "N/A",
+      token:                mintData.mintAddress       || "N/A"
     };
-  
-    console.log("🔹 Datos formateados para guardar:", JSON.stringify(tokenInfo, null, 2));
-  
+
     const filePath = 'tokens.json';
     let tokens = {};
-  
+
+    // Leer o inicializar el archivo
     if (fs.existsSync(filePath)) {
       try {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        tokens = fileContent.trim() ? JSON.parse(fileContent) : {};
-        console.log("📂 Archivo tokens.json leído correctamente.");
-      } catch (error) {
-        console.error("❌ Error leyendo tokens.json:", error);
-        console.log("🔄 Restaurando tokens.json vacío...");
+        const content = fs.readFileSync(filePath, 'utf-8').trim();
+        tokens = content ? JSON.parse(content) : {};
+      } catch {
         fs.writeFileSync(filePath, "{}", 'utf-8');
         tokens = {};
       }
-    } else {
-      console.log("📂 Archivo tokens.json no existe, se creará uno nuevo.");
     }
-  
-    if (!mintData.mintAddress || mintData.mintAddress === "N/A") {
-      console.error("❌ Error: Mint Address inválido, no se guardará en tokens.json.");
+
+    // Validar que tengamos un mint válido
+    const key = mintData.mintAddress;
+    if (!key || key === "N/A") {
       return;
     }
-  
-    console.log("🔹 Mint Address a usar como clave:", mintData.mintAddress);
-  
-    tokens[mintData.mintAddress] = tokenInfo;
-  
+
+    // Actualizar y guardar
+    tokens[key] = tokenInfo;
     try {
       fs.writeFileSync(filePath, JSON.stringify(tokens, null, 2), 'utf-8');
-      console.log(`✅ Token ${dexData.symbol} almacenado en tokens.json`);
-    } catch (error) {
-      console.error("❌ Error guardando token en tokens.json:", error);
+    } catch {
+      // Silenciar errores de escritura
     }
-  
-    try {
-      fs.accessSync(filePath, fs.constants.W_OK);
-      console.log("✅ Permisos de escritura en tokens.json verificados.");
-    } catch (error) {
-      console.error("❌ Error: No hay permisos de escritura en tokens.json.");
-      console.log("🔄 Ejecuta este comando para arreglarlo:");
-      console.log(`chmod 666 ${filePath}`);
-    }
-  }
+}
 
-  function getTokenInfo(mintAddress) {
-    if (!fs.existsSync('tokens.json')) return { symbol: "N/A", name: "N/A" };
-  
-    const tokens = JSON.parse(fs.readFileSync('tokens.json', 'utf-8')) || {};
-  
-    return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
+// Función de lectura sin logs
+function getTokenInfo(mintAddress) {
+  const filePath = 'tokens.json';
+  if (!fs.existsSync(filePath)) {
+    return { symbol: "N/A", name: "N/A" };
   }
+  const tokens = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+  return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
+}
 
 // Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
+    let rpcUrl;
     try {
       const user = users[chatId];
       if (!user || !user.privateKey) {
         throw new Error("User not registered or missing privateKey.");
       }
   
-      // Obtención del keypair y de la wallet del usuario
-      const userKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+      // 1) Reservar un RPC distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "processed");
+  
+      // 2) Keypair y wallet
+      const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
       const userPublicKey = userKeypair.publicKey;
   
-      // Crear la conexión a Helius usando un endpoint premium y el compromiso "processed"
-      const connection = new Connection(
-        "https://mainnet.helius-rpc.com/?api-key=0c964f01-0302-4d00-a86c-f389f87a3f35",
-        "processed"
-      );
-  
-      // Verificar/crear la ATA y obtener el balance de SOL en paralelo
+      // 3) Crear/asegurar ATA y chequear balance simultáneo
       const [ata, balanceLamports] = await Promise.all([
         ensureAssociatedTokenAccount(userKeypair, mint, connection),
         connection.getBalance(userPublicKey, "processed")
       ]);
-  
       if (!ata) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return await buyToken(chatId, mint, amountSOL, attempt + 1);
+        await new Promise(r => setTimeout(r, 1000));
+        return buyToken(chatId, mint, amountSOL, attempt + 1);
       }
-  
       const balanceSOL = balanceLamports / 1e9;
       if (balanceSOL < amountSOL) {
         throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
@@ -1156,83 +1792,61 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   
       // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
       const orderParams = {
-        inputMint: "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
+        inputMint:  "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
         outputMint: mint,
-        amount: Math.floor(amountSOL * 1e9).toString(),
-        taker: userPublicKey.toBase58(),
+        amount:     Math.floor(amountSOL * 1e9).toString(),
+        taker:      userPublicKey.toBase58(),
         dynamicSlippage: true
       };
-  
-      const orderUrl = "https://lite-api.jup.ag/ultra/v1/order";
-      const orderResponse = await axios.get(orderUrl, {
+      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
         params: orderParams,
         headers: { Accept: "application/json" }
       });
-      if (!orderResponse.data) {
+      if (!orderRes.data) {
         throw new Error("Failed to receive order details from Ultra API.");
       }
-  
-      let unsignedTx = orderResponse.data.unsignedTransaction || orderResponse.data.transaction;
-      const requestId = orderResponse.data.requestId;
+      let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
+      const requestId = orderRes.data.requestId;
       if (!unsignedTx || !requestId) {
         throw new Error("Invalid order response from Ultra API.");
       }
       unsignedTx = unsignedTx.trim();
   
       // Deserializar, firmar y volver a serializar la transacción
-      let transactionBuffer;
+      const txBuf = Buffer.from(unsignedTx, "base64");
+      let signedTxBase64;
       try {
-        transactionBuffer = Buffer.from(unsignedTx, "base64");
-      } catch (err) {
-        throw new Error("Error decoding unsigned transaction: " + err.message);
+        const vtx = VersionedTransaction.deserialize(txBuf);
+        vtx.sign([userKeypair]);
+        signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+      } catch {
+        const legacy = Transaction.from(txBuf);
+        legacy.sign(userKeypair);
+        signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
-      let versionedTransaction;
-      try {
-        versionedTransaction = VersionedTransaction.deserialize(transactionBuffer);
-      } catch (err) {
-        throw new Error("Error deserializing transaction: " + err.message);
-      }
-      versionedTransaction.sign([userKeypair]);
-      const signedTx = versionedTransaction.serialize();
-      const signedTxBase64 = Buffer.from(signedTx).toString("base64");
   
       // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
       const executePayload = {
-        signedTransaction: signedTxBase64,
-        requestId: requestId,
-        prioritizationFeeLamports: 3500000 // Valor configurable
+        signedTransaction:          signedTxBase64,
+        requestId:                  requestId,
+        prioritizationFeeLamports:  5000000 // Valor configurable
       };
-      const executeResponse = await axios.post(
+      const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
         executePayload,
-        {
-          headers: { "Content-Type": "application/json", Accept: "application/json" }
-        }
+        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
       );
-  
-      // Agregar log para ver la respuesta completa en la consola
-      console.log("[buyToken] Execute response:", JSON.stringify(executeResponse.data, null, 2));
-  
-      // Verificar que la respuesta tenga status "Success"
-      if (
-        !executeResponse.data ||
-        (executeResponse.data.status && executeResponse.data.status !== "Success") ||
-        (!executeResponse.data.txSignature && !executeResponse.data.signature)
-      ) {
-        throw new Error(
-          "Invalid execute response from Ultra API: " +
-          JSON.stringify(executeResponse.data)
-        );
+      const exec = execRes.data || {};
+      if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
+        throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
       }
-  
-      // Extraer la firma de la transacción
-      const txSignature = executeResponse.data.txSignature || executeResponse.data.signature;
+      const txSignature = exec.txSignature || exec.signature;
   
       // ── GUARDAR EN buyReferenceMap ──
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
       buyReferenceMap[chatId][mint] = {
         txSignature,
-        executeResponse: executeResponse.data
+        executeResponse: exec
       };
   
       return txSignature;
@@ -1245,12 +1859,14 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
         error.response ? JSON.stringify(error.response.data) : ""
       );
       if (attempt < 6) {
-        const delay = 1000; // Delay fijo de 1 segundo
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await buyToken(chatId, mint, amountSOL, attempt + 1);
-      } else {
-        return Promise.reject(error);
+        await new Promise(r => setTimeout(r, 500));
+        return buyToken(chatId, mint, amountSOL, attempt + 1);
       }
+      return Promise.reject(error);
+  
+    } finally {
+      // Liberar el RPC para futuras llamadas
+      if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
 
@@ -1286,69 +1902,66 @@ async function getTokenBalance(chatId, mint) {
 
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
+    const SOL_MINT = "So11111111111111111111111111111111111111112";
+    let rpcUrl;
+  
     try {
       const user = users[chatId];
-      if (!user || !user.privateKey) {
-        return null;
-      }
+      if (!user?.privateKey) return null;
   
-      // Obtiene el keypair y establece la conexión.
+      // 1) Reservar un endpoint distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "processed");
+  
+      // 2) Keypair y pedir orden unsigned
       const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
-  
-      // Construir parámetros para la solicitud de orden a la API Ultra de Jupiter.
-      const amountInUnits = amount.toString();
-      const orderResponse = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
+      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
         params: {
           inputMint:  mint,
-          outputMint: "So11111111111111111111111111111111111111112",
-          amount:     amountInUnits,
+          outputMint: SOL_MINT,
+          amount:     amount.toString(),
           taker:      wallet.publicKey.toBase58(),
           dynamicSlippage: true
         },
         headers: { Accept: "application/json" }
       });
-      if (!orderResponse.data) {
-        throw new Error("Failed to receive order details from Ultra API for sell.");
-      }
-      const { unsignedTransaction, requestId, transaction } = orderResponse.data;
-      let txData = (unsignedTransaction || transaction || "").trim();
+      const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
+      const txData = (unsignedTransaction || transaction || "").trim();
       if (!txData || !requestId) {
         throw new Error("Invalid order response from Ultra API for sell.");
       }
   
-      // Deserializar, firmar y volver a serializar la transacción.
-      const transactionBuffer = Buffer.from(txData, "base64");
+      // 3) Deserializar y firmar localmente
+      const txBuf = Buffer.from(txData, "base64");
       let signedTxBase64;
       try {
-        // Intentamos v1
-        const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
-        versionedTx.sign([wallet]);
-        signedTxBase64 = Buffer.from(versionedTx.serialize()).toString("base64");
-      } catch (err) {
-        // Fallback a legacy
-        const legacyTx = Transaction.from(transactionBuffer);
-        legacyTx.sign(wallet);
-        signedTxBase64 = Buffer.from(legacyTx.serialize()).toString("base64");
+        const vtx = VersionedTransaction.deserialize(txBuf);
+        vtx.sign([wallet]);
+        signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+      } catch {
+        const legacy = Transaction.from(txBuf);
+        legacy.sign(wallet);
+        signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
       }
   
-      // Ejecutar la transacción mediante Ultra Execute
-      const executeResponse = await axios.post(
+      // 4) Ejecutar con Ultra Execute
+      const executePayload = {
+        signedTransaction:         signedTxBase64,
+        requestId:                 requestId,
+        prioritizationFeeLamports: 6000000
+      };
+      const execRes = await axios.post(
         "https://lite-api.jup.ag/ultra/v1/execute",
-        {
-          signedTransaction:   signedTxBase64,
-          requestId,
-          prioritizationFeeLamports: 3500000
-        },
+        executePayload,
         { headers: { "Content-Type": "application/json", Accept: "application/json" } }
       );
-      const exec = executeResponse.data || {};
+      const exec = execRes.data || {};
       if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
         throw new Error("Invalid execute response from Ultra API for sell: " + JSON.stringify(exec));
       }
       const txSignatureFinal = exec.txSignature || exec.signature;
   
-      // ── MERGE de la respuesta de venta sin borrar solBeforeBuy ──
+      // 5) Merge de la referencia sin perder solBeforeBuy
       buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
       buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
       Object.assign(buyReferenceMap[chatId][mint], {
@@ -1356,37 +1969,23 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         executeResponse: exec
       });
   
-      // Intentar cerrar el ATA si quedó vacío
-      try {
-        const ataAddress = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-        const ataInfo = await connection.getParsedAccountInfo(ataAddress, "confirmed");
-        const tokenAmount = ataInfo.value?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-        if (tokenAmount === 0) {
-          const closeTx = new Transaction().add(
-            createCloseAccountInstruction(
-              ataAddress,
-              wallet.publicKey,
-              wallet.publicKey,
-              []
-            )
-          );
-          await sendAndConfirmTransaction(connection, closeTx, [wallet]);
-        }
-      } catch (closeError) {
-        console.error("Error closing ATA for mint", mint, ":", closeError);
-      }
+      // 6) Disparar el cierre silencioso de ATAs tras la venta
+      setImmediate(() => {
+        closeEmptyATAsAfterSell(chatId);
+      });
   
       return txSignatureFinal;
   
     } catch (error) {
-      // Reintentos con backoff exponencial
       if (attempt < 6) {
-        const delay = 1000 * Math.pow(2, attempt - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = 500 * Math.pow(2, attempt - 1);
+        await new Promise(r => setTimeout(r, delay));
         return sellToken(chatId, mint, amount, attempt + 1);
-      } else {
-        return Promise.reject(error);
       }
+      return Promise.reject(error);
+    } finally {
+      // 7) Liberar el RPC
+      if (rpcUrl) releaseRpc(rpcUrl);
     }
   }
 
@@ -1536,7 +2135,102 @@ function saveProcessedMints() {
 // 🔹 Conjunto para almacenar firmas ya procesadas automáticamente
 const processedSignatures = new Set();
 
-// Función principal que ejecuta todo el proceso de análisis
+// ─── Helpers para envío en paralelo ───
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  }
+  /**
+   * Envía mensajes en paralelo en lotes de 28 por segundo
+   */
+  async function broadcastMessage(chatIds, text, opts = {}) {
+    const BATCH_SIZE  = 28;
+    const INTERVAL_MS = 1000;
+    const batches     = chunkArray(chatIds, BATCH_SIZE);
+    for (const batch of batches) {
+      await Promise.allSettled(batch.map(id => bot.sendMessage(id, text, opts)));
+      await sleep(INTERVAL_MS);
+    }
+  }
+
+  bot.onText(/\/notifications/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
+  
+    try {
+      await bot.deleteMessage(chatId, cmdMsgId);
+    } catch {}
+  
+    return bot.sendMessage(
+      chatId,
+      "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
+      "You can pause alerts during a buy/sell process to avoid distractions, or turn them off completely and re-enable whenever you like.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [ { text: "✅ Always On",         callback_data: "notif_always" } ],
+            [ { text: "⏸ Pause During Trade", callback_data: "notif_pause"  } ],
+            [ { text: "❌ Turn Off",          callback_data: "notif_off"    } ]
+          ]
+        }
+      }
+    );
+  });
+
+  bot.on("callback_query", async query => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
+  
+    if (data === "open_new_token_notif") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageText(
+        "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
+        "You can pause alerts during a buy/sell process to avoid distractions, or turn them off completely and re-enable whenever you like.",
+        {
+          chat_id: chatId,                         // 👈 aquí
+          message_id: query.message.message_id,    // 👈 y aquí
+          reply_markup: {
+            inline_keyboard: [
+              [ { text: "✅ Always On",         callback_data: "notif_always" } ],
+              [ { text: "⏸ Pause During Trade", callback_data: "notif_pause"  } ],
+              [ { text: "❌ Turn Off",          callback_data: "notif_off"    } ]
+            ]
+          }
+        }
+      );
+    }
+  
+    if (["notif_always","notif_pause","notif_off"].includes(data)) {
+      users[chatId] = users[chatId]||{};
+      users[chatId].newTokenNotif =
+        data === "notif_always"       ? "always" :
+        data === "notif_pause"        ? "pauseDuringTrade" :
+                                        "off";
+      saveUsers();
+  
+      const labels = {
+        always:           "✅ Notifications always on",
+        pauseDuringTrade: "⏸ Notifications paused during trade",
+        off:              "❌ Notifications turned off"
+      };
+      await bot.editMessageText(labels[users[chatId].newTokenNotif], {
+        chat_id:   chatId,                            // 👈 aquí también
+        message_id: query.message.message_id,         // 👈 y aquí
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery();
+    }
+  
+    // …otros callbacks…
+  });
+
+// ─── Función principal actualizada ───
 async function analyzeTransaction(signature, forceCheck = false) {
     if (!forceCheck && processedSignatures.has(signature)) return;
     if (!forceCheck) processedSignatures.add(signature);
@@ -1550,87 +2244,152 @@ async function analyzeTransaction(signature, forceCheck = false) {
     processedMints[mintData.mintAddress] = true;
     saveProcessedMints();
   
-    // Pre‑creación de ATAs (fire‑and‑forget)
+    // Pre-creación de ATAs (fire-and-forget)
     preCreateATAsForToken(mintData.mintAddress)
-      .catch(err => console.error("❌ Error pre‑creating ATAs:", err.message));
+      .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
   
-    // ─── Auto‑Buy One‑Shot ───
+    // ——— AUTO-BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
     for (const [chatId, user] of Object.entries(users)) {
-      if (user.subscribed && user.privateKey && user.autoBuyEnabled) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'detect'
+      ) {
         const amountSOL = user.autoBuyAmount;
         const mint      = mintData.mintAddress;
-  
-        // Desactivar auto‑buy
         user.autoBuyEnabled = false;
         saveUsers();
   
         try {
-          // 1) Mensaje inicial
           const sent      = await bot.sendMessage(
             chatId,
-            `🛒 Auto‑buying ${amountSOL} SOL for ${mint}…`
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
           const messageId = sent.message_id;
   
-          // 2) Ejecutar la compra
           const txSignature = await buyToken(chatId, mint, amountSOL);
           if (!txSignature) {
             await bot.editMessageText(
-              `❌ Auto‑Buy failed for ${mint}.`,
-              { chat_id: chatId, message_id: messageId }
+              `❌ Auto-Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
             );
             continue;
           }
   
-          // → ya no editamos el mensaje con “order confirmed”
-          // → ya no hacemos el bucle manual de retry
-  
-          // 3) Obtener detalles de una sola vez y confirmar
           const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
           await confirmBuy(chatId, swapDetails, messageId, txSignature);
-  
         } catch (err) {
-          console.error(`❌ Error en Auto‑Buy para ${chatId}:`, err);
-          bot.sendMessage(chatId, `❌ Auto‑Buy error: ${err.message}`);
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
         }
       }
     }
   
     // ——— Resto del flujo manual de análisis ———
-    const alertMessages = {};
-    for (const userId in users) {
-      const user = users[userId];
-      if (user && user.subscribed && user.privateKey) {
-        try {
-          const msg = await bot.sendMessage(
-            userId,
-            "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
-            { parse_mode: "Markdown" }
-          );
-          alertMessages[userId] = msg.message_id;
-          setTimeout(() => {
-            bot.deleteMessage(userId, msg.message_id).catch(() => {});
-          }, 80000);
-        } catch (_) {}
+  
+    // 1) Filtrar destinatarios para la alerta inicial:
+    const alertTargets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => Number(id));
+  
+    // 2) Enviar “🚨 Token incoming…” sólo a esos targets
+    const alertPromises = alertTargets.map(chatId =>
+      bot.sendMessage(
+        chatId,
+        "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
+        { parse_mode: "Markdown" }
+      )
+      .then(msg => ({ chatId, messageId: msg.message_id }))
+      .catch(() => null)
+    );
+    const alertResults = await Promise.all(alertPromises);
+  
+    // 3) Borrar cada alerta tras 60s
+    for (const res of alertResults) {
+      if (res) {
+        setTimeout(() => {
+          bot.deleteMessage(res.chatId, res.messageId).catch(() => {});
+        }, 60_000);
       }
     }
   
+    // 4) Obtener datos en SolanaTracker → Moralis → RugCheck
     const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
     if (!pairAddress) return;
+  
     const dexData = await getDexScreenerData(pairAddress);
     if (!dexData) {
-      for (const userId in alertMessages) {
-        try {
+      // si no hay dexData, editar cada alerta existente
+      for (const res of alertResults) {
+        if (res) {
           await bot.editMessageText(
             "⚠️ Token discarded due to insufficient info for analysis.",
-            { chat_id: userId, message_id: alertMessages[userId], parse_mode: "Markdown" }
-          );
-        } catch (_) {}
+            {
+              chat_id: res.chatId,
+              message_id: res.messageId,
+              parse_mode: "Markdown"
+            }
+          ).catch(() => {});
+        }
       }
       return;
     }
+  
     const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
     if (!rugCheckData) return;
+  
+    // ——— AUTO-BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
+    for (const [chatId, user] of Object.entries(users)) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'notify'
+      ) {
+        const amountSOL = user.autoBuyAmount;
+        const mint      = mintData.mintAddress;
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
+        try {
+          const sent      = await bot.sendMessage(
+            chatId,
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
+          );
+          const messageId = sent.message_id;
+  
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(
+              `❌ Auto-Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
+            );
+            continue;
+          }
+  
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+        } catch (err) {
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
+        }
+      }
+    }
+  
+    // ——— Continuar con tu flujo de notificaciones ———
     const priceChange24h = dexData.priceChange24h !== "N/A"
       ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
       : "N/A";
@@ -1639,11 +2398,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     const migrationTimestamp = mintData.date || Date.now();
     const age = calculateAge(migrationTimestamp);
     const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-    const buys24h = typeof dexData.buys24h === "number" ? dexData.buys24h : 0;
-    const sells24h = typeof dexData.sells24h === "number" ? dexData.sells24h : 0;
-    const buyers24h = typeof dexData.buyers24h === "number" ? dexData.buyers24h : 0;
-    const sellers24h = typeof dexData.sellers24h === "number" ? dexData.sellers24h : 0;
-    
+    const buys24h   = Number(dexData.buys24h)   || 0;
+    const sells24h  = Number(dexData.sells24h)  || 0;
+    const buyers24h = Number(dexData.buyers24h) || 0;
+    const sellers24h= Number(dexData.sellers24h)|| 0;
+  
     saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
   
     let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
@@ -1651,11 +2410,11 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
     message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
     message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n`;
-    message += `🟩 Buys 24h: ${escapeMarkdown(buys24h)} 🟥 Sells 24h: ${escapeMarkdown(sells24h)}\n`;
-    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined, { maximumFractionDigits: 2 })}\n`;
-    message += `🧑‍🤝‍🧑 Buyers: ${escapeMarkdown(buyers24h)} 👤 Sellers: ${escapeMarkdown(sellers24h)}\n\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n`;
+    message += `🟩 Buys 24h: ${buys24h} 🟥 Sells 24h: ${sells24h}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${buyers24h} 👤 Sellers: ${sellers24h}\n\n`;
     message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
     message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
     message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
@@ -1663,7 +2422,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
     message += `📆 **Created:** ${createdDate}\n\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-    
+  
     await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
   }
   
@@ -1672,15 +2431,16 @@ async function analyzeTransaction(signature, forceCheck = false) {
       console.error("⚠️ Mint inválido, no se enviará notificación.");
       return;
     }
+  
     const actionButtons = [
       [
         { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-        { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+        { text: "📊 Chart+Txns",   url: `https://app.gemsniping.com/solana/${mint}` }
       ],
       [
-        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-        { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-        { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
+        { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+        { text: "💰 0.2 Sol",  callback_data: `buy_${mint}_0.2` },
+        { text: "💰 0.3 Sol",  callback_data: `buy_${mint}_0.3` }
       ],
       [
         { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
@@ -1691,90 +2451,289 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
       ]
     ];
-    for (const userId in users) {
-      const user = users[userId];
-      if (!user || !user.subscribed || !user.privateKey) continue;
+  
+    // 1) Construir array de destinatarios filtrados
+    const targets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            // Si está en medio de un trade para este usuario, NO notificar
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => id);
+  
+    // 2) Envío sólo a esos targets
+    for (const chatId of targets) {
       try {
-        let sentMsg;
         if (imageUrl) {
-          sentMsg = await bot.sendPhoto(userId, imageUrl, {
+          await bot.sendPhoto(chatId, imageUrl, {
             caption: message,
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         } else {
-          sentMsg = await bot.sendMessage(userId, message, {
+          await bot.sendMessage(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: { inline_keyboard: actionButtons }
           });
         }
-        console.log(`✅ Mensaje enviado a ${userId}`);
+        console.log(`✅ Mensaje final enviado a ${chatId}`);
       } catch (error) {
-        console.error(`❌ Error enviando mensaje a ${userId}:`, error);
+        console.error(`❌ Error enviando mensaje final a ${chatId}:`, error);
       }
     }
   }
 
-  bot.onText(/\/autobuy_(on|off)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const cmd    = match[1];
+  // En tu scope global
+const followers = {
+    // leaderChatId: Set([followerChatId, ...])
+  };
+
+  function getParticipants(leaderId) {
+    const set = followers[leaderId] || new Set();
+    return [ leaderId, ...Array.from(set) ];
+  }
+
+// /follow <leaderId>
+bot.onText(/\/follow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId] ||= new Set();
+    followers[leaderId].add(followerId);
+    bot.sendMessage(followerId, `✅ Now following ${leaderId}.`);
+  });
   
-    if (!users[chatId]) users[chatId] = {};
-    if (cmd === 'off') {
-      users[chatId].autoBuyEnabled = false;
-      saveUsers();
-      return bot.sendMessage(chatId, "❌ Auto‑Buy disabled.");
-    }
-  
-    // on: preguntar monto con emoji 💰 y "Sol" al final
-    const keyboard = [
-      [0.1, 0.2, 0.3].map(x => ({
-        text: `💰 ${x} Sol`,
-        callback_data: `autobuy_amt_${x}`
-      })),
-      [0.5, 1.0, 2.0].map(x => ({
-        text: `💰 ${x} Sol`,
-        callback_data: `autobuy_amt_${x}`
-      }))
-    ];
-  
-    await bot.sendMessage(
-      chatId,
-      "How much SOL would you like to auto‑buy?",
-      { reply_markup: { inline_keyboard: keyboard } }
-    );
+  // /unfollow <leaderId>
+  bot.onText(/\/unfollow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId]?.delete(followerId);
+    bot.sendMessage(followerId, `❌ Unfollowed ${leaderId}.`);
   });
 
-// ————————————————
-// 1) Capturar la selección de monto para Auto‑Buy
-// (debe ir antes que los handlers de buy_, sell_, refresh_)
-// ————————————————
-bot.on('callback_query', async (query) => {
+// Ejecuta compra en paralelo para todos los participantes
+async function executeParallelBuy(participants, mint, amountSOL) {
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar compra
+        const txSignature = await buyToken(chatId, mint, amountSOL);
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ The purchase could not be completed.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Fetch swap details
+        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+        if (!swapDetails) {
+          return bot.editMessageText(
+            `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        await confirmBuy(chatId, swapDetails, messageId, txSignature);
+  
+      } catch (error) {
+        console.error(`Error in parallel buy for ${chatId}:`, error);
+        await bot.sendMessage(chatId, `❌ Purchase error: ${error.message || error}`);
+      }
+    }));
+  }
+  
+  // Ejecuta venta en paralelo para todos los participantes
+  async function executeParallelSell(participants, mint, sellType) {
+    const label = sellType === "50" ? "50%" : "100%";
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🔄 Processing sale of ${label} of your ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar la venta (con reintentos si quieres replicar tu lógica original)
+        let txSignature = null;
+        for (let i = 0; i < 3 && !txSignature; i++) {
+          txSignature = await sellToken(chatId, mint, sellType);
+          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ Sell failed for ${mint}. Please check server logs.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Obtener detalles (hasta 5 intentos)
+        let sellDetails = null;
+        for (let i = 0; i < 5 && !sellDetails; i++) {
+          sellDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!sellDetails) {
+          return bot.editMessageText(
+            `⚠️ Sell details could not be retrieved.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        // (si necesitas pasar el soldAmount, extráelo tal como en el handler individual)
+        await confirmSell(chatId, sellDetails, null, messageId, txSignature, mint);
+  
+      } catch (err) {
+        console.error(`Error in parallel sell for ${chatId}:`, err);
+        await bot.sendMessage(chatId, `❌ Sell error: ${err.message || err}`);
+      }
+    }));
+  }
+
+ // Comando /autobuy
+bot.onText(/\/autobuy/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
+  
+    try {
+      await bot.deleteMessage(chatId, cmdMsgId);
+    } catch (err) {
+      console.warn("Could not delete command message:", err.message);
+    }
+  
+    const intro =
+      "🚀 *Auto‑Buy Turbo Mode!* 🚀\n\n" +
+      "Get fresh tokens the moment they land on Solana—hands‑free and lightning‑fast! " +
+      "Turn it *ON*, pick your amount, and watch the bot work. " +
+      "Turn it *OFF* anytime and I'll stop buying tokens.";
+  
+    const keyboard = [
+      [
+        { text: "✅ Enable",  callback_data: "autobuy_toggle_on"  },
+        { text: "❌ Disable", callback_data: "autobuy_toggle_off" }
+      ]
+    ];
+  
+    await bot.sendMessage(chatId, intro, {
+      parse_mode:   'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  });
+  
+  // Handler de toggles y selección de monto
+  bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    // Si viene de un botón 'autobuy_amt_X'
-    if (data.startsWith('autobuy_amt_')) {
-      const amount = parseFloat(data.replace('autobuy_amt_',''));
-      if (!users[chatId]) users[chatId] = {};
-  
-      users[chatId].autoBuyEnabled = true;
-      users[chatId].autoBuyAmount  = amount;
-      saveUsers();   // ← Persiste en users.json
-  
-      // Respondemos al botón y actualizamos el texto
-      await bot.answerCallbackQuery(query.id, { text: `✅ Auto‑Buy enabled: ${amount} SOL` });
+    // ── Toggle OFF ──
+    if (data === 'autobuy_toggle_off') {
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = false;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: '❌ Auto‑Buy disabled.' });
       return bot.editMessageText(
-        `✅ Auto‑Buy set to *${amount} SOL*`,
+        '❌ *Auto‑Buy is now DISABLED!*',
         {
           chat_id: chatId,
           message_id: query.message.message_id,
-          parse_mode: "Markdown"
+          parse_mode: 'Markdown'
         }
       );
     }
   
-    // Si no era Auto‑Buy, no hacemos nada aquí y dejamos que otros handlers lo procesen.
+    // ── Enable Auto‑Buy ──
+    if (data === 'autobuy_toggle_on') {
+      users[chatId] = users[chatId] || {};
+      users[chatId].autoBuyEnabled = true;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
+  
+      // 👉 Nueva etapa: elegir momento de disparo
+      const text = '⌚ *When should I trigger Auto‑Buy?*';
+      const keyboard = [
+        [{ text: '1️⃣ When a token is detected', callback_data: 'autobuy_trigger_detect' }],
+        [{ text: '2️⃣ When the token is announced',           callback_data: 'autobuy_trigger_notify' }]
+      ];
+      return bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    }
+  
+    // ── Selección de trigger ──
+    if (data === 'autobuy_trigger_detect' || data === 'autobuy_trigger_notify') {
+      const trigger = data === 'autobuy_trigger_detect' ? 'detect' : 'notify';
+      users[chatId].autoBuyTrigger = trigger;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id);
+  
+      // Ahora preguntamos el monto
+      const keyboard = [
+        [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
+        [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
+      ];
+      return bot.editMessageText(
+        '✅ *Great!*  \n\n' +
+        '💰 *How much SOL would you like me to auto‑buy each time?*',
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: keyboard }
+        }
+      );
+    }
+  
+    // ── Capturar monto seleccionado ──
+    if (data.startsWith('autobuy_amt_')) {
+      const amount = parseFloat(data.replace('autobuy_amt_',''));
+      users[chatId].autoBuyAmount = amount;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
+      return bot.editMessageText(
+        '🎉 *Auto‑Buy configured!*  \n\n' +
+        `It will now automatically purchase *${amount} SOL* according to your preference.`,
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        }
+      );
+    }
+  
+    // Si no era un callback de Auto‑Buy, dejamos que otros handlers lo procesen
+    return;
   });
 
   bot.on("callback_query", async (query) => {
@@ -1820,8 +2779,8 @@ bot.on('callback_query', async (query) => {
           refreshRiskCount[mint]++;
         }
         let updatedRiskLevel, updatedWarning;
-        if (refreshRiskCount[mint] % 10 === 1) {
-          // Solo en el primer refresh (y cada 10 refresh) se actualiza la data de riesgo
+        if (refreshRiskCount[mint] % 16 === 1) {
+          // Solo en el primer refresh (y cada 16 refresh) se actualiza la data de riesgo
           const rugCheckData = await fetchRugCheckData(mint);
           if (rugCheckData) {
             updatedRiskLevel = rugCheckData.riskLevel;
@@ -1903,10 +2862,10 @@ bot.on('callback_query', async (query) => {
           inline_keyboard: [
             [
                 { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-                { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${mint}.html` }
+                { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
               ],
               [
-                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
                 { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
                 { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
       ],
@@ -2066,172 +3025,181 @@ bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
-    if (data.startsWith("sell_")) {
-      const [_, expectedTokenMint, sellType] = data.split("_");
-  
-      // Asegurarnos de que tenemos llave privada
-      if (!users[chatId]?.privateKey) {
-        await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
-        return bot.answerCallbackQuery(query.id);
-      }
-  
-      // Recuperar o enviar el mensaje "Waiting for sell"
-      let msgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
-      if (!msgId) {
-        const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
-        msgId = m.message_id;
-        buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-        buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
-        buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
-      }
-  
-      // Mostrar que estamos procesando la venta
-      await bot.editMessageText(
-        `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
-        { chat_id: chatId, message_id: msgId }
-      );
-  
-      try {
-        // 1) Asegurar ATA, obtener decimales y balance
-        const wallet     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-        await ensureAssociatedTokenAccount(wallet, expectedTokenMint, connection);
-  
-        const decimals = await getTokenDecimals(expectedTokenMint);
-        const balance  = await getTokenBalance(chatId, expectedTokenMint);
-        if (!balance || balance <= 0) {
-          await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
-            chat_id: chatId, message_id: msgId
-          });
-          setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 30_000);
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 2) Calcular lamports y soldAmount
-        const balanceInLam = Math.floor(balance * 10 ** decimals);
-        const amountToSell = sellType === "50"
-          ? Math.floor(balanceInLam / 2)
-          : balanceInLam;
-        const soldAmount = sellType === "50"
-          ? (balance / 2).toFixed(decimals)
-          : balance.toFixed(decimals);
-  
-        if (amountToSell < 1) {
-          await bot.editMessageText("⚠️ The amount to sell is too low.", {
-            chat_id: chatId, message_id: msgId
-          });
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 3) Ejecutar la venta (hasta 3 intentos con 1 s backoff)
-        let txSignature = null;
-        for (let i = 0; i < 3 && !txSignature; i++) {
-          txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
-          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
-        }
-        if (!txSignature) {
-          await bot.editMessageText(
-            "❌ The sale could not be completed after multiple attempts. Please check server logs.",
-            { chat_id: chatId, message_id: msgId }
-          );
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 4) Obtener detalles de la venta (hasta 5 intentos con 1 s backoff)
-        let sellDetails = null;
-        for (let i = 0; i < 5 && !sellDetails; i++) {
-          sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
-          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
-        }
-        if (!sellDetails) {
-          await bot.editMessageText(
-            `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
-            {
-              chat_id: chatId,
-              message_id: msgId,
-              parse_mode: "Markdown",
-              disable_web_page_preview: true
-            }
-          );
-          return bot.answerCallbackQuery(query.id);
-        }
-  
-        // 5) Confirmar y actualizar con todos los detalles finales
-        await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
-  
-      } catch (err) {
-        console.error("❌ Error in sell process:", err);
-        await bot.editMessageText(
-          `❌ The sale could not be completed. Error: ${err.message}`,
-          { chat_id: chatId, message_id: msgId }
-        );
-      }
+    if (!data.startsWith("sell_")) {
+      return bot.answerCallbackQuery(query.id);
     }
   
-    // siempre respondemos para quitar el “loading” del botón
-    bot.answerCallbackQuery(query.id);
+    // quita el spinner
+    await bot.answerCallbackQuery(query.id);
+  
+    const [_, expectedTokenMint, sellType] = data.split("_");
+  
+    // 1) Si tiene seguidores, hacemos parallel sell y salimos
+    const participants = getParticipants(chatId);
+    if (participants.length > 1) {
+      return executeParallelSell(participants, expectedTokenMint, sellType);
+    }
+  
+    // … de aquí en adelante, tu flujo individual EXACTO …
+  
+    // asegurarnos de que exista la clave
+    if (!users[chatId]?.privateKey) {
+      await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
+      return;
+    }
+  
+    // recuperar o enviar el mensaje "Waiting for sell"
+    let msgId = buyReferenceMap[chatId]?.[expectedTokenMint]?.sellMessageId;
+    if (!msgId) {
+      const m = await bot.sendMessage(chatId, "⏳ Waiting for sell...", { parse_mode: "Markdown" });
+      msgId = m.message_id;
+      buyReferenceMap[chatId] = users[chatId] = users[chatId] || {};
+      buyReferenceMap[chatId][expectedTokenMint] = buyReferenceMap[chatId][expectedTokenMint] || {};
+      buyReferenceMap[chatId][expectedTokenMint].sellMessageId = msgId;
+    }
+  
+    // indicar procesamiento
+    await bot.editMessageText(
+      `🔄 Processing sale of ${sellType === "50" ? "50%" : "100%"} of your ${expectedTokenMint} tokens...`,
+      { chat_id: chatId, message_id: msgId }
+    );
+  
+    let rpcUrl;
+    try {
+      // 1) escoger un RPC distinto
+      rpcUrl = getNextRpc();
+      const connection = new Connection(rpcUrl, "processed");
+  
+      // 2) Omitimos ensureAssociatedTokenAccount
+      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(users[chatId].privateKey)));
+  
+      // 3) Decimales y balance
+      const decimals = await getTokenDecimals(expectedTokenMint);
+      const balance  = await getTokenBalance(chatId, expectedTokenMint);
+      if (!balance || balance <= 0) {
+        await bot.editMessageText("⚠️ You don't have enough balance to sell.", {
+          chat_id: chatId, message_id: msgId
+        });
+        setTimeout(() => bot.deleteMessage(chatId, msgId).catch(() => {}), 30_000);
+        return;
+      }
+  
+      // 4) preparar montos
+      const balanceInLam = Math.floor(balance * 10 ** decimals);
+      const amountToSell = sellType === "50"
+        ? Math.floor(balanceInLam / 2)
+        : balanceInLam;
+      const soldAmount = sellType === "50"
+        ? (balance / 2).toFixed(decimals)
+        : balance.toFixed(decimals);
+  
+      if (amountToSell < 1) {
+        await bot.editMessageText("⚠️ The amount to sell is too low.", {
+          chat_id: chatId, message_id: msgId
+        });
+        return;
+      }
+  
+      // 5) ejecutar la venta (hasta 3 intentos)
+      let txSignature = null;
+      for (let i = 0; i < 3 && !txSignature; i++) {
+        txSignature = await sellToken(chatId, expectedTokenMint, amountToSell);
+        if (!txSignature) await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!txSignature) {
+        await bot.editMessageText(
+          "❌ The sale could not be completed after multiple attempts. Please check server logs.",
+          { chat_id: chatId, message_id: msgId }
+        );
+        return;
+      }
+  
+      // 6) detalles de la venta (hasta 5 intentos)
+      let sellDetails = null;
+      for (let i = 0; i < 5 && !sellDetails; i++) {
+        sellDetails = await getSwapDetailsHybrid(txSignature, expectedTokenMint, chatId);
+        if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!sellDetails) {
+        await bot.editMessageText(
+          `⚠️ Sell details could not be retrieved after 5 attempts.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+          {
+            chat_id: chatId,
+            message_id: msgId,
+            parse_mode: "Markdown",
+            disable_web_page_preview: true
+          }
+        );
+        return;
+      }
+  
+      // 7) confirmar y actualizar
+      await confirmSell(chatId, sellDetails, soldAmount, msgId, txSignature, expectedTokenMint);
+  
+    } catch (err) {
+      console.error("❌ Error in sell process:", err);
+      await bot.editMessageText(
+        `❌ The sale could not be completed. Error: ${err.message}`,
+        { chat_id: chatId, message_id: msgId }
+      );
+    } finally {
+      // 8) liberar el RPC usado
+      if (rpcUrl) releaseRpc(rpcUrl);
+    }
   });
 
-  async function confirmSell(
+// ——— Función confirmSell actualizada ———
+async function confirmSell(
     chatId,
     sellDetails,
-    _soldAmountStr,    // ya no lo usamos, vendimos lo que dice sellDetails.soldAmount
+    _soldAmountStr,
     messageId,
     txSignature,
     expectedTokenMint
   ) {
     const solPrice = await getSolPriceUSD();
-  
-    // Parsear cantidades desde sellDetails
-    const soldTokens = parseFloat(sellDetails.soldAmount)   || 0;
+
+    // — Parsear cantidades —
+    const soldTokens = parseFloat(sellDetails.soldAmount) || 0;
     const gotSol     = parseFloat(sellDetails.receivedAmount) || 0;
-  
-    // PnL en SOL y USD
+
+    // — Calcular PnL —
     let pnlDisplay = "N/A";
     const ref = buyReferenceMap[chatId]?.[expectedTokenMint];
     if (ref?.solBeforeBuy != null) {
-      const beforeBuy = ref.solBeforeBuy;
-      const pnlSol    = gotSol - beforeBuy;
-      const emoji     = pnlSol >= 0 ? "🟢" : "🔻";
-      const pnlUsd    = solPrice != null ? pnlSol * solPrice : null;
+      const pnlSol = gotSol - ref.solBeforeBuy;
+      const emoji  = pnlSol >= 0 ? "🟢" : "🔻";
+      const usdPnL = solPrice != null ? pnlSol * solPrice : null;
       pnlDisplay = `${emoji}${Math.abs(pnlSol).toFixed(3)} SOL` +
-        (pnlUsd != null
-          ? ` (USD ${pnlUsd >= 0 ? "+" : "-"}$${Math.abs(pnlUsd).toFixed(2)})`
+        (usdPnL != null
+          ? ` (USD ${usdPnL >= 0 ? "+" : "-"}$${Math.abs(usdPnL).toFixed(2)})`
           : ""
         );
     }
-  
-    // Precio promedio de venta
+
+    // — Precio medio y hora —
     const tokenPrice = soldTokens > 0
       ? (gotSol / soldTokens).toFixed(9)
       : "N/A";
-  
-    // Formatear hora
-    const now = Date.now();
-    const utcTime = new Date(now).toLocaleTimeString("en-GB", {
-      hour12: false, timeZone: "UTC"
-    });
-    const estTime = new Date(now).toLocaleTimeString("en-US", {
-      hour12: false, timeZone: "America/New_York"
-    });
+    const now       = Date.now();
+    const utcTime   = new Date(now).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const estTime   = new Date(now).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
     const formattedTime = `${utcTime} UTC | ${estTime} EST`;
-  
-    // Balance actual de la wallet
-    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-    const balLam     = await connection.getBalance(
-      new PublicKey(sellDetails.walletAddress)
-    );
+
+    // — Balance de la wallet —
+    const rpcUrl     = getNextRpc();
+    const connection = new Connection(rpcUrl, "processed");
+    const balLam     = await connection.getBalance(new PublicKey(sellDetails.walletAddress));
+    releaseRpc(rpcUrl);
     const walletSol = balLam / 1e9;
-    const walletUsd = solPrice != null
-      ? (walletSol * solPrice).toFixed(2)
-      : "N/A";
-  
-    // Símbolo del token
+    const walletUsd = solPrice != null ? (walletSol * solPrice).toFixed(2) : "N/A";
+
+    // — Símbolo —
     const tokenSymbol = escapeMarkdown(
       getTokenInfo(expectedTokenMint).symbol || "Unknown"
     );
-  
-    // Mensaje final
+
+    // — 1) Mensaje completo para Telegram —
     const confirmationMessage =
       `✅ *Sell completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${txSignature})\n` +
       `*${tokenSymbol}/SOL* (Jupiter Aggregator v6)\n` +
@@ -2244,69 +3212,129 @@ bot.on("callback_query", async (query) => {
       `🌑 *Wallet Balance:* ${walletSol.toFixed(2)} SOL (USD $${walletUsd})\n\n` +
       `🔗 *Sold Token ${tokenSymbol}:* \`${expectedTokenMint}\`\n` +
       `🔗 *Wallet:* \`${sellDetails.walletAddress}\``;
-  
+
+    // — 2) Texto corto para compartir en X/WhatsApp —
+    let shareText =
+      `✅ Sell completed ${tokenSymbol}/SOL\n` +
+      `Token Price: ${tokenPrice} SOL\n` +
+      `Sold: ${soldTokens.toFixed(3)} ${tokenSymbol}\n` +
+      `SOL PnL: ${pnlDisplay}\n` +
+      `Got: ${gotSol.toFixed(9)} SOL (USD $${(gotSol * solPrice).toFixed(2)})\n` +
+      `🔗 https://solscan.io/tx/${txSignature}\n\n` +
+      `💎 I got this result using Gemsniping – the best bot on Solana! https://gemsniping.com`;
+
+    shareText = shareText
+      .normalize('NFC')
+      .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
+
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+
+    // — 3) Editamos el mensaje y añadimos botones —
     await bot.editMessageText(confirmationMessage, {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "Markdown",
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🚀 Share on X", url: tweetUrl },
+            { text: "💬 WhatsApp",    url: waUrl }
+          ]
+        ]
+      }
     });
-  
-    // Actualizamos sólo la metadata, conservando solBeforeBuy
+
+    // — 4) Guardar estado de la referencia y el swap —
     buyReferenceMap[chatId][expectedTokenMint] = {
       ...buyReferenceMap[chatId][expectedTokenMint],
       txSignature,
       time: Date.now()
     };
-  
     saveSwap(chatId, "Sell", {
       "Sell completed successfully": true,
       Pair:         `${tokenSymbol}/SOL`,
       Sold:         `${soldTokens.toFixed(3)} ${tokenSymbol}`,
       Got:          `${gotSol.toFixed(9)} SOL`,
-      "Token Price": `${tokenPrice} SOL`,
+      "Token Price":`${tokenPrice} SOL`,
       "SOL PnL":    pnlDisplay,
       Time:         formattedTime,
       Transaction:  `https://solscan.io/tx/${txSignature}`,
       Wallet:       sellDetails.walletAddress,
       messageText:  confirmationMessage
     });
+
+    // — 5) Limpiar el flag de “en trade” para que pauseDuringTrade vuelva a notificar —
+    try {
+      if (buyReferenceMap[chatId] && buyReferenceMap[chatId][expectedTokenMint]) {
+        delete buyReferenceMap[chatId][expectedTokenMint];
+        if (Object.keys(buyReferenceMap[chatId]).length === 0) {
+          delete buyReferenceMap[chatId];
+        }
+      }
+    } catch (e) {
+      console.warn("Error limpiando buyReferenceMap:", e);
+    }
   }
+
 
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
     if (data.startsWith("buy_")) {
+      // 1) Quitar spinner
+      await bot.answerCallbackQuery(query.id);
+  
       const [_, mint, amountStr] = data.split("_");
       const amountSOL = parseFloat(amountStr);
-      const messageId = (await bot.sendMessage(
-        chatId,
-        `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
-      )).message_id;
   
-      if (!users[chatId]?.privateKey) {
-        await bot.editMessageText("⚠️ You don't have a registered private key. Use /start to register.", {
-          chat_id: chatId,
-          message_id
-        });
-        await bot.answerCallbackQuery(query.id);
+      // 2) Si tiene seguidores, lanzamos compras en paralelo y salimos
+      const participants = getParticipants(chatId);
+      if (participants.length > 1) {
+        await executeParallelBuy(participants, mint, amountSOL);
         return;
       }
   
+      // 💰 2b) Chequeo de balance antes de “Processing”
       try {
-        // 1) Send order
+        const connection = new Connection(SOLANA_RPC_URL, "processed");
+        const balanceLam = await connection.getBalance(
+          new PublicKey(users[chatId].walletPublicKey)
+        );
+        const balanceSOL = balanceLam / 1e9;
+        if (balanceSOL < amountSOL) {
+          return bot.sendMessage(
+            chatId,
+            `❌ Not enough SOL. Balance: ${balanceSOL.toFixed(4)} SOL, Required: ${amountSOL} SOL`,
+            { parse_mode: "Markdown" }
+          );
+        }
+      } catch (err) {
+        console.error("Error checking balance:", err);
+        // Si el RPC falla, seguimos al flujo normal:
+      }
+  
+      // 3) Enviar mensaje de “processing”
+      const sentMsg = await bot.sendMessage(
+        chatId,
+        `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+      );
+      const messageId = sentMsg.message_id;
+  
+      try {
+        // 4) Send order
         const txSignature = await buyToken(chatId, mint, amountSOL);
         if (!txSignature) {
-          await bot.editMessageText(`❌ The purchase could not be completed.`, {
-            chat_id: chatId,
-            message_id
-          });
-          await bot.answerCallbackQuery(query.id);
+          await bot.editMessageText(
+            `❌ The purchase could not be completed.`,
+            { chat_id: chatId, message_id }
+          );
           return;
         }
   
-        // 2) Fetch swap details once
+        // 5) Fetch swap details once
         const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
         if (!swapDetails) {
           await bot.editMessageText(
@@ -2318,11 +3346,10 @@ bot.on("callback_query", async (query) => {
               disable_web_page_preview: true
             }
           );
-          await bot.answerCallbackQuery(query.id);
           return;
         }
   
-        // 3) Final confirmation (updates the same message to the full summary)
+        // 6) Final confirmation
         await confirmBuy(chatId, swapDetails, messageId, txSignature);
   
       } catch (error) {
@@ -2337,8 +3364,6 @@ bot.on("callback_query", async (query) => {
           message_id
         });
       }
-  
-      await bot.answerCallbackQuery(query.id);
     }
   });
 
@@ -2410,7 +3435,7 @@ bot.on("callback_query", async (query) => {
             { text: "💯 Sell MAX", callback_data: `sell_${receivedTokenMint}_100` }
           ],
           [
-            { text: "📈 📊 Chart+Txns", url: `https://pumpultra.fun/solana/${receivedTokenMint}.html` }
+            { text: "📈 📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${receivedTokenMint}` }
           ]
         ]
       }
@@ -2479,186 +3504,158 @@ const lastMessageContent = {};
 
 // --- Función refreshBuyConfirmationV2 actualizada ---
 async function refreshBuyConfirmationV2(chatId, messageId, tokenMint) {
-  let tokenSymbol = "Unknown";
+    let tokenSymbol = "Unknown";
+    
+    try {
+      // Incrementa contador y cada 20 rotar proxy
+      refreshRequestCount++;
+      if (refreshRequestCount % 20 === 0) {
+        regenerateProxySession();
+      }
   
-  try {
-    // Incrementar el contador de refrescos y, cada 20, rotar la sesión del proxy
-    refreshRequestCount++;
-    if (refreshRequestCount % 20 === 0) {
-      console.log("[refreshBuyConfirmationV2] Rotating proxy session...");
-      regenerateProxySession();
-    }
-
-    // Control de cooldown para evitar refrescos muy seguidos (bloqueo de 1 segundo por cada combinación chat+token)
-    const refreshKey = `${chatId}_${tokenMint}`;
-    if (lastRefreshTime[refreshKey] && (Date.now() - lastRefreshTime[refreshKey] < 1000)) {
-      console.log(`[refreshBuyConfirmationV2] Refresh blocked for ${refreshKey}: please wait at least 1 second.`);
-      return;
-    }
-    lastRefreshTime[refreshKey] = Date.now();
-
-    // Obtener datos estáticos del token
-    const tokenInfo = getTokenInfo(tokenMint);
-    tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
-
-    // Obtener la compra original a partir de buyReferenceMap
-    const original = buyReferenceMap[chatId]?.[tokenMint];
-    if (!original || !original.solBeforeBuy) {
-      console.warn(`⚠️ No previous buy reference found for ${tokenMint}`);
-      await bot.sendMessage(chatId, "⚠️ No previous purchase data found for this token.");
-      return;
-    }
-
-    // --- CONTROL DE RATERATE ---
-    const now = Date.now();
-    const elapsed = now - lastJupRequestTime;
-    if (elapsed < 1000) {
-      const waitTime = 1000 - elapsed;
-      console.log(`[refreshBuyConfirmationV2] Waiting ${waitTime} ms before next tracker request...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-    lastJupRequestTime = Date.now();
-    // --- FIN CONTROL ---
-
-    // Construir la URL para la API de SolanaTracker
-    const jupUrl =
+      // Cooldown de 1 s por chat+token
+      const refreshKey = `${chatId}_${tokenMint}`;
+      if (lastRefreshTime[refreshKey] && Date.now() - lastRefreshTime[refreshKey] < 1000) {
+        return;
+      }
+      lastRefreshTime[refreshKey] = Date.now();
+  
+      // Datos estáticos del token
+      const tokenInfo = getTokenInfo(tokenMint);
+      tokenSymbol = escapeMarkdown(tokenInfo.symbol || "N/A");
+  
+      // Datos de compra original
+      const original = buyReferenceMap[chatId]?.[tokenMint];
+      if (!original || !original.solBeforeBuy) {
+        return;
+      }
+  
+      // Rate‑limit Jupiter
+      const now = Date.now();
+      const elapsed = now - lastJupRequestTime;
+      if (elapsed < 1000) {
+        await new Promise(r => setTimeout(r, 1000 - elapsed));
+      }
+      lastJupRequestTime = Date.now();
+  
+      // Cotización de venta en Jupiter
+      const jupUrl =
         `https://quote-api.jup.ag/v6/quote?inputMint=${tokenMint}` +
         `&outputMint=So11111111111111111111111111111111111111112` +
         `&amount=1000000000&slippageBps=500&priorityFeeBps=30`;
-      console.log(`[refreshBuyConfirmationV2] Fetching Jupiter quote from: ${jupUrl}`);
-
-    // Realizar la solicitud mediante Axios usando el proxyAgent y un timeout
-    const jupRes = await axios.get(jupUrl, {
-      httpsAgent: proxyAgent,
-      timeout: 5000,
-    });
-
-    // Si se recibe un error 429 o 407, se espera y se lanza error (solo se loguea, no se notifica al usuario)
-    if (jupRes.status === 429 || jupRes.status === 407) {
-      console.log(`[refreshBuyConfirmationV2] Received status ${jupRes.status}. Waiting 2500 ms before retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      lastJupRequestTime = Date.now();
-      throw new Error(`Rate excess error from SolanaTracker API (status ${jupRes.status})`);
-    }
-    if (jupRes.status !== 200) {
-      throw new Error(`Error fetching SolanaTracker rate: ${jupRes.statusText}`);
-    }
-    const jupData = jupRes.data;
-
-    // Validar que jupData.outAmount sea numérico
-    const outAmount = Number(jupData.outAmount);
-    if (isNaN(outAmount)) {
-      throw new Error(`Invalid outAmount from Jupiter: ${jupData.outAmount}`);
-    }
-    const priceSolNow = outAmount / 1e9;
-
-    // Funciones formateadoras seguras (si no es número, devuelven "N/A")
-    const formatDefault = (val) => {
-      const numVal = Number(val);
-      if (isNaN(numVal)) return "N/A";
-      return numVal >= 1 ? numVal.toFixed(6) : numVal.toFixed(9).replace(/0+$/, "");
-    };
-
-    const formatWithZeros = (val) => {
-      const numVal = Number(val);
-      if (isNaN(numVal)) return "N/A";
-      if (numVal >= 1) return numVal.toFixed(6);
-      const str = numVal.toFixed(12);
-      const forced = "0.000" + str.slice(2);
-      const match = forced.match(/0*([1-9]\d{0,2})/);
-      if (!match) return forced;
-      const idx = forced.indexOf(match[1]);
-      return forced.slice(0, idx + match[1].length + 1);
-    };
-
-    const formattedOriginalPrice = formatDefault(original.tokenPrice);
-    const formattedCurrentPrice = formatWithZeros(priceSolNow);
-
-    // Calcular el valor actual de la inversión
-    const currentPriceShown = Number(formattedCurrentPrice);
-    const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
-    const visualPriceSolNow = Number(formatWithZeros(priceSolNow));
-
-    // Calcular el cambio porcentual
-    let changePercent = 0;
-    if (Number(original.tokenPrice) > 0 && !isNaN(visualPriceSolNow)) {
-      changePercent = ((visualPriceSolNow - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
-      if (!isFinite(changePercent)) changePercent = 0;
-    }
-    const changePercentStr = changePercent.toFixed(2);
-    const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
-
-    const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
-    const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
-
-    // Formatear la hora de la transacción en UTC y EST
-    const rawTime = original.time || Date.now();
-    const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
-    const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
-
-    // Nota: Se ha removido la parte que añadía el "Age" para evitar que el mensaje cambie constantemente.
-
-    // Construir el mensaje final de actualización (sin la variación de "Age")
-    const updatedMessage =
-      `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
-      `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
-      `🕒 *Time:* ${formattedTime}\n\n` +
-      `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
-      `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
-      `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
-      `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
-      `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
-      `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
-      `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
-      `🔗 *Wallet:* \`${original.walletAddress}\``;
-
-    // --- COMPARAR CON EL ÚLTIMO CONTENIDO PUBLICADO ---
-    if (lastMessageContent[messageId] && lastMessageContent[messageId] === updatedMessage) {
-      console.log("⏸ New content is identical to the current content. Skipping edit.");
-      return;
-    }
-
-    // Realizar la actualización del mensaje en Telegram
-    await bot.editMessageText(updatedMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔄 Refresh", callback_data: `refresh_buy_${tokenMint}` },
-            { text: "💯 Sell MAX", callback_data: `sell_${tokenMint}_100` }
-          ],
-          [
-            { text: "📊 Chart+Txns", url: `https://pumpultra.fun/solana/${tokenMint}.html` }
-          ]
-        ]
+      const jupRes = await axios.get(jupUrl, {
+        httpsAgent: proxyAgent,
+        timeout: 5000,
+      });
+  
+      if ([429, 407].includes(jupRes.status)) {
+        await new Promise(r => setTimeout(r, 2500));
+        lastJupRequestTime = Date.now();
+        throw new Error(`Rate limit error from Jupiter (status ${jupRes.status})`);
       }
-    });
-
-    // Almacenar el nuevo contenido para futuras comparaciones
-    lastMessageContent[messageId] = updatedMessage;
-
-    console.log(`🔄 Buy confirmation refreshed for ${tokenSymbol}`);
-  } catch (error) {
-    const errMsg = error.message || "";
-    // Filtrar errores para no notificar al usuario:
-    if (errMsg.includes("message is not modified")) {
-      console.log("⏸ Message not modified, skipping update.");
-      return;
-    } else if (errMsg.includes("429") || errMsg.includes("407") || errMsg.includes("502")) {
-      console.error("❌ Error in refreshBuyConfirmationV2 (rate/proxy/502 related):", error.stack || error);
-      // No notificar al usuario para estos errores específicos
-      return;
-    } else {
-      console.error("❌ Error in refreshBuyConfirmationV2:", error.stack || error);
-      await bot.sendMessage(chatId, `❌ Error while refreshing token info: ${error.message}`);
+      if (jupRes.status !== 200) {
+        throw new Error(`Error fetching Jupiter quote: ${jupRes.statusText}`);
+      }
+      const outAmount = Number(jupRes.data.outAmount);
+      if (isNaN(outAmount)) {
+        throw new Error(`Invalid outAmount from Jupiter: ${jupRes.data.outAmount}`);
+      }
+      const priceSolNow = outAmount / 1e9;
+  
+      // Formateadores
+      const formatDefault = val => {
+        const n = Number(val);
+        if (isNaN(n)) return "N/A";
+        return n >= 1 ? n.toFixed(6) : n.toFixed(9).replace(/0+$/, "");
+      };
+      const formatWithZeros = val => {
+        const n = Number(val);
+        if (isNaN(n)) return "N/A";
+        if (n >= 1) return n.toFixed(6);
+        const str = n.toFixed(12);
+        const forced = "0.000" + str.slice(2);
+        const m = forced.match(/0*([1-9]\d{0,2})/);
+        if (!m) return forced;
+        const idx = forced.indexOf(m[1]);
+        return forced.slice(0, idx + m[1].length + 1);
+      };
+  
+      const formattedOriginalPrice = formatDefault(original.tokenPrice);
+      const formattedCurrentPrice = formatWithZeros(priceSolNow);
+  
+      // Cálculos PnL y porcentaje
+      const currentPriceShown = Number(formattedCurrentPrice);
+      const currentValue = (original.receivedAmount * currentPriceShown).toFixed(6);
+      let changePercent = 0;
+      if (Number(original.tokenPrice) > 0 && !isNaN(currentPriceShown)) {
+        changePercent = ((currentPriceShown - Number(original.tokenPrice)) / Number(original.tokenPrice)) * 100;
+        if (!isFinite(changePercent)) changePercent = 0;
+      }
+      const changePercentStr = changePercent.toFixed(2);
+      const emojiPrice = changePercent > 100 ? "🚀" : changePercent > 0 ? "🟢" : "🔻";
+  
+      const pnlSol = Number(currentValue) - Number(original.solBeforeBuy);
+      const emojiPNL = pnlSol > 0 ? "🟢" : pnlSol < 0 ? "🔻" : "➖";
+  
+      // Horario
+      const rawTime = original.time || Date.now();
+      const utcTimeStr = new Date(rawTime).toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+      const estTimeStr = new Date(rawTime).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+      const formattedTime = `${utcTimeStr} UTC | ${estTimeStr} EST`;
+  
+      // Mensaje actualizado
+      const updatedMessage =
+        `✅ *Swap completed successfully* 🔗 [View in Solscan](https://solscan.io/tx/${original.txSignature})\n` +
+        `*SOL/${tokenSymbol}* (Jupiter Aggregator v6)\n` +
+        `🕒 *Time:* ${formattedTime}\n\n` +
+        `⚡️ SWAP ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+        `💲 *Token Price:* ${formattedOriginalPrice} SOL\n` +
+        `💰 *Got:* ${Number(original.receivedAmount).toFixed(3)} Tokens\n` +
+        `💲 *Spent:* ${original.solBeforeBuy} SOL\n\n` +
+        `⚡️ TRADE ⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️\n` +
+        `💲 *Price Actual:* ${emojiPrice} ${formattedCurrentPrice} SOL (${changePercentStr}%)\n` +
+        `💰 *You Get:* ${emojiPNL} ${currentValue} SOL\n\n` +
+        `🔗 *Received Token ${tokenSymbol}:* \`${escapeMarkdown(tokenMint)}\`\n` +
+        `🔗 *Wallet:* \`${original.walletAddress}\``;
+  
+      // Si no cambia nada, no editar
+      if (lastMessageContent[messageId] === updatedMessage) {
+        return;
+      }
+  
+      // Editar mensaje
+      await bot.editMessageText(updatedMessage, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🔄 Refresh",   callback_data: `refresh_buy_${tokenMint}` },
+              { text: "💯 Sell MAX",  callback_data: `sell_${tokenMint}_100` }
+            ],
+            [
+              { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${tokenMint}` }
+            ]
+          ]
+        }
+      });
+  
+      lastMessageContent[messageId] = updatedMessage;
+  
+    } catch (error) {
+        const errMsg = error.message || "";
+        if (errMsg.includes("message is not modified")) {
+          return;
+        } else if (/^(429|407|502)/.test(errMsg)) {
+          return;
+        } else {
+          console.error("❌ Error while refreshing token info:", error);
+          return;
+        }
+      }
     }
-  }
-}
 
 async function getSolPriceUSD() {
   try {
@@ -2703,113 +3700,158 @@ getSolPriceUSD().then(price => {
   }
 });
 
-/**
- * Cierra hasta 20 de las cuentas ATA vacías asociadas a la wallet del usuario.
- * @param {string} telegramId - El ID de Telegram del usuario.
- */
-async function closeAllATAs(telegramId) {
-    try {
-      // Asegúrate de haber cargado tus usuarios desde el archivo (users.json)
-      const user = users[telegramId];
-      if (!user || !user.walletPublicKey || !user.privateKey) {
-        console.error("User not found or missing wallet credentials.");
-        return;
-      }
+// ----------------------------------------
+// 1) Nuevo handler para /close_ata
+// ----------------------------------------
+bot.onText(/\/close/, async (msg) => {
+    const chatId   = msg.chat.id;
+    const cmdMsgId = msg.message_id;
   
-      // Lista de direcciones ATA que se desean excluir (en base58)
-      const exclusionList = [
-        "J65HtePF5TvPud7gyoqrGSy3hz2U8FTfYLy4RCho5K8x"
-      ];
+    // 1️⃣ Borrar el comando
+    await bot.deleteMessage(chatId, cmdMsgId).catch(() => {});
   
-      // Crear el keypair y la conexión
-      const walletKeypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+    // 2️⃣ Enviar menú inicial
+    const text =
+      '🗄 *Associated Token Account* 🗄\n\n' +
+      'An Associated Token Account (ATA) is where your tokens live on Solana. ' +
+      'Empty ATAs still hold a small rent deposit. You can either *check* how many empty ATAs you have, ' +
+      'or *close* them to reclaim that rent.';
   
-      // Obtener todas las cuentas de tokens asociadas a la wallet
-      const parsedTokenAccounts = await connection.getParsedTokenAccountsByOwner(
+    const keyboard = [
+      [
+        { text: '🔍 Check ATAs', callback_data: 'ata_check' },
+        { text: '🔒 Close ATAs', callback_data: 'ata_close' }
+      ]
+    ];
+  
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  });
+  
+  // ----------------------------------------
+  // 2) Handler para los callbacks de ATA
+  // ----------------------------------------
+  bot.on('callback_query', async query => {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    const data   = query.data;
+  
+    // Helper: conexión fija a Helius
+    const connection = new Connection(
+      "https://ros-5f117e-fast-mainnet.helius-rpc.com",
+      'confirmed'
+    );
+  
+    // 2.1) Check ATAs
+    if (data === 'ata_check') {
+      await bot.answerCallbackQuery(query.id);
+  
+      const user = users[chatId];
+      const accounts = await connection.getParsedTokenAccountsByOwner(
         new PublicKey(user.walletPublicKey),
         { programId: TOKEN_PROGRAM_ID }
       );
   
-      let instructions = [];
-      const batchLimit = 25; // Limite de 20 cuentas por batch
-      let count = 0;
-      for (const { pubkey, account } of parsedTokenAccounts.value) {
-        const ataAddress = pubkey.toBase58();
+      const emptyCount = accounts.value
+        .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+        .length;
   
-        // Si la cuenta está en la lista de exclusión, se omite
-        if (exclusionList.includes(ataAddress)) {
-          console.log(`Excluida ATA ${ataAddress} de cierre (en lista de exclusión).`);
-          continue;
+      console.log(`[ata_check] User ${chatId} has ${emptyCount} empty ATAs`);
+  
+      const newText = `🔍 You have *${emptyCount}* empty ATA account${emptyCount !== 1 ? 's' : ''} that can be closed.`;
+  
+      return bot.editMessageText(newText, {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '🔍 Check ATAs', callback_data: 'ata_check' },
+              { text: '🔒 Close ATAs', callback_data: 'ata_close' }
+            ]
+          ]
+        }
+      });
+    }
+  
+    // 2.2) Close ATAs
+if (data === 'ata_close') {
+    await bot.answerCallbackQuery(query.id);
+  
+    const user    = users[chatId];
+    const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+  
+    let closedTotal = 0;
+    let iteration   = 0;
+    let lastSig     = null;  // ← guardaremos aquí la última firma
+  
+    try {
+      while (true) {
+        iteration++;
+        const accounts = await connection.getParsedTokenAccountsByOwner(
+          new PublicKey(user.walletPublicKey),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+  
+        const empties = accounts.value
+          .filter(acc => Number(acc.account.data.parsed.info.tokenAmount.amount) === 0)
+          .slice(0, 25);
+  
+        console.log(`[ata_close][iter ${iteration}] Found ${empties.length} empty ATAs:`,
+          empties.map(a => a.pubkey.toBase58())
+        );
+  
+        if (empties.length === 0) break;
+  
+        const tx = new Transaction();
+        for (let { pubkey } of empties) {
+          tx.add(createCloseAccountInstruction(
+            pubkey,
+            new PublicKey(user.walletPublicKey),
+            new PublicKey(user.walletPublicKey)
+          ));
         }
   
-        const tokenAmountInfo = account.data.parsed.info.tokenAmount;
-        // Solo se procede si el campo "amount" (saldo bruto) es exactamente 0
-        if (Number(tokenAmountInfo.amount) === 0) {
-          console.log(`Preparando a cerrar ATA: ${ataAddress}`);
-          instructions.push(
-            createCloseAccountInstruction(
-              pubkey, // La ATA a cerrar
-              new PublicKey(user.walletPublicKey), // El dueño de la cuenta
-              new PublicKey(user.walletPublicKey)  // La cuenta destino para recuperar el rent deposit
-            )
+        try {
+          const sig = await sendAndConfirmTransaction(connection, tx, [keypair]);
+          lastSig = sig;                        // ← actualizamos la última firma
+          closedTotal += empties.length;
+          console.log(`[ata_close][iter ${iteration}] Closed ${empties.length} ATAs, txSig=${sig}`);
+        } catch (err) {
+          console.error(
+            `[ata_close][iter ${iteration}] Error closing ATAs:`,
+            err.message
           );
-          count++;
-          // Si ya se alcanzaron las 20 instrucciones, salimos del bucle.
-          if (count === batchLimit) break;
-        } else {
-          console.log(`No se cerrará ATA ${ataAddress} porque tiene un saldo residual: ${tokenAmountInfo.amount}`);
+          break;  // salimos del loop ante error
         }
       }
+    } catch (err) {
+      console.error('[ata_close] Unexpected error:', err);
+    }
   
-      if (instructions.length === 0) {
-        console.log("No se encontraron ATA vacías (o todas están en la lista de exclusión) para cerrar.");
-        return;
+    let finalText;
+    if (closedTotal > 0) {
+      finalText = `✅ Closed *${closedTotal}* ATA account${closedTotal !== 1 ? 's' : ''}. All rent deposits have been returned!`;
+      if (lastSig) {
+        finalText += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
       }
-  
-      // Crear y enviar la transacción con las instrucciones de cierre
-      const transaction = new Transaction().add(...instructions);
-      const signature = await sendAndConfirmTransaction(connection, transaction, [walletKeypair]);
-      console.log(`✅ Cierre de ATA completado (batch de ${instructions.length}). Signature: ${signature}`);
-      // Aquí podrías notificar al usuario (o al admin) que la operación se completó, si lo deseas.
-    } catch (error) {
-      console.error("❌ Error cerrando ATA:", error);
+    } else {
+      finalText = '⚠️ No empty ATA accounts found to close.';
     }
+  
+    return bot.editMessageText(finalText, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    });
   }
   
-  // Ejemplo de función para cerrar una ATA individual
-  async function closeAssociatedTokenAccount(wallet, mint, connection) {
-    try {
-      // Calcular la dirección ATA
-      const ata = await getAssociatedTokenAddress(new PublicKey(mint), wallet.publicKey);
-  
-      // Crear la instrucción de cierre
-      const closeIx = createCloseAccountInstruction(
-        ata,                // ATA a cerrar
-        wallet.publicKey,   // Dirección donde se devolverá el depósito de alquiler (usualmente el owner)
-        wallet.publicKey    // El owner de la cuenta ATA
-      );
-  
-      // Crear y enviar la transacción
-      const transaction = new Transaction().add(closeIx);
-      const signature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
-      console.log(`✅ ATA ${ata.toBase58()} cerrada. Signature: ${signature}`);
-      return signature;
-    } catch (error) {
-      console.error("❌ Error al cerrar la ATA:", error);
-      throw error;
-    }
-  }
-
-  bot.onText(/\/close_ata/, async (msg) => {
-    const chatId = msg.chat.id;
-    try {
-      await closeAllATAs(chatId);
-      bot.sendMessage(chatId, "✅ ATAs have been closed (rent returned).");
-    } catch (error) {
-      console.error("❌ Error en /close_ata:", error);
-      bot.sendMessage(chatId, "❌ Error al cerrar las ATA.");
-    }
+  // responder cualquier otro callback para quitar spinner
+  await bot.answerCallbackQuery(query.id);
   });
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
