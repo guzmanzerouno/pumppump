@@ -540,140 +540,168 @@ Your membership is now active.
     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-// // ────────────────────────────────
-// // Comando /payments con paginación (5 por página) y botón Close
-// // ────────────────────────────────
-// bot.onText(/\/payments/, async (msg) => {
-//     const chatId       = msg.chat.id;
-//     const commandMsgId = msg.message_id;
+// ────────────────────────────────
+// Comando /payments con paginación (5 por página) y botón Close
+// ────────────────────────────────
+bot.onText(/\/payments/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
   
-//     // 1) Borrar el mensaje del comando inmediatamente
-//     try {
-//       await bot.deleteMessage(chatId, commandMsgId);
-//     } catch (e) {
-//       console.warn("Could not delete /payments message:", e.message);
-//     }
+    // 1) Borrar el mensaje del comando inmediatamente
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /payments message:", e.message);
+    }
   
-//     // 2) Comprobar registro del usuario
-//     const user = users[chatId];
-//     if (!user || !user.walletPublicKey) {
-//       return bot.sendMessage(
-//         chatId,
-//         "❌ You must be registered to view your payment history."
-//       );
-//     }
+    // 2) Comprobar registro del usuario
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(
+        chatId,
+        "❌ You must be registered to view your payment history."
+      );
+    }
   
-//     // 3) Leer archivo de pagos y filtrar
-//     const paymentsFile = "payments.json";
-//     if (!fs.existsSync(paymentsFile)) {
-//       return bot.sendMessage(chatId, "📭 No payment records found.");
-//     }
-//     const records      = JSON.parse(fs.readFileSync(paymentsFile));
-//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
+    // 3) Leer archivo de pagos y filtrar
+    const paymentsFile = "payments.json";
+    if (!fs.existsSync(paymentsFile)) {
+      return bot.sendMessage(chatId, "📭 No payment records found.");
+    }
+    const records      = JSON.parse(fs.readFileSync(paymentsFile));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
-//     if (userPayments.length === 0) {
-//       return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
-//     }
+    if (userPayments.length === 0) {
+      return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+    }
   
-//     // Función auxiliar para renderizar una página
-//     function renderPage(pageIndex) {
-//       const pageSize = 5;
-//       const start    = pageIndex * pageSize;
-//       const slice    = userPayments.slice(start, start + pageSize);
-//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-//       for (const p of slice) {
-//         const date = new Date(p.timestamp).toLocaleDateString();
-//         text += `🗓️ *${date}*\n`;
-//         text += `💼 Wallet: \`${p.wallet}\`\n`;
-//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-//       }
-//       // Construir inline keyboard: back/next + close
-//       const navButtons = [];
-//       if (pageIndex > 0) {
-//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-//       }
-//       if (start + pageSize < userPayments.length) {
-//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-//       }
-//       const keyboard = [];
-//       if (navButtons.length) keyboard.push(navButtons);
-//       // siempre mostrar botón Close
-//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+    // Función auxiliar para renderizar una página
+    function renderPage(pageIndex) {
+      const pageSize = 5;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      const navButtons = [];
+      if (pageIndex > 0) {
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if (start + pageSize < userPayments.length) {
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
   
-//       return { text, keyboard };
-//     }
+      return { text, keyboard };
+    }
   
-//     // 4) Enviar la primera página (índice 0)
-//     const { text, keyboard } = renderPage(0);
-//     await bot.sendMessage(chatId, text, {
-//       parse_mode: "Markdown",
-//       disable_web_page_preview: true,
-//       reply_markup: { inline_keyboard: keyboard }
-//     });
-//   });
+    // 4) Enviar la primera página (índice 0)
+    const { text, keyboard } = renderPage(0);
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  });
   
-//   // ────────────────────────────────
-//   // Callback para paginar o cerrar el mensaje
-//   // ────────────────────────────────
-//   bot.on("callback_query", async (query) => {
-//     const data   = query.data;
-//     const chatId = query.message.chat.id;
-//     const msgId  = query.message.message_id;
+  // ────────────────────────────────
+  // Callback para paginar o cerrar el mensaje
+  // ────────────────────────────────
+  const editingPayments = new Set();
   
-//     // Cerrar el mensaje
-//     if (data === "payments_close") {
-//       await bot.deleteMessage(chatId, msgId).catch(() => {});
-//       return bot.answerCallbackQuery();
-//     }
+  bot.on("callback_query", async (query) => {
+    const { id: callbackId, data, message } = query;
+    const chatId = message.chat.id;
+    const msgId  = message.message_id;
   
-//     // Paginación
-//     if (!data.startsWith("payments_page_")) {
-//       return bot.answerCallbackQuery();
-//     }
-//     const pageIndex = parseInt(data.split("_").pop(), 10);
+    // 1) Ack inmediato
+    await bot.answerCallbackQuery(callbackId).catch(() => {});
   
-//     // Releer y filtrar pagos
-//     const records      = JSON.parse(fs.readFileSync("payments.json"));
-//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
+    // 2) Cerrar el mensaje
+    if (data === "payments_close") {
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      editingPayments.delete(msgId);
+      return;
+    }
   
-//     // Renderizar la página solicitada
-//     function renderPage(pageIndex) {
-//       const pageSize = 5;
-//       const start    = pageIndex * pageSize;
-//       const slice    = userPayments.slice(start, start + pageSize);
-//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-//       for (const p of slice) {
-//         const date = new Date(p.timestamp).toLocaleDateString();
-//         text += `🗓️ *${date}*\n`;
-//         text += `💼 Wallet: \`${p.wallet}\`\n`;
-//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-//       }
-//       const navButtons = [];
-//       if (pageIndex > 0) {
-//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-//       }
-//       if ((pageIndex+1) * pageSize < userPayments.length) {
-//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-//       }
-//       const keyboard = [];
-//       if (navButtons.length) keyboard.push(navButtons);
-//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
-//       return { text, keyboard };
-//     }
+    // 3) Solo procesar paginación
+    if (!data.startsWith("payments_page_")) {
+      return;
+    }
   
-//     const { text, keyboard } = renderPage(pageIndex);
-//     await bot.editMessageText(text, {
-//       chat_id: chatId,
-//       message_id: msgId,
-//       parse_mode: "Markdown",
-//       disable_web_page_preview: true,
-//       reply_markup: { inline_keyboard: keyboard }
-//     });
+    // 4) Evitar concurrencia en el mismo mensaje
+    if (editingPayments.has(msgId)) return;
+    editingPayments.add(msgId);
   
-//     await bot.answerCallbackQuery();
-//   });
+    try {
+      const newPage = parseInt(data.split("_").pop(), 10);
+  
+      // 5) Detectar la página actual desde el texto
+      const match       = message.text.match(/\(Page (\d+)\/\d+\)/);
+      const currentPage = match ? Number(match[1]) - 1 : null;
+      if (currentPage === newPage) {
+        // Nada que editar
+        return;
+      }
+  
+      // 6) Releer y filtrar pagos
+      const records      = JSON.parse(fs.readFileSync("payments.json"));
+      const userPayments = records.filter(p => p.chatId === chatId).reverse();
+  
+      // 7) Función renderPage duplicada (podrías extraerla si prefieres)
+      function renderPage(pageIndex) {
+        const pageSize = 5;
+        const start    = pageIndex * pageSize;
+        const slice    = userPayments.slice(start, start + pageSize);
+        let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+        for (const p of slice) {
+          const date = new Date(p.timestamp).toLocaleDateString();
+          text += `🗓️ *${date}*\n`;
+          text += `💼 Wallet: \`${p.wallet}\`\n`;
+          text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+          text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+        }
+        const navButtons = [];
+        if (pageIndex > 0) {
+          navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+        }
+        if ((pageIndex+1) * pageSize < userPayments.length) {
+          navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+        }
+        const keyboard = [];
+        if (navButtons.length) keyboard.push(navButtons);
+        keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+        return { text, keyboard };
+      }
+  
+      const { text, keyboard } = renderPage(newPage);
+  
+      // 8) Editar con try/catch para ignorar "message is not modified"
+      try {
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: keyboard }
+        });
+      } catch (err) {
+        const desc = err.response?.body?.description || "";
+        if (!/message is not modified/.test(desc)) {
+          console.error("Error editando historial de pagos:", err);
+        }
+      }
+    } finally {
+      editingPayments.delete(msgId);
+    }
+  });
 
 
 // ────────────────────────────────
@@ -2162,7 +2190,10 @@ function sleep(ms) {
     }
   }
 
-  bot.onText(/\/notifications/, async (msg) => {
+  // ────────────────────────────────
+// Comando /notifications
+// ────────────────────────────────
+bot.onText(/\/notifications/, async (msg) => {
     const chatId   = msg.chat.id;
     const cmdMsgId = msg.message_id;
   
@@ -2185,19 +2216,30 @@ function sleep(ms) {
       }
     );
   });
-
-  bot.on("callback_query", async query => {
-    const chatId = query.message.chat.id;
-    const data   = query.data;
   
+  // ────────────────────────────────
+  // Callback para /notifications
+  // ────────────────────────────────
+  const editingNotif = new Set();
+  
+  bot.on("callback_query", async (query) => {
+    const { id: callbackId, data, message } = query;
+    const chatId = message.chat.id;
+    const msgId  = message.message_id;
+  
+    // 1) Ack inmediato
+    await bot.answerCallbackQuery(callbackId).catch(() => {});
+  
+    // 2) Flujo de "open_new_token_notif" si aplica
     if (data === "open_new_token_notif") {
-      await bot.answerCallbackQuery(query.id);
-      return bot.editMessageText(
+      const text = 
         "Choose when to receive new-token notifications or stop them entirely.  \n\n" +
-        "You can pause alerts during a buy/sell process to avoid distractions, or turn them off completely and re-enable whenever you like.",
-        {
-          chat_id: chatId,                         // 👈 aquí
-          message_id: query.message.message_id,    // 👈 y aquí
+        "You can pause alerts during a buy/sell process to avoid distractions, or turn them off completely and re-enable whenever you like.";
+  
+      try {
+        await bot.editMessageText(text, {
+          chat_id:   chatId,
+          message_id: msgId,
           reply_markup: {
             inline_keyboard: [
               [ { text: "✅ Always On",         callback_data: "notif_always" } ],
@@ -2205,29 +2247,65 @@ function sleep(ms) {
               [ { text: "❌ Turn Off",          callback_data: "notif_off"    } ]
             ]
           }
+        });
+      } catch (err) {
+        const desc = err.response?.body?.description || "";
+        if (!/message is not modified/.test(desc)) {
+          console.error("Error reabriendo notifs:", err);
         }
-      );
+      }
+      return;
     }
   
+    // 3) Opciones de notificación
     if (["notif_always","notif_pause","notif_off"].includes(data)) {
-      users[chatId] = users[chatId]||{};
-      users[chatId].newTokenNotif =
-        data === "notif_always"       ? "always" :
-        data === "notif_pause"        ? "pauseDuringTrade" :
-                                        "off";
-      saveUsers();
+      // 3a) Evitar concurrencia
+      if (editingNotif.has(msgId)) return;
+      editingNotif.add(msgId);
   
-      const labels = {
-        always:           "✅ Notifications always on",
-        pauseDuringTrade: "⏸ Notifications paused during trade",
-        off:              "❌ Notifications turned off"
-      };
-      await bot.editMessageText(labels[users[chatId].newTokenNotif], {
-        chat_id:   chatId,                            // 👈 aquí también
-        message_id: query.message.message_id,         // 👈 y aquí
-        parse_mode: "Markdown"
-      });
-      return bot.answerCallbackQuery();
+      try {
+        // Determinar nuevo estado
+        const newSetting =
+          data === "notif_always" ? "always" :
+          data === "notif_pause"  ? "pauseDuringTrade" :
+                                    "off";
+  
+        // 3b) Si ya está en ese estado, nada que hacer
+        if (users[chatId]?.newTokenNotif === newSetting) {
+          return;
+        }
+  
+        // 3c) Actualizar y guardar
+        users[chatId] = users[chatId] || {};
+        users[chatId].newTokenNotif = newSetting;
+        saveUsers();
+  
+        // 3d) Etiquetas para mostrar
+        const labels = {
+          always:           "✅ Notifications always on",
+          pauseDuringTrade: "⏸ Notifications paused during trade",
+          off:              "❌ Notifications turned off"
+        };
+        const text = labels[newSetting];
+  
+        // 3e) Editar el mensaje, filtrando “not modified”
+        try {
+          await bot.editMessageText(text, {
+            chat_id:    chatId,
+            message_id: msgId,
+            parse_mode: "Markdown"
+          });
+        } catch (err) {
+          const desc = err.response?.body?.description || "";
+          if (!/message is not modified/.test(desc)) {
+            console.error("Error editando notifs:", err);
+          }
+        }
+      } finally {
+        editingNotif.delete(msgId);
+      }
+  
+      return;
     }
   
     // …otros callbacks…
