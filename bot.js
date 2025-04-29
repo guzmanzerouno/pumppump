@@ -170,101 +170,101 @@ async function closeEmptyATAs(chatId) {
   return { closedTotal, lastSig };
 }
 
-// // ─────────────────────────────────────────────
-// // Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
-// // ─────────────────────────────────────────────
-// bot.onText(/\/ata/, async (msg) => {
-//   const chatId   = msg.chat.id;
-//   const cmdMsgId = msg.message_id;
+// ─────────────────────────────────────────────
+// Comando /ata on|off (individual por usuario + cierra ATAs al apagar)
+// ─────────────────────────────────────────────
+bot.onText(/\/ata/, async (msg) => {
+  const chatId   = msg.chat.id;
+  const cmdMsgId = msg.message_id;
 
-//   try {
-//     await bot.deleteMessage(chatId, cmdMsgId);
-//   } catch (err) {
-//     console.warn("Could not delete /ata command message:", err.message);
-//   }
+  try {
+    await bot.deleteMessage(chatId, cmdMsgId);
+  } catch (err) {
+    console.warn("Could not delete /ata command message:", err.message);
+  }
 
-//   const text =
-//     "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
-//     "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
-//     "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
+  const text =
+    "⚡️ *Turbo‑Charge ATA Mode!* ⚡️\n\n" +
+    "Pre‑create your Associated Token Accounts before token drops hit Solana—no more delays at purchase time! " +
+    "A small refundable fee applies, but you’ll get it all back the moment you switch *OFF* ATA auto‑creation.";
 
-//   await bot.sendMessage(chatId, text, {
-//     parse_mode: 'Markdown',
-//     reply_markup: {
-//       inline_keyboard: [
-//         [
-//           { text: "✅ ON",  callback_data: "ata_on"  },
-//           { text: "❌ OFF", callback_data: "ata_off" }
-//         ]
-//       ]
-//     }
-//   });
-// });
+  await bot.sendMessage(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ ON",  callback_data: "ata_on"  },
+          { text: "❌ OFF", callback_data: "ata_off" }
+        ]
+      ]
+    }
+  });
+});
 
-// // 2) Handler para los botones ON / OFF
-// bot.on("callback_query", async (query) => {
-//     const { id, data, message } = query;
-//     const chatId = message.chat.id;
-//     const msgId  = message.message_id;
+// 2) Handler para los botones ON / OFF
+bot.on("callback_query", async (query) => {
+    const { id, data, message } = query;
+    const chatId = message.chat.id;
+    const msgId  = message.message_id;
   
-//     // 1) Responder el callback de Telegram lo antes posible
-//     await bot.answerCallbackQuery(id);
+    // 1) Responder el callback de Telegram lo antes posible
+    await bot.answerCallbackQuery(id);
   
-//     // 2) Ahora ya puedes procesar la acción
-//     if (data === "ata_on") {
-//       users[chatId] = users[chatId] || {};
-//       users[chatId].ataAutoCreationEnabled = true;
-//       saveUsers();
+    // 2) Ahora ya puedes procesar la acción
+    if (data === "ata_on") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = true;
+      saveUsers();
   
-//       return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
-//         chat_id: chatId,
-//         message_id: msgId,
-//         parse_mode: "Markdown"
-//       });
-//     }
+      return bot.editMessageText("✅ Auto-creation of ATAs is now *ENABLED*", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
+    }
   
-//     if (data === "ata_off") {
-//       users[chatId] = users[chatId] || {};
-//       users[chatId].ataAutoCreationEnabled = false;
-//       saveUsers();
+    if (data === "ata_off") {
+      users[chatId] = users[chatId] || {};
+      users[chatId].ataAutoCreationEnabled = false;
+      saveUsers();
   
-//       await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
-//         chat_id: chatId,
-//         message_id: msgId,
-//         parse_mode: "Markdown"
-//       });
+      await bot.editMessageText("❌ Auto-creation of ATAs is now *DISABLED*", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
   
-//       // 3) Cierra ATAs en background, sin bloquear el callback
-//       closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
-//         if (closedTotal > 0) {
-//           let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
-//           if (lastSig) {
-//             text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
-//           }
-//           bot.sendMessage(chatId, text, {
-//             parse_mode: 'Markdown',
-//             disable_web_page_preview: true
-//           });
-//         } else {
-//           bot.sendMessage(chatId,
-//             `⚠️ No empty ATA accounts were found to close.`,
-//             { parse_mode: 'Markdown' }
-//           ).then(sent => {
-//             setTimeout(() => {
-//               bot.deleteMessage(chatId, sent.message_id).catch(() => {});
-//             }, 15_000);
-//           });
-//         }
-//       }).catch(err => {
-//         console.error("Error cerrando ATAs:", err);
-//       });
+      // 3) Cierra ATAs en background, sin bloquear el callback
+      closeEmptyATAs(chatId).then(({ closedTotal, lastSig }) => {
+        if (closedTotal > 0) {
+          let text = `✅ Closed *${closedTotal}* empty ATA account${closedTotal !== 1 ? 's' : ''}. Rent deposits refunded!`;
+          if (lastSig) {
+            text += `\n🔗 [View Close Tx on Solscan](https://solscan.io/tx/${lastSig})`;
+          }
+          bot.sendMessage(chatId, text, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          });
+        } else {
+          bot.sendMessage(chatId,
+            `⚠️ No empty ATA accounts were found to close.`,
+            { parse_mode: 'Markdown' }
+          ).then(sent => {
+            setTimeout(() => {
+              bot.deleteMessage(chatId, sent.message_id).catch(() => {});
+            }, 15_000);
+          });
+        }
+      }).catch(err => {
+        console.error("Error cerrando ATAs:", err);
+      });
   
-//       return;
-//     }
+      return;
+    }
   
-//     // En caso de otros callbacks...
-//     // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
-//   });
+    // En caso de otros callbacks...
+    // ya hemos respondido arriba, así que aquí solo procesarías lógica extra
+  });
 
 // ─────────────────────────────────────────────
 // preCreateATAsForToken (filtra por each user.ataAutoCreationEnabled)
@@ -349,686 +349,709 @@ function showPaymentButtons(chatId) {
     );
   }
   
-//   // ─────────────────────────────────────────────
-//   // 2) Capturar la selección de pago y lanzar el flujo
-//   // ─────────────────────────────────────────────
-//   bot.on("callback_query", async (query) => {
-//     const chatId = query.message.chat.id;
-//     const data   = query.data;
+  // ─────────────────────────────────────────────
+  // 2) Capturar la selección de pago y lanzar el flujo
+  // ─────────────────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId = query.message.chat.id;
+    const data   = query.data;
   
-//     if (!data.startsWith("pay_")) {
-//       return bot.answerCallbackQuery(query.id);
-//     }
-//     await bot.answerCallbackQuery(query.id); // stop the spinner
+    if (!data.startsWith("pay_")) {
+      return bot.answerCallbackQuery(query.id);
+    }
+    await bot.answerCallbackQuery(query.id); // stop the spinner
   
-//     // ** store the menu msg ID so we can delete it later **
-//     users[chatId] = users[chatId] || {};
-//     users[chatId].lastPaymentMsgId = query.message.message_id;
-//     saveUsers();
+    // ** store the menu msg ID so we can delete it later **
+    users[chatId] = users[chatId] || {};
+    users[chatId].lastPaymentMsgId = query.message.message_id;
+    saveUsers();
   
-//     // now proceed as before
-//     let days, solAmount, swaps;
-//     switch (data) {
-//       case "pay_1d":
-//         days = 1; solAmount = 0.05; swaps = 10;
-//         break;
-//       case "pay_month":
-//         days = 30; solAmount = 1.00; swaps = 300;
-//         break;
-//       case "pay_un":
-//         days = 30; solAmount = 1.25; swaps = "Unlimited";
-//         break;
-//       default:
-//         return;
-//     }
+    // now proceed as before
+    let days, solAmount, swaps;
+    switch (data) {
+      case "pay_1d":
+        days = 1; solAmount = 0.05; swaps = 10;
+        break;
+      case "pay_month":
+        days = 30; solAmount = 1.00; swaps = 300;
+        break;
+      case "pay_un":
+        days = 30; solAmount = 1.25; swaps = "Unlimited";
+        break;
+      default:
+        return;
+    }
   
-//     return activateMembership(chatId, days, solAmount, swaps);
-//   });
+    return activateMembership(chatId, days, solAmount, swaps);
+  });
   
-//   // ─────────────────────────────────────────────
-//   // 3) Flujo de activación de membresía (ahora con swaps)
-//   // ─────────────────────────────────────────────
-//   async function activateMembership(chatId, days, solAmount, swaps) {
-//     const user = users[chatId];
-//     const now = Date.now();
-//     const expiration = now + days * 24 * 60 * 60 * 1000;
+  // ─────────────────────────────────────────────
+  // 3) Flujo de activación de membresía (ahora con swaps)
+  // ─────────────────────────────────────────────
+  async function activateMembership(chatId, days, solAmount, swaps) {
+    const user = users[chatId];
+    const now = Date.now();
+    const expiration = now + days * 24 * 60 * 60 * 1000;
   
-//     // Guardamos el límite de swaps en el usuario
-//     user.swapLimit = swaps;
-//     saveUsers();
+    // Guardamos el límite de swaps en el usuario
+    user.swapLimit = swaps;
+    saveUsers();
   
-//     const sender     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-//     const receiver   = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
-//     const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
+    const sender     = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const receiver   = new PublicKey("8VCEaTpyg12kYHAH1oEAuWm7EHQ62e147UPrJzRZZeps");
+    const connection = new Connection("https://ros-5f117e-fast-mainnet.helius-rpc.com", "confirmed");
   
-//     // Verificar fondos
-//     const balance = await connection.getBalance(sender.publicKey);
-//     if (balance < solAmount * 1e9) {
-//       return bot.sendMessage(chatId,
-//         `❌ *Insufficient funds.*\nYour wallet has ${(balance/1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`,
-//         { parse_mode: "Markdown" }
-//       );
-//     }
+    // Verificar fondos
+    const balance = await connection.getBalance(sender.publicKey);
+    if (balance < solAmount * 1e9) {
+      return bot.sendMessage(chatId,
+        `❌ *Insufficient funds.*\nYour wallet has ${(balance/1e9).toFixed(4)} SOL but needs ${solAmount} SOL.`,
+        { parse_mode: "Markdown" }
+      );
+    }
   
-//     // Mensaje de “processing”
-//     const processingMsg = await bot.sendMessage(chatId,
-//       "🕐 *Processing your payment...*", { parse_mode: "Markdown" }
-//     );
+    // Mensaje de “processing”
+    const processingMsg = await bot.sendMessage(chatId,
+      "🕐 *Processing your payment...*", { parse_mode: "Markdown" }
+    );
   
-//     try {
-//       // Ejecutar transferencia
-//       const tx = new Transaction().add(
-//         SystemProgram.transfer({
-//           fromPubkey: sender.publicKey,
-//           toPubkey:   receiver,
-//           lamports:   solAmount * 1e9
-//         })
-//       );
-//       const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
+    try {
+      // Ejecutar transferencia
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: sender.publicKey,
+          toPubkey:   receiver,
+          lamports:   solAmount * 1e9
+        })
+      );
+      const sig = await sendAndConfirmTransaction(connection, tx, [sender]);
   
-//       // Actualizar usuario
-//       user.expired    = expiration;
-//       user.subscribed = true;
-//       saveUsers();
-//       savePaymentRecord(chatId, sig, days, solAmount);
+      // Actualizar usuario
+      user.expired    = expiration;
+      user.subscribed = true;
+      saveUsers();
+      savePaymentRecord(chatId, sig, days, solAmount);
   
-//       const expirationDate = new Date(expiration).toLocaleDateString();
-//       const statusLine     = `✅ Active for ${Math.round((expiration - now)/(1000*60*60*24))} day(s)`;
-//       const limitedText    = typeof swaps === "number" ? `${swaps} Swaps` : "Unlimited";
+      const expirationDate = new Date(expiration).toLocaleDateString();
+      const statusLine     = `✅ Active for ${Math.round((expiration - now)/(1000*60*60*24))} day(s)`;
+      const limitedText    = typeof swaps === "number" ? `${swaps} Swaps` : "Unlimited";
   
-//       // Construir caption con “Limited”
-//       const fullConfirmation =
-//         `👤 *Name:* ${user.name}\n` +
-//         `📱 *Phone:* ${user.phone}\n` +
-//         `📧 *Email:* ${user.email}\n` +
-//         `🆔 *Username:* ${user.username || "None"}\n` +
-//         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
-//         `🔐 *Referral:* ${user.rcode || "None"}\n` +
-//         `⏳ *Status:* ${statusLine}\n` +
-//         `🎟️ *Limited:* ${limitedText}`;
+      // Construir caption con “Limited”
+      const fullConfirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* ${user.rcode || "None"}\n` +
+        `⏳ *Status:* ${statusLine}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
   
-//       // Editar el mensaje con solo “How to Use the Bot”
-//       await bot.editMessageMedia(
-//         {
-//           type: "photo",
-//           media:
-//             "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
-//           caption: fullConfirmation,
-//           parse_mode: "Markdown"
-//         },
-//         {
-//           chat_id: chatId,
-//           message_id: processingMsg.message_id,
-//           reply_markup: {
-//             inline_keyboard: [
-//               [
-//                 { text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }
-//               ]
-//             ]
-//           }
-//         }
-//       );
+      // Editar el mensaje con solo “How to Use the Bot”
+      await bot.editMessageMedia(
+        {
+          type: "photo",
+          media:
+            "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+          caption: fullConfirmation,
+          parse_mode: "Markdown"
+        },
+        {
+          chat_id: chatId,
+          message_id: processingMsg.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }
+              ]
+            ]
+          }
+        }
+      );
   
-//       // ─────────────────────────────────────────────
-//       // Mensaje final al usuario con todos los detalles
-//       await bot.sendMessage(
-//         chatId,
-// `✅ *Payment received successfully!*  
-// Your membership is now active.
+      // ─────────────────────────────────────────────
+      // Mensaje final al usuario con todos los detalles
+      await bot.sendMessage(
+        chatId,
+`✅ *Payment received successfully!*  
+Your membership is now active.
 
-// 💳 *Paid:* ${solAmount} SOL for ${days} day(s)  
-// 🗓️ *Expires:* ${expirationDate}  
-// 🎟️ *Limited:* ${limitedText}  
-// 🔗 [View Tx](https://solscan.io/tx/${sig})`,
-//         {
-//           parse_mode: "Markdown",
-//           disable_web_page_preview: true
-//         }
-//       );
-//       // ─────────────────────────────────────────────
+💳 *Paid:* ${solAmount} SOL for ${days} day(s)  
+🗓️ *Expires:* ${expirationDate}  
+🎟️ *Limited:* ${limitedText}  
+🔗 [View Tx](https://solscan.io/tx/${sig})`,
+        {
+          parse_mode: "Markdown",
+          disable_web_page_preview: true
+        }
+      );
+      // ─────────────────────────────────────────────
   
-//       // Borrar menú de pago antiguo
-//       if (user.lastPaymentMsgId) {
-//         try {
-//           await bot.deleteMessage(chatId, user.lastPaymentMsgId);
-//           user.lastPaymentMsgId = null;
-//           saveUsers();
-//         } catch {}
-//       }
+      // Borrar menú de pago antiguo
+      if (user.lastPaymentMsgId) {
+        try {
+          await bot.deleteMessage(chatId, user.lastPaymentMsgId);
+          user.lastPaymentMsgId = null;
+          saveUsers();
+        } catch {}
+      }
   
-//       // Notificar al admin
-//       const adminMsg =
-//         `✅ *Payment received successfully!*\n` +
-//         `📧 *Email:* ${user.email}\n` +
-//         `🆔 *Username:* ${user.username}\n` +
-//         `💳 *Paid:* ${solAmount} SOL for ${days} day(s)\n` +
-//         `🗓️ *Expires:* ${expirationDate}\n` +
-//         `🎟️ *Limited:* ${limitedText}\n` +
-//         `🔗 [View Tx](https://solscan.io/tx/${sig})`;
+      // Notificar al admin
+      const adminMsg =
+        `✅ *Payment received successfully!*\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username}\n` +
+        `💳 *Paid:* ${solAmount} SOL for ${days} day(s)\n` +
+        `🗓️ *Expires:* ${expirationDate}\n` +
+        `🎟️ *Limited:* ${limitedText}\n` +
+        `🔗 [View Tx](https://solscan.io/tx/${sig})`;
   
-//       await bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
-//         parse_mode: "Markdown",
-//         disable_web_page_preview: true
-//       });
+      await bot.sendMessage(ADMIN_CHAT_ID, adminMsg, {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true
+      });
   
-//     } catch (err) {
-//       // Error en la transacción
-//       await bot.editMessageText(
-//         `❌ Transaction failed: ${err.message}`,
-//         { chat_id: chatId, message_id: processingMsg.message_id }
-//       );
-//     }
-//   }
+    } catch (err) {
+      // Error en la transacción
+      await bot.editMessageText(
+        `❌ Transaction failed: ${err.message}`,
+        { chat_id: chatId, message_id: processingMsg.message_id }
+      );
+    }
+  }
 
-//   function savePaymentRecord(chatId, txId, days, solAmount) {
-//     const paymentsFile = "payments.json";
-//     let records = [];
+  function savePaymentRecord(chatId, txId, days, solAmount) {
+    const paymentsFile = "payments.json";
+    let records = [];
   
-//     if (fs.existsSync(paymentsFile)) {
-//       records = JSON.parse(fs.readFileSync(paymentsFile));
-//     }
+    if (fs.existsSync(paymentsFile)) {
+      records = JSON.parse(fs.readFileSync(paymentsFile));
+    }
   
-//     records.push({
-//       chatId,
-//       wallet: users[chatId].walletPublicKey,
-//       tx: txId,
-//       amountSol: solAmount,
-//       days,
-//       timestamp: Date.now()
-//     });
+    records.push({
+      chatId,
+      wallet: users[chatId].walletPublicKey,
+      tx: txId,
+      amountSol: solAmount,
+      days,
+      timestamp: Date.now()
+    });
   
-//     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
-//   }
+    fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
+  }
 
-// // ────────────────────────────────
-// // Comando /payments con paginación (5 por página) y botón Close
-// // ────────────────────────────────
-// bot.onText(/\/payments/, async (msg) => {
-//     const chatId       = msg.chat.id;
-//     const commandMsgId = msg.message_id;
+// ────────────────────────────────
+// Comando /payments con paginación (5 por página) y botón Close
+// ────────────────────────────────
+bot.onText(/\/payments/, async (msg) => {
+    const chatId       = msg.chat.id;
+    const commandMsgId = msg.message_id;
   
-//     // 1) Borrar el mensaje del comando inmediatamente
-//     try {
-//       await bot.deleteMessage(chatId, commandMsgId);
-//     } catch (e) {
-//       console.warn("Could not delete /payments message:", e.message);
-//     }
+    // 1) Borrar el mensaje del comando inmediatamente
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /payments message:", e.message);
+    }
   
-//     // 2) Comprobar registro del usuario
-//     const user = users[chatId];
-//     if (!user || !user.walletPublicKey) {
-//       return bot.sendMessage(
-//         chatId,
-//         "❌ You must be registered to view your payment history."
-//       );
-//     }
+    // 2) Comprobar registro del usuario
+    const user = users[chatId];
+    if (!user || !user.walletPublicKey) {
+      return bot.sendMessage(
+        chatId,
+        "❌ You must be registered to view your payment history."
+      );
+    }
   
-//     // 3) Leer archivo de pagos y filtrar
-//     const paymentsFile = "payments.json";
-//     if (!fs.existsSync(paymentsFile)) {
-//       return bot.sendMessage(chatId, "📭 No payment records found.");
-//     }
-//     const records      = JSON.parse(fs.readFileSync(paymentsFile));
-//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
+    // 3) Leer archivo de pagos y filtrar
+    const paymentsFile = "payments.json";
+    if (!fs.existsSync(paymentsFile)) {
+      return bot.sendMessage(chatId, "📭 No payment records found.");
+    }
+    const records      = JSON.parse(fs.readFileSync(paymentsFile));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
-//     if (userPayments.length === 0) {
-//       return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
-//     }
+    if (userPayments.length === 0) {
+      return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+    }
   
-//     // Función auxiliar para renderizar una página
-//     function renderPage(pageIndex) {
-//       const pageSize = 5;
-//       const start    = pageIndex * pageSize;
-//       const slice    = userPayments.slice(start, start + pageSize);
-//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-//       for (const p of slice) {
-//         const date = new Date(p.timestamp).toLocaleDateString();
-//         text += `🗓️ *${date}*\n`;
-//         text += `💼 Wallet: \`${p.wallet}\`\n`;
-//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-//       }
-//       // Construir inline keyboard: back/next + close
-//       const navButtons = [];
-//       if (pageIndex > 0) {
-//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-//       }
-//       if (start + pageSize < userPayments.length) {
-//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-//       }
-//       const keyboard = [];
-//       if (navButtons.length) keyboard.push(navButtons);
-//       // siempre mostrar botón Close
-//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+    // Función auxiliar para renderizar una página
+    function renderPage(pageIndex) {
+      const pageSize = 5;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      // Construir inline keyboard: back/next + close
+      const navButtons = [];
+      if (pageIndex > 0) {
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if (start + pageSize < userPayments.length) {
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      // siempre mostrar botón Close
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
   
-//       return { text, keyboard };
-//     }
+      return { text, keyboard };
+    }
   
-//     // 4) Enviar la primera página (índice 0)
-//     const { text, keyboard } = renderPage(0);
-//     await bot.sendMessage(chatId, text, {
-//       parse_mode: "Markdown",
-//       disable_web_page_preview: true,
-//       reply_markup: { inline_keyboard: keyboard }
-//     });
-//   });
+    // 4) Enviar la primera página (índice 0)
+    const { text, keyboard } = renderPage(0);
+    await bot.sendMessage(chatId, text, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  });
   
-//   // ────────────────────────────────
-//   // Callback para paginar o cerrar el mensaje
-//   // ────────────────────────────────
-//   bot.on("callback_query", async (query) => {
-//     const data   = query.data;
-//     const chatId = query.message.chat.id;
-//     const msgId  = query.message.message_id;
+  // ────────────────────────────────
+  // Callback para paginar o cerrar el mensaje
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const data   = query.data;
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
   
-//     // Cerrar el mensaje
-//     if (data === "payments_close") {
-//       await bot.deleteMessage(chatId, msgId).catch(() => {});
-//       return bot.answerCallbackQuery();
-//     }
+    // Cerrar el mensaje
+    if (data === "payments_close") {
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      return bot.answerCallbackQuery();
+    }
   
-//     // Paginación
-//     if (!data.startsWith("payments_page_")) {
-//       return bot.answerCallbackQuery();
-//     }
-//     const pageIndex = parseInt(data.split("_").pop(), 10);
+    // Paginación
+    if (!data.startsWith("payments_page_")) {
+      return bot.answerCallbackQuery();
+    }
+    const pageIndex = parseInt(data.split("_").pop(), 10);
   
-//     // Releer y filtrar pagos
-//     const records      = JSON.parse(fs.readFileSync("payments.json"));
-//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
+    // Releer y filtrar pagos
+    const records      = JSON.parse(fs.readFileSync("payments.json"));
+    const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
-//     // Renderizar la página solicitada
-//     function renderPage(pageIndex) {
-//       const pageSize = 5;
-//       const start    = pageIndex * pageSize;
-//       const slice    = userPayments.slice(start, start + pageSize);
-//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-//       for (const p of slice) {
-//         const date = new Date(p.timestamp).toLocaleDateString();
-//         text += `🗓️ *${date}*\n`;
-//         text += `💼 Wallet: \`${p.wallet}\`\n`;
-//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-//       }
-//       const navButtons = [];
-//       if (pageIndex > 0) {
-//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-//       }
-//       if ((pageIndex+1) * pageSize < userPayments.length) {
-//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-//       }
-//       const keyboard = [];
-//       if (navButtons.length) keyboard.push(navButtons);
-//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
-//       return { text, keyboard };
-//     }
+    // Renderizar la página solicitada
+    function renderPage(pageIndex) {
+      const pageSize = 5;
+      const start    = pageIndex * pageSize;
+      const slice    = userPayments.slice(start, start + pageSize);
+      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+      for (const p of slice) {
+        const date = new Date(p.timestamp).toLocaleDateString();
+        text += `🗓️ *${date}*\n`;
+        text += `💼 Wallet: \`${p.wallet}\`\n`;
+        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+      }
+      const navButtons = [];
+      if (pageIndex > 0) {
+        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+      }
+      if ((pageIndex+1) * pageSize < userPayments.length) {
+        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+      }
+      const keyboard = [];
+      if (navButtons.length) keyboard.push(navButtons);
+      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+      return { text, keyboard };
+    }
   
-//     const { text, keyboard } = renderPage(pageIndex);
-//     await bot.editMessageText(text, {
-//       chat_id: chatId,
-//       message_id: msgId,
-//       parse_mode: "Markdown",
-//       disable_web_page_preview: true,
-//       reply_markup: { inline_keyboard: keyboard }
-//     });
+    const { text, keyboard } = renderPage(pageIndex);
+    await bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
   
-//     await bot.answerCallbackQuery();
-//   });
+    await bot.answerCallbackQuery();
+  });
 
 
-// // ────────────────────────────────
-// // 1) Comando /start y paso inicial
-// // ────────────────────────────────
-// bot.onText(/\/start/, async (msg) => {
-//     const chatId    = msg.chat.id;
-//     const firstName = msg.from.first_name || "there";
-//     const commandMsgId = msg.message_id;
+// ────────────────────────────────
+// 1) Comando /start y paso inicial
+// ────────────────────────────────
+bot.onText(/\/start/, async (msg) => {
+    const chatId    = msg.chat.id;
+    const firstName = msg.from.first_name || "there";
+    const commandMsgId = msg.message_id;
   
-//     // 1.a) borramos el /start
-//     try {
-//       await bot.deleteMessage(chatId, commandMsgId);
-//     } catch (e) {
-//       console.warn("Could not delete /start message:", e.message);
-//     }
+    // 1.a) borramos el /start
+    try {
+      await bot.deleteMessage(chatId, commandMsgId);
+    } catch (e) {
+      console.warn("Could not delete /start message:", e.message);
+    }
   
-//     if (users[chatId]?.walletPublicKey) {
-//       const expired     = users[chatId].expired;
-//       const stillActive = expired === "never" || (expired && Date.now() < expired);
-//       users[chatId].subscribed = stillActive;
-//       saveUsers();
+    if (users[chatId]?.walletPublicKey) {
+      const expired     = users[chatId].expired;
+      const stillActive = expired === "never" || (expired && Date.now() < expired);
+      users[chatId].subscribed = stillActive;
+      saveUsers();
   
-//       if (stillActive) {
-//         return bot.sendMessage(
-//           chatId,
-//           `✅ You are already registered, *${firstName}*!`,
-//           { parse_mode: "Markdown" }
-//         );
-//       }
-//       return bot.sendMessage(
-//         chatId,
-//         `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`,
-//         { parse_mode: "Markdown" }
-//       ).then(() => showPaymentButtons(chatId));
-//     }
+      if (stillActive) {
+        return bot.sendMessage(
+          chatId,
+          `✅ You are already registered, *${firstName}*!`,
+          { parse_mode: "Markdown" }
+        );
+      }
+      return bot.sendMessage(
+        chatId,
+        `⚠️ Your subscription has *expired*, *${firstName}*.\n\nPlease choose a plan to continue:`,
+        { parse_mode: "Markdown" }
+      ).then(() => showPaymentButtons(chatId));
+    }
   
-//     // nuevo usuario
-//     users[chatId] = { step: 1, name: firstName };
-//     saveUsers();
+    // nuevo usuario
+    users[chatId] = { step: 1, name: firstName };
+    saveUsers();
   
-//     const m = await bot.sendMessage(
-//       chatId,
-//       `👋 Hello *${firstName}*! Welcome to *GEMSNIPING Bot*.\n\n📱 Please enter your *phone number*:`,
-//       { parse_mode: "Markdown" }
-//     );
-//     users[chatId].msgId = m.message_id;
-//     saveUsers();
-//   });
+    const m = await bot.sendMessage(
+      chatId,
+      `👋 Hello *${firstName}*! Welcome to *GEMSNIPING Bot*.\n\n📱 Please enter your *phone number*:`,
+      { parse_mode: "Markdown" }
+    );
+    users[chatId].msgId = m.message_id;
+    saveUsers();
+  });
   
-//   // ────────────────────────────────
-//   // 2) Handler de mensajes por paso
-//   // ────────────────────────────────
-//   bot.on("message", async (msg) => {
-//     const chatId   = msg.chat.id;
-//     const text     = msg.text?.trim();
-//     const messageId= msg.message_id;
-//     const user     = users[chatId];
-//     if (!user || !user.step) return;
+  // ────────────────────────────────
+  // 2) Handler de mensajes por paso
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId   = msg.chat.id;
+    const text     = msg.text?.trim();
+    const messageId= msg.message_id;
+    const user     = users[chatId];
+    if (!user || !user.step) return;
   
-//     // limpiamos el input del usuario
-//     await bot.deleteMessage(chatId, messageId).catch(() => {});
+    // limpiamos el input del usuario
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
   
-//     const msgId = user.msgId;
-//     switch (user.step) {
-//       case 1:
-//         user.phone = text;
-//         user.step  = 2;
-//         saveUsers();
-//         await bot.editMessageText("📧 Please enter your *email address*:", {
-//           chat_id: chatId,
-//           message_id: msgId,
-//           parse_mode: "Markdown"
-//         });
-//         break;
+    const msgId = user.msgId;
+    switch (user.step) {
+      case 1:
+        user.phone = text;
+        user.step  = 2;
+        saveUsers();
+        await bot.editMessageText("📧 Please enter your *email address*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
   
-//       case 2:
-//         user.email = text;
-//         user.step  = 3;
-//         saveUsers();
-//         await bot.editMessageText("🆔 Please choose a *username*:", {
-//           chat_id: chatId,
-//           message_id: msgId,
-//           parse_mode: "Markdown"
-//         });
-//         break;
+      case 2:
+        user.email = text;
+        user.step  = 3;
+        saveUsers();
+        await bot.editMessageText("🆔 Please choose a *username*:", {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        });
+        break;
   
-//       // — sustituimos el antiguo case 3 por este nuevo prompt con ayuda inmediata —
-//       case 3:
-//         user.username = text;
-//         user.step     = 4;
-//         saveUsers();
-//         // Prompt de private key + ayuda
-//         await bot.editMessageText(
-//             "🔑 Please enter your *Solana Private Key* or tap for help:",
-//             {
-//               chat_id: chatId,
-//               message_id: msgId,
-//               parse_mode: "Markdown",
-//               reply_markup: {
-//                 inline_keyboard: [
-//                   [
-//                     { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
-//                   ],
-//                   [
-//                     { text: "📘 More Help", url: "https://gemsniping.com/docs" }
-//                   ]
-//                 ]
-//               }
-//             }
-//           );
-//         // guardamos para borrarlo más adelante
-//         user.tempKeyPromptId = msgId;
-//         user.step = 4.1;
-//         saveUsers();
-//         break;
+      // — sustituimos el antiguo case 3 por este nuevo prompt con ayuda inmediata —
+      case 3:
+        user.username = text;
+        user.step     = 4;
+        saveUsers();
+        // Prompt de private key + ayuda
+        await bot.editMessageText(
+            "🔑 Please enter your *Solana Private Key* or tap for help:",
+            {
+              chat_id: chatId,
+              message_id: msgId,
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "❓ How to get Phantom Private Key", callback_data: "show_phantom_pk" }
+                  ],
+                  [
+                    { text: "📘 More Help", url: "https://gemsniping.com/docs" }
+                  ]
+                ]
+              }
+            }
+          );
+        // guardamos para borrarlo más adelante
+        user.tempKeyPromptId = msgId;
+        user.step = 4.1;
+        saveUsers();
+        break;
   
-//       case 4.1:
-//         // 1) borramos el prompt de key
-//         if (user.tempKeyPromptId) {
-//           await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
-//           delete user.tempKeyPromptId;
-//         }
-//         // 2) borramos la imagen de ayuda si existe
-//         if (user.tempHelpMsgId) {
-//           await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
-//           delete user.tempHelpMsgId;
-//         }
-//         // 3) procesar la private key
-//         try {
-//           const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
-//           user.privateKey      = text;
-//           user.walletPublicKey = keypair.publicKey.toBase58();
-//           user.step            = 5;
-//           saveUsers();
+      case 4.1:
+        // 1) borramos el prompt de key
+        if (user.tempKeyPromptId) {
+          await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+          delete user.tempKeyPromptId;
+        }
+        // 2) borramos la imagen de ayuda si existe
+        if (user.tempHelpMsgId) {
+          await bot.deleteMessage(chatId, user.tempHelpMsgId).catch(() => {});
+          delete user.tempHelpMsgId;
+        }
+        // 3) procesar la private key
+        try {
+          const keypair = Keypair.fromSecretKey(new Uint8Array(bs58.decode(text)));
+          user.privateKey      = text;
+          user.walletPublicKey = keypair.publicKey.toBase58();
+          user.step            = 5;
+          saveUsers();
   
-//           // 4) lanzamos la pregunta de referral
-//           await bot.sendMessage(
-//             chatId,
-//             "🎟️ Do you have a *referral code*?",
-//             {
-//               parse_mode: "Markdown",
-//               reply_markup: {
-//                 inline_keyboard: [
-//                   [{ text: "✅ YES", callback_data: "referral_yes" }],
-//                   [{ text: "❌ NO",  callback_data: "referral_no"  }]
-//                 ]
-//               }
-//             }
-//           );
-//         } catch (err) {
-//           // en caso de key inválida, reiniciamos al paso 4
-//           await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
-//           user.step = 4;
-//           saveUsers();
-//         }
-//         break;
+          // 4) lanzamos la pregunta de referral
+          await bot.sendMessage(
+            chatId,
+            "🎟️ Do you have a *referral code*?",
+            {
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "✅ YES", callback_data: "referral_yes" }],
+                  [{ text: "❌ NO",  callback_data: "referral_no"  }]
+                ]
+              }
+            }
+          );
+        } catch (err) {
+          // en caso de key inválida, reiniciamos al paso 4
+          await bot.sendMessage(chatId, "❌ Invalid private key. Please try again:");
+          user.step = 4;
+          saveUsers();
+        }
+        break;
   
-//       // … resto de pasos …
-//     }
-//   });
+      // … resto de pasos …
+    }
+  });
   
-//   // ─────────────────────────────────────────────
-//   // Callback para mostrar ayuda de Phantom Key
-//   // ─────────────────────────────────────────────
-//   bot.on("callback_query", async (query) => {
-//     if (query.data !== "show_phantom_pk") return;
-//     const chatId = query.message.chat.id;
-//     await bot.answerCallbackQuery(query.id);
+  // ─────────────────────────────────────────────
+  // Callback para mostrar ayuda de Phantom Key
+  // ─────────────────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    if (query.data !== "show_phantom_pk") return;
+    const chatId = query.message.chat.id;
+    await bot.answerCallbackQuery(query.id);
   
-//     const help = await bot.sendPhoto(
-//       chatId,
-//       "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
-//       {
-//         caption:
-// `1. Open Phantom  
-// Unlock your Phantom extension or mobile app.
+    const help = await bot.sendPhoto(
+      chatId,
+      "https://framerusercontent.com/images/ISnZasMWb9w6SePLNUrOLbyg9b8.png",
+      {
+        caption:
+`1. Open Phantom  
+Unlock your Phantom extension or mobile app.
   
-// 2. Go to Settings  
-// Tap your profile → Settings.
+2. Go to Settings  
+Tap your profile → Settings.
   
-// 3. Security & Privacy  
-// Select *Security & Privacy*.
+3. Security & Privacy  
+Select *Security & Privacy*.
   
-// 4. Export Private Key  
-// Scroll and tap *Export Private Key*.
+4. Export Private Key  
+Scroll and tap *Export Private Key*.
   
-// 5. Authenticate  
-// Approve with your password or biometrics.
+5. Authenticate  
+Approve with your password or biometrics.
   
-// 6. Copy & Paste
-// Copy the long string and paste here.`,
-//         parse_mode: "Markdown"
-//       }
-//     );
-//     // guardamos para poder borrarlo luego en el paso 4.1
-//     users[chatId].tempHelpMsgId = help.message_id;
-//     saveUsers();
-//   });
+6. Copy & Paste
+Copy the long string and paste here.`,
+        parse_mode: "Markdown"
+      }
+    );
+    // guardamos para poder borrarlo luego en el paso 4.1
+    users[chatId].tempHelpMsgId = help.message_id;
+    saveUsers();
+  });
   
-// // ────────────────────────────────
-// // 3) Handler de Yes/No para referral / trial
-// // ────────────────────────────────
-// bot.on("callback_query", async query => {
-//     const chatId = query.message.chat.id;
-//     const msgId  = query.message.message_id;
-//     const data   = query.data;
-//     const user   = users[chatId];
+// ────────────────────────────────
+// 3) Handler de Yes/No para referral / trial
+// ────────────────────────────────
+bot.on("callback_query", async query => {
+    const chatId = query.message.chat.id;
+    const msgId  = query.message.message_id;
+    const data   = query.data;
+    const user   = users[chatId];
   
-//     // YES: guardamos msgId y pedimos el código
-//     if (data === "referral_yes") {
-//       user.step  = 6;
-//       user.msgId = msgId;         // ◀️ guardamos este prompt para borrarlo luego
-//       saveUsers();
+    // YES: guardamos msgId y pedimos el código
+    if (data === "referral_yes") {
+      user.step  = 6;
+      user.msgId = msgId;         // ◀️ guardamos este prompt para borrarlo luego
+      saveUsers();
   
-//       await bot.editMessageText("🔠 Please enter your *referral code*:", {
-//         chat_id: chatId,
-//         message_id: msgId,
-//         parse_mode: "Markdown"
-//       });
-//       return bot.answerCallbackQuery(query.id);
-//     }
+      await bot.editMessageText("🔠 Please enter your *referral code*:", {
+        chat_id: chatId,
+        message_id: msgId,
+        parse_mode: "Markdown"
+      });
+      return bot.answerCallbackQuery(query.id);
+    }
   
-//     // NO: borramos prompt de Private Key (si queda), activamos trial…
-//     if (data === "referral_no") {
-//       await bot.answerCallbackQuery(query.id);
+    // NO: borramos prompt de Private Key (si queda), activamos trial…
+    if (data === "referral_no") {
+      await bot.answerCallbackQuery(query.id);
   
-//       if (user.tempKeyPromptId) {
-//         await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
-//         delete user.tempKeyPromptId;
-//       }
+      if (user.tempKeyPromptId) {
+        await bot.deleteMessage(chatId, user.tempKeyPromptId).catch(() => {});
+        delete user.tempKeyPromptId;
+      }
   
-//       const now    = Date.now();
-//       const oneDay = 24 * 60 * 60 * 1000;
-//       user.expired    = now + oneDay;
-//       user.subscribed = true;
-//       user.swapLimit  = 50;
-//       user.step       = 0;
-//       saveUsers();
+      const now    = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      user.expired    = now + oneDay;
+      user.subscribed = true;
+      user.swapLimit  = 50;
+      user.step       = 0;
+      saveUsers();
   
-//       const expDate = new Date(user.expired).toLocaleDateString();
-//       await bot.editMessageText(
-//         `🎉 *Free Trial Activated!* 🎉\n\n` +
-//         `You’ve unlocked a *1-day free trial* with *50 swaps*.\n` +
-//         `Trial ends on ${expDate}.\n\n` +
-//         `Let’s start sniping!`,
-//         { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
-//       );
+      const expDate = new Date(user.expired).toLocaleDateString();
+      await bot.editMessageText(
+        `🎉 *Free Trial Activated!* 🎉\n\n` +
+        `You’ve unlocked a *1-day free trial* with *50 swaps*.\n` +
+        `Trial ends on ${expDate}.\n\n` +
+        `Let’s start sniping!`,
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+      );
   
-//       // luego enviamos confirmación completa
-//       const statusLine      = `Active for 1 day`;
-//       const limitedText     = `50 swaps`;
-//       const fullConfirmation =
-//         `👤 *Name:* ${user.name}\n` +
-//         `📱 *Phone:* ${user.phone}\n` +
-//         `📧 *Email:* ${user.email}\n` +
-//         `🆔 *Username:* ${user.username || "None"}\n` +
-//         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
-//         `🔐 *Referral:* None (Trial)\n` +
-//         `⏳ *Status:* ${statusLine}\n` +
-//         `🎟️ *Limited:* ${limitedText}`;
+      // luego enviamos confirmación completa
+      const statusLine      = `Active for 1 day`;
+      const limitedText     = `50 swaps`;
+      const fullConfirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username || "None"}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* None (Trial)\n` +
+        `⏳ *Status:* ${statusLine}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
   
-//       await bot.sendPhoto(
-//         chatId,
-//         "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
-//         {
-//           caption: fullConfirmation,
-//           parse_mode: "Markdown",
-//           reply_markup: {
-//             inline_keyboard: [
-//               [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
-//             ]
-//           }
-//         }
-//       );
-//       return;
-//     }
+      await bot.sendPhoto(
+        chatId,
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+        {
+          caption: fullConfirmation,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+            ]
+          }
+        }
+      );
+      return;
+    }
   
-//     await bot.answerCallbackQuery(query.id);
-//   });
+    await bot.answerCallbackQuery(query.id);
+  });
   
-//   // ────────────────────────────────
-//   // 4) Handler de referral code (step 6)
-//   // ────────────────────────────────
-//   bot.on("message", async (msg) => {
-//     const chatId    = msg.chat.id;
-//     const text      = msg.text?.trim();
-//     const messageId = msg.message_id;
-//     const user      = users[chatId];
+  // ────────────────────────────────
+  // 4) Handler de referral code (step 6)
+  // ────────────────────────────────
+  bot.on("message", async (msg) => {
+    const chatId    = msg.chat.id;
+    const text      = msg.text?.trim();
+    const messageId = msg.message_id;
+    const user      = users[chatId];
   
-//     if (!user || user.step !== 6) return;
+    if (!user || user.step !== 6) return;
   
-//     // borramos input del usuario
-//     await bot.deleteMessage(chatId, messageId).catch(() => {});
+    // borramos input del usuario
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
   
-//     // borramos el prompt “Please enter your referral code”
-//     if (user.msgId) {
-//       await bot.deleteMessage(chatId, user.msgId).catch(() => {});
-//       delete user.msgId;
-//       saveUsers();
-//     }
+    // borramos el prompt “Please enter your referral code”
+    if (user.msgId) {
+      await bot.deleteMessage(chatId, user.msgId).catch(() => {});
+      delete user.msgId;
+      saveUsers();
+    }
   
-//     const result = validateReferralCode(text);
-//     if (result.valid) {
-//       // actualizamos usuario
-//       user.referrer   = result.referrer;
-//       user.rcode      = result.code;
-//       user.expired    = result.expiration;
-//       user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
-//       user.step       = 0;
-//       saveUsers();
+    const result = validateReferralCode(text);
+    if (result.valid) {
+      // actualizamos usuario
+      user.referrer   = result.referrer;
+      user.rcode      = result.code;
+      user.expired    = result.expiration;
+      user.subscribed = result.expiration === "never" || Date.now() < result.expiration;
+      user.step       = 0;
+      saveUsers();
   
-//       const activeStatus = result.expiration === "never"
-//         ? "✅ Unlimited"
-//         : `✅ Active for ${Math.ceil((result.expiration - Date.now()) / (1000*60*60*24))} day(s)`;
-//       const limitedText = typeof user.swapLimit === "number"
-//         ? `${user.swapLimit} swaps`
-//         : "Unlimited";
+      const activeStatus = result.expiration === "never"
+        ? "✅ Unlimited"
+        : `✅ Active for ${Math.ceil((result.expiration - Date.now()) / (1000*60*60*24))} day(s)`;
+      const limitedText = typeof user.swapLimit === "number"
+        ? `${user.swapLimit} swaps`
+        : "Unlimited";
   
-//       const confirmation =
-//         `👤 *Name:* ${user.name}\n` +
-//         `📱 *Phone:* ${user.phone}\n` +
-//         `📧 *Email:* ${user.email}\n` +
-//         `🆔 *Username:* ${user.username}\n` +
-//         `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
-//         `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
-//         `⏳ *Status:* ${activeStatus}\n` +
-//         `🎟️ *Limited:* ${limitedText}`;
+      const confirmation =
+        `👤 *Name:* ${user.name}\n` +
+        `📱 *Phone:* ${user.phone}\n` +
+        `📧 *Email:* ${user.email}\n` +
+        `🆔 *Username:* ${user.username}\n` +
+        `💼 *Wallet:* \`${user.walletPublicKey}\`\n` +
+        `🔐 *Referral:* ${result.code} (${user.referrer})\n` +
+        `⏳ *Status:* ${activeStatus}\n` +
+        `🎟️ *Limited:* ${limitedText}`;
   
-//       return bot.sendPhoto(
-//         chatId,
-//         "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
-//         {
-//           caption: confirmation,
-//           parse_mode: "Markdown",
-//           reply_markup: {
-//             inline_keyboard: [
-//               [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
-//             ]
-//           }
-//         }
-//       );
-//     } else {
-//       // cupón inválido
-//       user.expired    = null;
-//       user.subscribed = false;
-//       user.step       = 0;
-//       saveUsers();
-//       await bot.editMessageText(
-//         "⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.",
-//         { chat_id: chatId, message_id: msg.message_id, parse_mode: "Markdown" }
-//       );
-//       return showPaymentButtons(chatId);
-//     }
-//   });
+      return bot.sendPhoto(
+        chatId,
+        "https://framerusercontent.com/images/GezLoqfssURsUYLZrfctzPEkRCw.png",
+        {
+          caption: confirmation,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📘 How to Use the Bot", url: "https://gemsniping.com/docs" }]
+            ]
+          }
+        }
+      );
+    } else {
+      // cupón inválido
+      user.expired    = null;
+      user.subscribed = false;
+      user.step       = 0;
+      saveUsers();
+      await bot.editMessageText(
+        "⚠️ Invalid or expired code. Please *purchase a subscription* to activate your account.",
+        { chat_id: chatId, message_id: msg.message_id, parse_mode: "Markdown" }
+      );
+      return showPaymentButtons(chatId);
+    }
+  });
+  
+  // ────────────────────────────────
+  // 5) Handler para ⚙️ Settings
+  // ────────────────────────────────
+  bot.on("callback_query", async (query) => {
+    const chatId    = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data      = query.data;
+  
+    // Mostrar mini‑menú de Settings
+    if (data === "settings_menu") {
+      await bot.answerCallbackQuery(query.id);
+      return bot.editMessageReplyMarkup({
+        inline_keyboard: [
+          [ { text: "🚀 Auto‑Buy", callback_data: "open_autobuy" } ],
+          [ { text: "⚡️ ATA Mode", callback_data: "open_ata" } ],
+          [ { text: "🔒 Close Empty ATAs", callback_data: "open_close_atas" } ]
+        ]
+      }, {
+        chat_id: chatId,
+        message_id
+      });
+    }
   
     // Cada opción vuelve a disparar tu comando ya existente
     if (data === "open_autobuy") {
