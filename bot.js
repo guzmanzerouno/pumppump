@@ -4037,19 +4037,21 @@ if (data === "swaps_view_pnl") {
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
   
     // 6) Preparar texto para compartir
-    let shareText =
-      `👋 Hey Human, check my PnL on GemSniping\n\n` +
-      `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
-      `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
-      `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
-      `✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%\n` +
-      `🔄 Total Transactions: ${totalPairs}\n\n` +
-      `Best bot on Solana! https://gemsniping.com`;
-    shareText = shareText
-      .normalize('NFC')
-      .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDBFF]))/g, '');
-    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+let shareText =
+`👋 Hey Human, check my PnL on GemSniping\n\n` +
+`💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
+`💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
+`🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
+`✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%\n` +
+`🔄 Total Pairs: ${totalPairs}\n\n` +
+`Best bot on Solana! https://gemsniping.com`;
+
+shareText = shareText
+.normalize('NFC')
+.replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
+
+const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
   
     // 7) Construir resultado final
     const result =
