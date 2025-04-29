@@ -3935,6 +3935,143 @@ if (data === 'ata_close') {
   await bot.answerCallbackQuery(query.id);
   });
 
+// ────────────────────────────────
+// /swaps command with PnL & token-lookup
+// ────────────────────────────────
+const waitingSwapQuery = new Set();
+
+bot.onText(/^\/swaps$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const wallet = users[chatId]?.walletPublicKey;
+  if (!wallet) {
+    return bot.sendMessage(chatId,
+      "❌ You’re not registered. Please use /start to register."
+    );
+  }
+
+  const text = 
+    "📋 *Swap History Help*\n\n" +
+    "• Press *View PnL* to see your total profits and losses.\n" +
+    "• Press *Lookup by Token* to query swaps for a specific token.";
+  const keyboard = [
+    [
+      { text: "📊 View PnL",       callback_data: "swaps_view_pnl" },
+      { text: "🔍 Lookup by Token", callback_data: "swaps_lookup" }
+    ]
+  ];
+  await bot.sendMessage(chatId, text, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: keyboard }
+  });
+});
+
+bot.on("callback_query", async query => {
+  const chatId = query.message.chat.id;
+  const msgId  = query.message.message_id;
+  const data   = query.data;
+  await bot.answerCallbackQuery(query.id);
+
+  // Close button handler
+  if (data === "swaps_close") {
+    return bot.deleteMessage(chatId, msgId).catch(() => {});
+  }
+
+  // View PnL
+  if (data === "swaps_view_pnl") {
+    // read swaps.json
+    let allSwaps = [];
+    try { allSwaps = JSON.parse(fs.readFileSync("swaps.json")); } catch {}
+    const wallet = users[chatId]?.walletPublicKey;
+    const sells  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
+    // accumulate PnL
+    let winSum=0, winCount=0, lossSum=0, lossCount=0;
+    const re = /\(USD\s*([+-]\$\d+(\.\d+)?)\)/;
+    sells.forEach(s => {
+      const m = (s["SOL PnL"]||"").match(re);
+      if (m) {
+        const val = parseFloat(m[1].replace("$",""));
+        if (m[1][0] === "+") { winSum+=val; winCount++; }
+        else                  { lossSum+=Math.abs(val); lossCount++; }
+      }
+    });
+    const real = winSum - lossSum;
+    const result =
+      `📊 *Profit and Loss*\n` +
+      `🟢 Win: +\$${winSum.toFixed(2)} (${winCount} tx)\n` +
+      `🔴 Lost: -\$${lossSum.toFixed(2)} (${lossCount} tx)\n` +
+      `⚖️ Net: \$${real.toFixed(2)}`;
+    return bot.editMessageText(result, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "❌ Close", callback_data: "swaps_close" }
+        ]]
+      }
+    });
+  }
+
+  // Lookup by Token
+  if (data === "swaps_lookup") {
+    waitingSwapQuery.add(chatId);
+    const prompt =
+      "🔍 *Token Swap Lookup*\n\n" +
+      "Please send me the *token address* you want to query.";
+    return bot.editMessageText(prompt, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "❌ Close", callback_data: "swaps_close" }
+        ]]
+      }
+    });
+  }
+});
+
+// handle user’s token address reply
+bot.on("message", async msg => {
+  const chatId = msg.chat.id;
+  if (!waitingSwapQuery.has(chatId)) return;
+  waitingSwapQuery.delete(chatId);
+
+  const token = msg.text.trim();
+  const wallet = users[chatId]?.walletPublicKey;
+  let allSwaps = [];
+  try { allSwaps = JSON.parse(fs.readFileSync("swaps.json")); } catch {}
+
+  // filter by wallet and token (buy+sell)
+  const userSwaps = allSwaps.filter(s =>
+    s.Wallet === wallet &&
+    (s["Received Token Address"] === token || s["Pair"]?.includes(token))
+  );
+
+  if (userSwaps.length === 0) {
+    return bot.sendMessage(chatId,
+      `📭 No swaps found for token \`${token}\`.`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  // format each swap as a short JSON block
+  const blocks = userSwaps.map(s => "```json\n" +
+    JSON.stringify(s, null, 2) +
+    "\n```"
+  ).join("\n");
+
+  await bot.sendMessage(chatId, blocks, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "❌ Close", callback_data: "swaps_close" }
+      ]]
+    }
+  });
+});
+
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
