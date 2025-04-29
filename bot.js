@@ -3999,7 +3999,7 @@ if (data === "swaps_view_pnl") {
       : (query.from.first_name || query.from.username || "there");
   
     // 2) Cargar y filtrar swaps
-    const wallet = users[chatId]?.walletPublicKey;
+    const wallet   = users[chatId]?.walletPublicKey;
     const allSwaps = loadAllSwaps();
     const buys  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
     const sells = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
@@ -4037,27 +4037,32 @@ if (data === "swaps_view_pnl") {
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
   
     // 6) Preparar texto para compartir
-    const shareText =
-      `Hello ${displayName}! Profit and Loss:\n` +
-      `Invest: ${sumSpent.toFixed(4)} SOL ($${investUSD.toFixed(2)})\n` +
-      `Recover: ${sumGot.toFixed(4)} SOL ($${recoverUSD.toFixed(2)})\n` +
-      `PnL: ${pnlSol.toFixed(4)} SOL ($${pnlUSD.toFixed(2)})\n` +
-      `Wins: ${winCount} (${winPct.toFixed(1)}%) Losses: ${lossCount} (${lossPct.toFixed(1)}%)`;
+    let shareText =
+      `👋 Hey Human, check my PnL on GemSniping\n\n` +
+      `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
+      `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
+      `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
+      `✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%\n` +
+      `🔄 Total Transactions: ${totalPairs}\n\n` +
+      `Best bot on Solana! https://gemsniping.com`;
+    shareText = shareText
+      .normalize('NFC')
+      .replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDBFF]))/g, '');
     const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
     const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
   
     // 7) Construir resultado final
     const result =
-  `👋 Hello *${displayName}*!  
-  💼 Wallet: \`${wallet}\`
+`👋 Hello *${displayName}*!  
+💼 Wallet: \`${wallet}\`
   
-  📊 *Profit and Loss*  
-  💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
-  💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
-  🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
-  📈 PnL %: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
-  ✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%  
-  🔄 Total Pairs: ${totalPairs}`;
+📊 *Profit and Loss*  
+💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
+💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
+🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
+📈 PnL %: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
+✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%  
+🔄 Total Transactions: ${totalPairs}`;
   
     // 8) Editar el mensaje con botones de share y close
     return bot.editMessageText(result, {
@@ -4068,11 +4073,11 @@ if (data === "swaps_view_pnl") {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🚀 Share on X",     url: tweetUrl },
-            { text: "💬 WhatsApp",       url: waUrl   }
+            { text: "🚀 Share on X", url: tweetUrl },
+            { text: "💬 WhatsApp",   url: waUrl   }
           ],
           [
-            { text: "❌ Close",          callback_data: "swaps_close" }
+            { text: "❌ Close",      callback_data: "swaps_close" }
           ]
         ]
       }
