@@ -3936,14 +3936,14 @@ if (data === 'ata_close') {
   });
 
 // ────────────────────────────────
-// /swaps command with PnL & token-lookup (updated with user name & wallet)
+// /swaps command with PnL & token-lookup (updated with detailed SOL-based PnL)
 // ────────────────────────────────
 const waitingSwapQuery = new Set();
 
 bot.onText(/^\/swaps$/, async (msg) => {
   const chatId = msg.chat.id;
   const cmdId  = msg.message_id;
-  // 1) Delete the /swaps command message
+  // Delete the /swaps command message
   await bot.deleteMessage(chatId, cmdId).catch(() => {});
 
   const wallet = users[chatId]?.walletPublicKey;
@@ -3953,7 +3953,7 @@ bot.onText(/^\/swaps$/, async (msg) => {
     );
   }
 
-  const text = 
+  const text =
     "📋 *Swap History Help*\n\n" +
     "• Press *View PnL* to see your total profits and losses.\n" +
     "• Press *Lookup by Token* to query swaps for a specific token.";
@@ -3980,48 +3980,61 @@ bot.on("callback_query", async query => {
     return bot.deleteMessage(chatId, msgId).catch(() => {});
   }
 
-  // Helper: load & normalize swaps.json into an array
+  // Helper to load and normalize swaps.json
   function loadAllSwaps() {
     try {
       const raw = JSON.parse(fs.readFileSync("swaps.json"));
-      if (Array.isArray(raw)) return raw;
-      return Object.values(raw).flat();
+      return Array.isArray(raw) ? raw : Object.values(raw).flat();
     } catch {
       return [];
     }
   }
 
-  // View PnL
+  // View PnL (SOL-based)
   if (data === "swaps_view_pnl") {
     const displayName = query.from.first_name || query.from.username || "there";
     const wallet      = users[chatId]?.walletPublicKey;
     const allSwaps    = loadAllSwaps();
-    const sells       = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
+    // Separate buys and sells
+    const buys  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
+    const sells = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
 
-    let winSum=0, winCount=0, lossSum=0, lossCount=0;
-    const re = /\(USD\s*([+-]\$\d+(?:\.\d+)?)\)/;
-    sells.forEach(s => {
-      const m = (s["SOL PnL"]||"").match(re);
-      if (m) {
-        const val = parseFloat(m[1].replace("$",""));
-        if (m[1][0] === "+") { winSum += val; winCount++; }
-        else                   { lossSum += Math.abs(val); lossCount++; }
-      }
-    });
+    // Sum SOL amounts
+    const sumSpent = buys.reduce((sum, s) => {
+      const lam = parseFloat((s.Spent || "0").split(" ")[0]);
+      return sum + (isNaN(lam) ? 0 : lam);
+    }, 0);
+    const sumGot   = sells.reduce((sum, s) => {
+      const lam = parseFloat((s.Got   || "0").split(" ")[0]);
+      return sum + (isNaN(lam) ? 0 : lam);
+    }, 0);
 
-    const real = winSum - lossSum;
+    // Calculate PnL
+    const pnlSol = sumGot - sumSpent;
+    const totalTx = buys.length + sells.length;
+    // Get SOL price in USD
+    const solPrice = await getSolPriceUSD();
+    const investUSD = sumSpent * solPrice;
+    const recoverUSD = sumGot * solPrice;
+    const pnlUSD = pnlSol * solPrice;
+    const percent = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
+
     const result =
       `👋 Hello *${displayName}*!\n` +
-      `💼 Wallet: \`${wallet}\`\n` +
-      `📊 *Profit and Loss*\n` +
-      `🟢 Win: +\$${winSum.toFixed(2)} (${winCount} tx)\n` +
-      `🔴 Lost: -\$${lossSum.toFixed(2)} (${lossCount} tx)\n` +
-      `⚖️ Net: \$${real.toFixed(2)}`;
+      `💼 Wallet: \`${wallet}\`\n
+` +
+      `📊 *Profit and Loss*\n\n` +
+      `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
+      `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
+      `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
+      `📈 Percentage: ${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%\n` +
+      `🔄 Total Transactions: ${totalTx}`;
 
     return bot.editMessageText(result, {
       chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
+      disable_web_page_preview: true,
       reply_markup: {
         inline_keyboard: [[
           { text: "❌ Close", callback_data: "swaps_close" }
@@ -4049,7 +4062,7 @@ bot.on("callback_query", async query => {
   }
 });
 
-// handle user’s token address reply
+// Handle user’s token address reply
 bot.on("message", async msg => {
   const chatId = msg.chat.id;
   if (!waitingSwapQuery.has(chatId)) return;
@@ -4060,10 +4073,7 @@ bot.on("message", async msg => {
   await bot.deleteMessage(chatId, tokenMsg).catch(() => {});
 
   const wallet = users[chatId]?.walletPublicKey;
-  const allSwaps = (function(){
-    try { const raw = JSON.parse(fs.readFileSync("swaps.json")); return Array.isArray(raw)? raw : Object.values(raw).flat(); }
-    catch { return []; }
-  })();
+  const allSwaps = loadAllSwaps();
 
   const userSwaps = allSwaps.filter(s =>
     s.Wallet === wallet &&
@@ -4093,55 +4103,6 @@ bot.on("message", async msg => {
   });
 });
 
-
-// handle user’s token address reply
-bot.on("message", async msg => {
-  const chatId = msg.chat.id;
-  if (!waitingSwapQuery.has(chatId)) return;
-  waitingSwapQuery.delete(chatId);
-
-  const token    = msg.text.trim();
-  const tokenMsg = msg.message_id;
-  // borrar el mensaje con el token
-  await bot.deleteMessage(chatId, tokenMsg).catch(() => {});
-
-  const wallet = users[chatId]?.walletPublicKey;
-  const allSwaps = (() => {
-    try {
-      const raw = JSON.parse(fs.readFileSync("swaps.json"));
-      return Array.isArray(raw) ? raw : Object.values(raw).flat();
-    } catch {
-      return [];
-    }
-  })();
-
-  const userSwaps = allSwaps.filter(s =>
-    s.Wallet === wallet &&
-    (s["Received Token Address"] === token || s.Pair?.includes(token))
-  );
-
-  if (userSwaps.length === 0) {
-    return bot.sendMessage(chatId,
-      `📭 No swaps found for token \`${token}\`.`,
-      { parse_mode: "Markdown" }
-    );
-  }
-
-  const blocks = userSwaps.map(s => "```json\n" +
-    JSON.stringify(s, null, 2) +
-    "\n```"
-  ).join("\n");
-
-  await bot.sendMessage(chatId, blocks, {
-    parse_mode: "Markdown",
-    disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "❌ Close", callback_data: "swaps_close" }
-      ]]
-    }
-  });
-});
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
 bot.onText(/^check (.+)/, async (msg, match) => {
