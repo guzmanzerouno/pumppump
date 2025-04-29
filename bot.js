@@ -3935,6 +3935,27 @@ if (data === 'ata_close') {
   await bot.answerCallbackQuery(query.id);
   });
 
+  function loadAllSwaps() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(SWAPS_FILE, "utf8"));
+      return Array.isArray(raw)
+        ? raw
+        : Object.values(raw).flat();
+    } catch (err) {
+      console.error("❌ Error loading swaps:", err);
+      return [];
+    }
+  }
+  
+  function saveSwaps(swaps) {
+    try {
+      fs.writeFileSync(SWAPS_FILE, JSON.stringify(swaps, null, 2));
+      console.log("📂 Swaps actualizados.");
+    } catch (err) {
+      console.error("❌ Error guardando swaps:", err);
+    }
+  }
+
 // ────────────────────────────────
 // /swaps command with PnL & token-lookup (updated with detailed SOL-based PnL + win/lose counts)
 // ────────────────────────────────
@@ -3942,9 +3963,7 @@ const waitingSwapQuery = new Set();
 
 bot.onText(/^\/swaps$/, async (msg) => {
   const chatId = msg.chat.id;
-  const cmdId  = msg.message_id;
-  // Delete the /swaps command message
-  await bot.deleteMessage(chatId, cmdId).catch(() => {});
+  await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
 
   const wallet = users[chatId]?.walletPublicKey;
   if (!wallet) {
@@ -3975,98 +3994,78 @@ bot.on("callback_query", async query => {
   const data   = query.data;
   await bot.answerCallbackQuery(query.id);
 
-  // Close button
   if (data === "swaps_close") {
     return bot.deleteMessage(chatId, msgId).catch(() => {});
   }
 
-  // Helper to load and normalize swaps.json
-  function loadAllSwaps() {
-    try {
-      const raw = JSON.parse(fs.readFileSync(SWAPS_FILE, "utf8"));
-      return Array.isArray(raw) ? raw : Object.values(raw).flat();
-    } catch {
-      return [];
-    }
-  }
-
-// View PnL (SOL-based + win/lose counts + share buttons)
-if (data === "swaps_view_pnl") {
-    // 1) Display name, con override para usuario especial
+  // View PnL
+  if (data === "swaps_view_pnl") {
     const isSpecial   = chatId.toString() === "1631313738";
     const displayName = isSpecial
       ? "Popochita"
       : (query.from.first_name || query.from.username || "there");
-  
-    // 2) Cargar y filtrar swaps
     const wallet   = users[chatId]?.walletPublicKey;
     const allSwaps = loadAllSwaps();
-    const buys  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
-    const sells = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
-  
-    // 3) Sumar cantidades en SOL
+    const buys     = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
+    const sells    = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
+
     const sumSpent = buys.reduce((sum, s) => {
       const v = parseFloat((s.Spent || "0").split(" ")[0]);
       return sum + (isNaN(v) ? 0 : v);
     }, 0);
     const sumGot = sells.reduce((sum, s) => {
-      const v = parseFloat((s.Got   || "0").split(" ")[0]);
+      const v = parseFloat((s.Got || "0").split(" ")[0]);
       return sum + (isNaN(v) ? 0 : v);
     }, 0);
-  
-    // 4) Contar wins/losses por USD en SOL PnL
+
     let winCount = 0, lossCount = 0;
     sells.forEach(s => {
-      const txt = s["SOL PnL"] || "";
-      const m = txt.match(/USD\s*([+-]\$\d+(?:\.\d+)?)/);
+      const m = (s["SOL PnL"]||"").match(/\((USD\s*([+-]\$\d+(\.\d+)?))\)/);
       if (m) {
-        if (m[1].startsWith("+")) winCount++;
-        else if (m[1].startsWith("-")) lossCount++;
+        if (m[2].startsWith("+")) winCount++;
+        else if (m[2].startsWith("-")) lossCount++;
       }
     });
     const totalPairs = sells.length;
     const winPct     = totalPairs ? (winCount  / totalPairs) * 100 : 0;
     const lossPct    = totalPairs ? (lossCount / totalPairs) * 100 : 0;
-  
-    // 5) Calcular PnL global
+
     const pnlSol   = sumGot - sumSpent;
     const solPrice = await getSolPriceUSD();
     const investUSD  = sumSpent * solPrice;
     const recoverUSD = sumGot   * solPrice;
     const pnlUSD     = pnlSol   * solPrice;
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
-  
-    // 6) Preparar texto para compartir
-let shareText =
-`👋 Hey Human, check my PnL on GemSniping\n\n` +
-`💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
-`💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
-`🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
-`✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%\n` +
-`🔄 Total Pairs: ${totalPairs}\n\n` +
-`Best bot on Solana! https://gemsniping.com`;
 
-shareText = shareText
-.normalize('NFC')
-.replace(/(?:(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF]))/g, '');
+    let shareText =
+`👋 Hey Human, check my PnL on GemSniping
 
-const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-  
-    // 7) Construir resultado final
+💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})
+💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})
+🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})
+✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%
+🔄 Total Pairs: ${totalPairs}
+
+Best bot on Solana! https://gemsniping.com`;
+
+    // limpiar posibles emojis mal formados
+    shareText = shareText.normalize('NFC').replace(/[^\u0000-\uD7FF\uE000-\uFFFF]/g, '');
+
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+
     const result =
 `👋 Hello *${displayName}*!  
 💼 Wallet: \`${wallet}\`
-  
+
 📊 *Profit and Loss*  
 💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
 💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
 🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
 📈 PnL %: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
 ✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%  
-🔄 Total Transactions: ${totalPairs}`;
-  
-    // 8) Editar el mensaje con botones de share y close
+🔄 Total Pairs: ${totalPairs}`;
+
     return bot.editMessageText(result, {
       chat_id:    chatId,
       message_id: msgId,
@@ -4075,11 +4074,11 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "🚀 Share on X", url: tweetUrl },
-            { text: "💬 WhatsApp",   url: waUrl   }
+            { text: "🚀 Share on X",    url: tweetUrl },
+            { text: "💬 WhatsApp",      url: waUrl   }
           ],
           [
-            { text: "❌ Close",      callback_data: "swaps_close" }
+            { text: "❌ Close",         callback_data: "swaps_close" }
           ]
         ]
       }
@@ -4105,53 +4104,40 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
   }
 });
 
-// Handle user’s token address reply
+// now your message handler can see loadAllSwaps()
 bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    if (!waitingSwapQuery.has(chatId)) return;
-    waitingSwapQuery.delete(chatId);
-  
-    // 1) Borrar el mensaje donde envió el token
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-  
-    const token  = msg.text.trim();
-    const wallet = users[chatId]?.walletPublicKey;
-    const allSwaps = loadAllSwaps();
-  
-    // 2) Filtrar solo los swaps de este wallet y este token
-    const userSwaps = allSwaps.filter(s =>
-      s.Wallet === wallet &&
-      (s["Received Token Address"] === token || s.Pair?.includes(token))
+  const chatId = msg.chat.id;
+  if (!waitingSwapQuery.has(chatId)) return;
+  waitingSwapQuery.delete(chatId);
+
+  await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+
+  const token  = msg.text.trim();
+  const wallet = users[chatId]?.walletPublicKey;
+  const allSwaps = loadAllSwaps();
+  const userSwaps = allSwaps.filter(s =>
+    s.Wallet === wallet &&
+    (s["Received Token Address"] === token || s.Pair?.includes(token))
+  );
+  if (!userSwaps.length) {
+    return bot.sendMessage(chatId,
+      `📭 No swaps found for token \`${token}\`.`,
+      { parse_mode: "Markdown" }
     );
-  
-    if (userSwaps.length === 0) {
-      return bot.sendMessage(chatId,
-        `📭 No swaps found for token \`${token}\`.`,
-        { parse_mode: "Markdown" }
-      );
+  }
+  const content = userSwaps.map(s => s.messageText).join("\n\n");
+  const waUrl   = `https://api.whatsapp.com/send?text=${encodeURIComponent(content)}`;
+  await bot.sendMessage(chatId, content, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "💬 Share on WhatsApp", url: waUrl },
+        { text: "❌ Close",            callback_data: "swaps_close" }
+      ]]
     }
-  
-    // 3) Tomar únicamente los campos messageText y unirlos
-    const content = userSwaps
-      .map(s => s.messageText)
-      .join("\n\n");
-  
-    // 4) Construir URL para compartir por WhatsApp
-    const waUrl = `https://api.whatsapp.com/send?text=` +
-      encodeURIComponent(content);
-  
-    // 5) Enviar un único mensaje con todos los swaps + botones
-    await bot.sendMessage(chatId, content, {
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "💬 Share on WhatsApp", url: waUrl },
-          { text: "❌ Close", callback_data: "swaps_close" }
-        ]]
-      }
-    });
   });
+});
 
 
 // ────────────────────────────────
