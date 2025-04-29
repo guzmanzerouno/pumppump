@@ -3936,14 +3936,14 @@ if (data === 'ata_close') {
   });
 
 // ────────────────────────────────
-// /swaps command with PnL & token-lookup
+// /swaps command with PnL & token-lookup (updated with user name & wallet)
 // ────────────────────────────────
 const waitingSwapQuery = new Set();
 
 bot.onText(/^\/swaps$/, async (msg) => {
   const chatId = msg.chat.id;
   const cmdId  = msg.message_id;
-  // 1) borrar comando
+  // 1) Delete the /swaps command message
   await bot.deleteMessage(chatId, cmdId).catch(() => {});
 
   const wallet = users[chatId]?.walletPublicKey;
@@ -3985,7 +3985,6 @@ bot.on("callback_query", async query => {
     try {
       const raw = JSON.parse(fs.readFileSync("swaps.json"));
       if (Array.isArray(raw)) return raw;
-      // objeto { chatId: [swaps...] } → aplanar
       return Object.values(raw).flat();
     } catch {
       return [];
@@ -3994,30 +3993,33 @@ bot.on("callback_query", async query => {
 
   // View PnL
   if (data === "swaps_view_pnl") {
-    const allSwaps = loadAllSwaps();
-    const wallet   = users[chatId]?.walletPublicKey;
-    const sells    = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
+    const displayName = query.from.first_name || query.from.username || "there";
+    const wallet      = users[chatId]?.walletPublicKey;
+    const allSwaps    = loadAllSwaps();
+    const sells       = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
 
     let winSum=0, winCount=0, lossSum=0, lossCount=0;
-    const re = /\(USD\s*([+-]\$\d+(\.\d+)?)\)/;
+    const re = /\(USD\s*([+-]\$\d+(?:\.\d+)?)\)/;
     sells.forEach(s => {
       const m = (s["SOL PnL"]||"").match(re);
       if (m) {
         const val = parseFloat(m[1].replace("$",""));
-        if (m[1][0] === "+") { winSum+=val; winCount++; }
-        else                  { lossSum+=Math.abs(val); lossCount++; }
+        if (m[1][0] === "+") { winSum += val; winCount++; }
+        else                   { lossSum += Math.abs(val); lossCount++; }
       }
     });
 
     const real = winSum - lossSum;
     const result =
+      `👋 Hello *${displayName}*!\n` +
+      `💼 Wallet: \`${wallet}\`\n` +
       `📊 *Profit and Loss*\n` +
       `🟢 Win: +\$${winSum.toFixed(2)} (${winCount} tx)\n` +
       `🔴 Lost: -\$${lossSum.toFixed(2)} (${lossCount} tx)\n` +
       `⚖️ Net: \$${real.toFixed(2)}`;
 
     return bot.editMessageText(result, {
-      chat_id: chatId,
+      chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
       reply_markup: {
@@ -4035,7 +4037,7 @@ bot.on("callback_query", async query => {
       "🔍 *Token Swap Lookup*\n\n" +
       "Please send me the *token address* you want to query.";
     return bot.editMessageText(prompt, {
-      chat_id: chatId,
+      chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
       reply_markup: {
@@ -4046,6 +4048,51 @@ bot.on("callback_query", async query => {
     });
   }
 });
+
+// handle user’s token address reply
+bot.on("message", async msg => {
+  const chatId = msg.chat.id;
+  if (!waitingSwapQuery.has(chatId)) return;
+  waitingSwapQuery.delete(chatId);
+
+  const token    = msg.text.trim();
+  const tokenMsg = msg.message_id;
+  await bot.deleteMessage(chatId, tokenMsg).catch(() => {});
+
+  const wallet = users[chatId]?.walletPublicKey;
+  const allSwaps = (function(){
+    try { const raw = JSON.parse(fs.readFileSync("swaps.json")); return Array.isArray(raw)? raw : Object.values(raw).flat(); }
+    catch { return []; }
+  })();
+
+  const userSwaps = allSwaps.filter(s =>
+    s.Wallet === wallet &&
+    (s["Received Token Address"] === token || s.Pair?.includes(token))
+  );
+
+  if (userSwaps.length === 0) {
+    return bot.sendMessage(chatId,
+      `📭 No swaps found for token \`${token}\`.`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  const blocks = userSwaps.map(s => "```json\n" +
+    JSON.stringify(s, null, 2) +
+    "\n```"
+  ).join("\n");
+
+  await bot.sendMessage(chatId, blocks, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "❌ Close", callback_data: "swaps_close" }
+      ]]
+    }
+  });
+});
+
 
 // handle user’s token address reply
 bot.on("message", async msg => {
