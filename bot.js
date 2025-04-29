@@ -2593,7 +2593,7 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "💰 0.3 Sol",  callback_data: `buy_${mint}_0.3` }
       ],
       [
-        { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
         { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
         { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
       ],
@@ -2798,7 +2798,8 @@ bot.onText(/\/autobuy/, async (msg) => {
   });
   
   // Handler de toggles y selección de monto
-  bot.on('callback_query', async (query) => {
+  // Handler de toggles, selección de trigger, monto y modo
+bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data   = query.data;
   
@@ -2807,36 +2808,35 @@ bot.onText(/\/autobuy/, async (msg) => {
       users[chatId] = users[chatId] || {};
       users[chatId].autoBuyEnabled = false;
       saveUsers();
-      await bot.answerCallbackQuery(query.id, { text: '❌ Auto‑Buy disabled.' });
+      await bot.answerCallbackQuery(query.id, { text: '❌ Auto-Buy disabled.' });
       return bot.editMessageText(
-        '❌ *Auto‑Buy is now DISABLED!*',
-        {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          parse_mode: 'Markdown'
-        }
+        '❌ *Auto-Buy is now DISABLED!*',
+        { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' }
       );
     }
   
-    // ── Enable Auto‑Buy ──
+    // ── Enable Auto-Buy ──
     if (data === 'autobuy_toggle_on') {
       users[chatId] = users[chatId] || {};
       users[chatId].autoBuyEnabled = true;
       saveUsers();
-      await bot.answerCallbackQuery(query.id, { text: '✅ Auto‑Buy enabled.' });
+      await bot.answerCallbackQuery(query.id, { text: '✅ Auto-Buy enabled.' });
   
       // 👉 Nueva etapa: elegir momento de disparo
-      const text = '⌚ *When should I trigger Auto‑Buy?*';
-      const keyboard = [
-        [{ text: '1️⃣ When a token is detected', callback_data: 'autobuy_trigger_detect' }],
-        [{ text: '2️⃣ When the token is announced',           callback_data: 'autobuy_trigger_notify' }]
-      ];
-      return bot.editMessageText(text, {
-        chat_id: chatId,
-        message_id: query.message.message_id,
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: keyboard }
-      });
+      return bot.editMessageText(
+        '⌚ *When should I trigger Auto-Buy?*',
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '1️⃣ When a token is detected', callback_data: 'autobuy_trigger_detect' }],
+              [{ text: '2️⃣ When the token is announced', callback_data: 'autobuy_trigger_notify' }]
+            ]
+          }
+        }
+      );
     }
   
     // ── Selección de trigger ──
@@ -2846,20 +2846,21 @@ bot.onText(/\/autobuy/, async (msg) => {
       saveUsers();
       await bot.answerCallbackQuery(query.id);
   
-      // Ahora preguntamos el monto
-      const keyboard = [
-        [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
-        [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
-      ];
+      // 👉 Ahora preguntamos el monto
       return bot.editMessageText(
         '✅ *Great!*  \n\n' +
-        '💰 *How much SOL would you like me to auto‑buy each time?*',
+        '💰 *How much SOL would you like me to auto-buy each time?*',
         {
           chat_id: chatId,
           message_id: query.message.message_id,
           parse_mode: 'Markdown',
           disable_web_page_preview: true,
-          reply_markup: { inline_keyboard: keyboard }
+          reply_markup: {
+            inline_keyboard: [
+              [0.1, 0.2, 0.3].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` })),
+              [0.5, 1.0, 2.0].map(x => ({ text: `💰 ${x} SOL`, callback_data: `autobuy_amt_${x}` }))
+            ]
+          }
         }
       );
     }
@@ -2870,9 +2871,47 @@ bot.onText(/\/autobuy/, async (msg) => {
       users[chatId].autoBuyAmount = amount;
       saveUsers();
       await bot.answerCallbackQuery(query.id, { text: `✅ Set to ${amount} SOL` });
+  
+      // 👉 Preguntamos ahora si la compra es one-time o indefinite
       return bot.editMessageText(
-        '🎉 *Auto‑Buy configured!*  \n\n' +
-        `It will now automatically purchase *${amount} SOL* according to your preference.`,
+        '⏱️ *Purchase Mode*  \n\n' +
+        'Do you want to auto-buy *once* and then turn off, or *keep buying indefinitely*?\n\n' +
+        '_We recommend setting Notifications to "Pause During Trade" if you choose indefinite._',
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '📌 One-Time',      callback_data: 'autobuy_mode_once'    },
+                { text: '🔁 Indefinite',   callback_data: 'autobuy_mode_indef'   }
+              ]
+            ]
+          }
+        }
+      );
+    }
+  
+    // ── Capturar modo de compra ──
+    if (data === 'autobuy_mode_once' || data === 'autobuy_mode_indef') {
+      const mode      = data === 'autobuy_mode_once' ? 'one time' : 'indefinitely';
+      const trigger   = users[chatId].autoBuyTrigger === 'detect'
+                        ? 'when a token is detected'
+                        : 'when the token is announced';
+      const amount    = users[chatId].autoBuyAmount;
+      users[chatId].autoBuyMode = mode;
+      saveUsers();
+      await bot.answerCallbackQuery(query.id);
+  
+      // Mensaje final de confirmación
+      const confirmation =
+        '🎉 *Auto-Buy configured!*  \n\n' +
+        `It will now automatically purchase *${amount} SOL* *${trigger}* *${mode}*.\n\n` +
+        '_Tip: If you choose indefinite mode, make sure your Notifications are set to "Pause During Trade" to avoid distractions._';
+  
+      return bot.editMessageText(
+        confirmation,
         {
           chat_id: chatId,
           message_id: query.message.message_id,
@@ -2882,8 +2921,7 @@ bot.onText(/\/autobuy/, async (msg) => {
       );
     }
   
-    // Si no era un callback de Auto‑Buy, dejamos que otros handlers lo procesen
-    return;
+    // Si no era un callback de Auto-Buy, seguimos con otros handlers
   });
 
   bot.on("callback_query", async (query) => {
@@ -3020,7 +3058,7 @@ bot.onText(/\/autobuy/, async (msg) => {
                 { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
       ],
       [
-                { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
+                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
                 { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
                 { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
               ],
