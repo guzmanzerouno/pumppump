@@ -1693,7 +1693,8 @@ async function getDexScreenerData(pairAddress) {
     return null;
   }
 
-  async function fetchRugCheckData(tokenAddress) {
+  // 🔹 Obtiene datos de riesgo + logo fallback desde RugCheck o SolanaTracker
+async function fetchRugCheckData(tokenAddress) {
     // 🔸 PRIMER INTENTO: RugCheck con timeout de 2000 ms
     try {
       console.log("🔍 Intentando obtener datos desde RugCheck...");
@@ -1712,7 +1713,7 @@ async function getDexScreenerData(pairAddress) {
       }
   
       const freezeAuthority = data.token?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
-      const mintAuthority = data.token?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+      const mintAuthority   = data.token?.mintAuthority   === null ? "✅ Revoked"  : "⚠️ Exists";
   
       const lpLocked = (typeof data.markets?.[0]?.lp?.lpLockedPct === "number")
         ? `${data.markets[0].lp.lpLockedPct}`
@@ -1725,7 +1726,9 @@ async function getDexScreenerData(pairAddress) {
         riskDescription,
         lpLocked,
         freezeAuthority,
-        mintAuthority
+        mintAuthority,
+        // ← fallback de imagen desde fileMeta de RugCheck
+        imageUrl: data.fileMeta?.image || null
       };
   
     } catch (error) {
@@ -1736,15 +1739,12 @@ async function getDexScreenerData(pairAddress) {
     try {
       console.log("🔄 RugCheck falló. Intentando con SolanaTracker...");
       const response = await axios.get(`https://data.solanatracker.io/tokens/${tokenAddress}`, {
-        headers: {
-          "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081"
-        }
+        headers: { "x-api-key": "cecd6680-9645-4f89-ab5e-e93d57daf081" }
       });
-  
       const data = response.data;
       if (!data) throw new Error("No se recibió data de SolanaTracker.");
   
-      const pool = data.pools?.[0];
+      const pool  = data.pools?.[0];
       const score = data.risk?.score || 0;
       let riskLevel = "🟢 GOOD";
       if (score >= 5) {
@@ -1764,14 +1764,16 @@ async function getDexScreenerData(pairAddress) {
         : "no data";
   
       const freezeAuthority = pool?.security?.freezeAuthority === null ? "✅ Disabled" : "🔒 Enabled";
-      const mintAuthority = pool?.security?.mintAuthority === null ? "✅ Revoked" : "⚠️ Exists";
+      const mintAuthority   = pool?.security?.mintAuthority   === null ? "✅ Revoked"  : "⚠️ Exists";
   
       return {
         riskLevel,
         riskDescription,
         lpLocked,
         freezeAuthority,
-        mintAuthority
+        mintAuthority,
+        // ← fallback de imagen desde SolanaTracker
+        imageUrl: data.token?.image || null
       };
   
     } catch (error) {
@@ -2573,7 +2575,8 @@ async function analyzeTransaction(signature, forceCheck = false) {
     message += `📆 **Created:** ${createdDate}\n\n`;
     message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
   
-    await notifySubscribers(message, dexData.tokenLogo, mintData.mintAddress);
+    const imageUrl = dexData.tokenLogo || rugCheckData.imageUrl || null;
+    await notifySubscribers(message, imageUrl, mintData.mintAddress);
   }
   
   async function notifySubscribers(message, imageUrl, mint) {
