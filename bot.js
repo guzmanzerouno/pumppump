@@ -3940,11 +3940,6 @@ if (data === 'ata_close') {
 // ────────────────────────────────
 const waitingSwapQuery = new Set();
 
-// ────────────────────────────────
-// /swaps command with PnL & token-lookup
-// ────────────────────────────────
-const waitingSwapQuery = new Set();
-
 bot.onText(/^\/swaps$/, async (msg) => {
   const chatId = msg.chat.id;
   const cmdId  = msg.message_id;
