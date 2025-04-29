@@ -1286,52 +1286,24 @@ const notifMap = {
       reply_markup: {
         inline_keyboard: [
           [ { text: "❔ Help",                  url: "https://gemsniping.com/docs" } ],
-          [
-            { text: "✅ Always On",         callback_data: "notif_always" },
-            { text: "⏸ Pause During Trade", callback_data: "notif_pause"  },
-            { text: "❌ Turn Off",           callback_data: "notif_off"    }
-          ],
           [ { text: "❌ Close",              callback_data: "status_close" } ]
         ]
       }
     });
   });
   
-  // ────────────────────────────────
-  // Callbacks para /status
-  // ────────────────────────────────
-  bot.on("callback_query", async query => {
+// ─────────────────────────────────────────────
+// callback para cerrar el mensaje de /status
+// ─────────────────────────────────────────────
+bot.on("callback_query", async query => {
+  if (query.data === "status_close") {
     const chatId = query.message.chat.id;
     const msgId  = query.message.message_id;
-    const data   = query.data;
-  
-    // Close
-    if (data === "status_close") {
-      await bot.deleteMessage(chatId, msgId).catch(() => {});
-      return bot.answerCallbackQuery(query.id);
-    }
-  
-    // Cambiar Alerts y guardar en users.json
-    if (data === "notif_always" || data === "notif_pause" || data === "notif_off") {
-      const user = users[chatId] = users[chatId] || {};
-      if (data === "notif_always")       user.newTokenNotif = "always";
-      else if (data === "notif_pause")   user.newTokenNotif = "pauseDuringTrade";
-      else if (data === "notif_off")     user.newTokenNotif = "off";
-      saveUsers();
-  
-      await bot.answerCallbackQuery(query.id, { text: `Alerts set to ${notifMap[user.newTokenNotif]}` });
-  
-      // Volver a mostrar /status actualizado
-      return bot.emit("text", {
-        chat:       { id: chatId },
-        message_id: msgId,
-        text:       "/status"
-      });
-    }
-  
-    // Siempre responder
-    await bot.answerCallbackQuery(query.id);
-  });
+    await bot.deleteMessage(chatId, msgId).catch(() => {});
+  }
+  // (no olvides responder siempre para quita spinner)
+  await bot.answerCallbackQuery(query.id);
+});
 
 // 2) Handler para /balance
 bot.onText(/^\/balance$/, async (msg) => {
