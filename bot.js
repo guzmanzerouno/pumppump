@@ -540,140 +540,140 @@ Your membership is now active.
     fs.writeFileSync(paymentsFile, JSON.stringify(records, null, 2));
   }
 
-// ────────────────────────────────
-// Comando /payments con paginación (5 por página) y botón Close
-// ────────────────────────────────
-bot.onText(/\/payments/, async (msg) => {
-    const chatId       = msg.chat.id;
-    const commandMsgId = msg.message_id;
+// // ────────────────────────────────
+// // Comando /payments con paginación (5 por página) y botón Close
+// // ────────────────────────────────
+// bot.onText(/\/payments/, async (msg) => {
+//     const chatId       = msg.chat.id;
+//     const commandMsgId = msg.message_id;
   
-    // 1) Borrar el mensaje del comando inmediatamente
-    try {
-      await bot.deleteMessage(chatId, commandMsgId);
-    } catch (e) {
-      console.warn("Could not delete /payments message:", e.message);
-    }
+//     // 1) Borrar el mensaje del comando inmediatamente
+//     try {
+//       await bot.deleteMessage(chatId, commandMsgId);
+//     } catch (e) {
+//       console.warn("Could not delete /payments message:", e.message);
+//     }
   
-    // 2) Comprobar registro del usuario
-    const user = users[chatId];
-    if (!user || !user.walletPublicKey) {
-      return bot.sendMessage(
-        chatId,
-        "❌ You must be registered to view your payment history."
-      );
-    }
+//     // 2) Comprobar registro del usuario
+//     const user = users[chatId];
+//     if (!user || !user.walletPublicKey) {
+//       return bot.sendMessage(
+//         chatId,
+//         "❌ You must be registered to view your payment history."
+//       );
+//     }
   
-    // 3) Leer archivo de pagos y filtrar
-    const paymentsFile = "payments.json";
-    if (!fs.existsSync(paymentsFile)) {
-      return bot.sendMessage(chatId, "📭 No payment records found.");
-    }
-    const records      = JSON.parse(fs.readFileSync(paymentsFile));
-    const userPayments = records.filter(p => p.chatId === chatId).reverse();
+//     // 3) Leer archivo de pagos y filtrar
+//     const paymentsFile = "payments.json";
+//     if (!fs.existsSync(paymentsFile)) {
+//       return bot.sendMessage(chatId, "📭 No payment records found.");
+//     }
+//     const records      = JSON.parse(fs.readFileSync(paymentsFile));
+//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
-    if (userPayments.length === 0) {
-      return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
-    }
+//     if (userPayments.length === 0) {
+//       return bot.sendMessage(chatId, "📭 You haven’t made any payments yet.");
+//     }
   
-    // Función auxiliar para renderizar una página
-    function renderPage(pageIndex) {
-      const pageSize = 5;
-      const start    = pageIndex * pageSize;
-      const slice    = userPayments.slice(start, start + pageSize);
-      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-      for (const p of slice) {
-        const date = new Date(p.timestamp).toLocaleDateString();
-        text += `🗓️ *${date}*\n`;
-        text += `💼 Wallet: \`${p.wallet}\`\n`;
-        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-      }
-      // Construir inline keyboard: back/next + close
-      const navButtons = [];
-      if (pageIndex > 0) {
-        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-      }
-      if (start + pageSize < userPayments.length) {
-        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-      }
-      const keyboard = [];
-      if (navButtons.length) keyboard.push(navButtons);
-      // siempre mostrar botón Close
-      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+//     // Función auxiliar para renderizar una página
+//     function renderPage(pageIndex) {
+//       const pageSize = 5;
+//       const start    = pageIndex * pageSize;
+//       const slice    = userPayments.slice(start, start + pageSize);
+//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+//       for (const p of slice) {
+//         const date = new Date(p.timestamp).toLocaleDateString();
+//         text += `🗓️ *${date}*\n`;
+//         text += `💼 Wallet: \`${p.wallet}\`\n`;
+//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+//       }
+//       // Construir inline keyboard: back/next + close
+//       const navButtons = [];
+//       if (pageIndex > 0) {
+//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+//       }
+//       if (start + pageSize < userPayments.length) {
+//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+//       }
+//       const keyboard = [];
+//       if (navButtons.length) keyboard.push(navButtons);
+//       // siempre mostrar botón Close
+//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
   
-      return { text, keyboard };
-    }
+//       return { text, keyboard };
+//     }
   
-    // 4) Enviar la primera página (índice 0)
-    const { text, keyboard } = renderPage(0);
-    await bot.sendMessage(chatId, text, {
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  });
+//     // 4) Enviar la primera página (índice 0)
+//     const { text, keyboard } = renderPage(0);
+//     await bot.sendMessage(chatId, text, {
+//       parse_mode: "Markdown",
+//       disable_web_page_preview: true,
+//       reply_markup: { inline_keyboard: keyboard }
+//     });
+//   });
   
-  // ────────────────────────────────
-  // Callback para paginar o cerrar el mensaje
-  // ────────────────────────────────
-  bot.on("callback_query", async (query) => {
-    const data   = query.data;
-    const chatId = query.message.chat.id;
-    const msgId  = query.message.message_id;
+//   // ────────────────────────────────
+//   // Callback para paginar o cerrar el mensaje
+//   // ────────────────────────────────
+//   bot.on("callback_query", async (query) => {
+//     const data   = query.data;
+//     const chatId = query.message.chat.id;
+//     const msgId  = query.message.message_id;
   
-    // Cerrar el mensaje
-    if (data === "payments_close") {
-      await bot.deleteMessage(chatId, msgId).catch(() => {});
-      return bot.answerCallbackQuery();
-    }
+//     // Cerrar el mensaje
+//     if (data === "payments_close") {
+//       await bot.deleteMessage(chatId, msgId).catch(() => {});
+//       return bot.answerCallbackQuery();
+//     }
   
-    // Paginación
-    if (!data.startsWith("payments_page_")) {
-      return bot.answerCallbackQuery();
-    }
-    const pageIndex = parseInt(data.split("_").pop(), 10);
+//     // Paginación
+//     if (!data.startsWith("payments_page_")) {
+//       return bot.answerCallbackQuery();
+//     }
+//     const pageIndex = parseInt(data.split("_").pop(), 10);
   
-    // Releer y filtrar pagos
-    const records      = JSON.parse(fs.readFileSync("payments.json"));
-    const userPayments = records.filter(p => p.chatId === chatId).reverse();
+//     // Releer y filtrar pagos
+//     const records      = JSON.parse(fs.readFileSync("payments.json"));
+//     const userPayments = records.filter(p => p.chatId === chatId).reverse();
   
-    // Renderizar la página solicitada
-    function renderPage(pageIndex) {
-      const pageSize = 5;
-      const start    = pageIndex * pageSize;
-      const slice    = userPayments.slice(start, start + pageSize);
-      let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
-      for (const p of slice) {
-        const date = new Date(p.timestamp).toLocaleDateString();
-        text += `🗓️ *${date}*\n`;
-        text += `💼 Wallet: \`${p.wallet}\`\n`;
-        text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
-        text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
-      }
-      const navButtons = [];
-      if (pageIndex > 0) {
-        navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
-      }
-      if ((pageIndex+1) * pageSize < userPayments.length) {
-        navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
-      }
-      const keyboard = [];
-      if (navButtons.length) keyboard.push(navButtons);
-      keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
-      return { text, keyboard };
-    }
+//     // Renderizar la página solicitada
+//     function renderPage(pageIndex) {
+//       const pageSize = 5;
+//       const start    = pageIndex * pageSize;
+//       const slice    = userPayments.slice(start, start + pageSize);
+//       let text = `📜 *Your Payment History* (Page ${pageIndex+1}/${Math.ceil(userPayments.length/pageSize)})\n\n`;
+//       for (const p of slice) {
+//         const date = new Date(p.timestamp).toLocaleDateString();
+//         text += `🗓️ *${date}*\n`;
+//         text += `💼 Wallet: \`${p.wallet}\`\n`;
+//         text += `💳 Paid: *${p.amountSol} SOL* for *${p.days} days*\n`;
+//         text += `🔗 [Tx Link](https://solscan.io/tx/${p.tx})\n\n`;
+//       }
+//       const navButtons = [];
+//       if (pageIndex > 0) {
+//         navButtons.push({ text: "◀️ Back", callback_data: `payments_page_${pageIndex-1}` });
+//       }
+//       if ((pageIndex+1) * pageSize < userPayments.length) {
+//         navButtons.push({ text: "Next ▶️", callback_data: `payments_page_${pageIndex+1}` });
+//       }
+//       const keyboard = [];
+//       if (navButtons.length) keyboard.push(navButtons);
+//       keyboard.push([{ text: "❌ Close", callback_data: "payments_close" }]);
+//       return { text, keyboard };
+//     }
   
-    const { text, keyboard } = renderPage(pageIndex);
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: keyboard }
-    });
+//     const { text, keyboard } = renderPage(pageIndex);
+//     await bot.editMessageText(text, {
+//       chat_id: chatId,
+//       message_id: msgId,
+//       parse_mode: "Markdown",
+//       disable_web_page_preview: true,
+//       reply_markup: { inline_keyboard: keyboard }
+//     });
   
-    await bot.answerCallbackQuery();
-  });
+//     await bot.answerCallbackQuery();
+//   });
 
 
 // ────────────────────────────────
