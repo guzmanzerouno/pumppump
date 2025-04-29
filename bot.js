@@ -3990,8 +3990,7 @@ bot.on("callback_query", async query => {
     }
   }
 
-  // View PnL (SOL-based + win/lose counts)
-  // View PnL (SOL-based + win/lose counts via USD PnL)
+// View PnL (SOL-based + win/lose counts via USD PnL)
 if (data === "swaps_view_pnl") {
     const displayName = query.from.first_name || query.from.username || "there";
     const wallet      = users[chatId]?.walletPublicKey;
@@ -4005,15 +4004,16 @@ if (data === "swaps_view_pnl") {
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
     const sumGot = sells.reduce((sum, s) => {
-      const val = parseFloat((s.Got || "0").split(" ")[0]);
+      const val = parseFloat((s.Got   || "0").split(" ")[0]);
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
   
-    // Count wins vs losses based on USD part of PnL
+    // Count wins vs losses based on USD part of SOL PnL
     let winCount = 0, lossCount = 0;
     sells.forEach(s => {
       const txt = s["SOL PnL"] || "";
-      const m = txt.match(/USD\s*([+-]\\$\\d+(?:\\.\\d+)?)/);
+      // Extraemos el signo del USD dentro de los paréntesis
+      const m = txt.match(/USD\s*([+-]\$\d+(?:\.\d+)?)/);
       if (m) {
         if (m[1].startsWith("+")) winCount++;
         else if (m[1].startsWith("-")) lossCount++;
@@ -4033,7 +4033,7 @@ if (data === "swaps_view_pnl") {
 `👋 Hello *${displayName}*!  
 💼 Wallet: \`${wallet}\`
   
-📊 *Profit and Loss*
+📊 *Profit and Loss*  
 💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
 💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
 🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
