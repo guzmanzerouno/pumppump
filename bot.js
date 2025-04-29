@@ -1343,12 +1343,6 @@ bot.onText(/^\/balance$/, async (msg) => {
       ? (solBalance * solPrice).toFixed(2)
       : "N/A";
   
-    // 3) Fecha y hora actual
-    const now = new Date();
-    const dateStr = now.toLocaleDateString("en-GB", { timeZone: "UTC" });
-    const timeStr = now.toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
-    const timestamp = `${dateStr} ${timeStr} UTC`;
-  
     // 4) GIF aleatorio
     const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
   
@@ -1357,7 +1351,6 @@ bot.onText(/^\/balance$/, async (msg) => {
       `👋 Hello *${displayName}*!\n` +
       `💼 Wallet: \`${wallet}\`\n\n` +
       `💰 Your balance is: *${solBalance.toFixed(4)} SOL* (USD $${usdValue})\n` +
-      `🕒 ${timestamp}`;
   
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
