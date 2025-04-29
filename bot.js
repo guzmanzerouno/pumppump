@@ -4021,9 +4021,8 @@ bot.on("callback_query", async query => {
 
     const result =
       `👋 Hello *${displayName}*!\n` +
-      `💼 Wallet: \`${wallet}\`\n
-` +
       `📊 *Profit and Loss*\n\n` +
+      `💼 Wallet: \`${wallet}\`\n` +
       `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
       `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
       `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
@@ -4102,6 +4101,58 @@ bot.on("message", async msg => {
     }
   });
 });
+
+// ────────────────────────────────
+// /clear_swaps command to remove all swap entries for a wallet
+// ────────────────────────────────
+bot.onText(/^\/clear_swaps(?:\s+(\S+))?$/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const cmdId  = msg.message_id;
+    // Delete the command message
+    await bot.deleteMessage(chatId, cmdId).catch(() => {});
+  
+    // Determine target wallet
+    const target = match[1] || users[chatId]?.walletPublicKey;
+    if (!target) {
+      return bot.sendMessage(chatId,
+        "❌ No wallet specified and you are not registered."
+      );
+    }
+  
+    // Load swaps.json
+    let raw;
+    try {
+      raw = JSON.parse(fs.readFileSync("swaps.json"));
+    } catch {
+      return bot.sendMessage(chatId,
+        "⚠️ Could not read swaps.json or file is empty."
+      );
+    }
+  
+    // Filter out entries
+    const newRaw = {};
+    let removedCount = 0;
+    for (const [uid, arr] of Object.entries(raw)) {
+      if (Array.isArray(arr)) {
+        const filtered = arr.filter(s => s.Wallet !== target);
+        removedCount += arr.length - filtered.length;
+        if (filtered.length) newRaw[uid] = filtered;
+      }
+    }
+  
+    // Write back
+    try {
+      fs.writeFileSync("swaps.json", JSON.stringify(newRaw, null, 2));
+    } catch (e) {
+      return bot.sendMessage(chatId,
+        `❌ Failed to write swaps.json: ${e.message}`
+      );
+    }
+  
+    return bot.sendMessage(chatId,
+      `✅ Removed ${removedCount} swap entries for wallet \`${target}\`.`
+    , { parse_mode: "Markdown" });
+  });
 
 
 // 🔹 Escuchar firmas de transacción o mint addresses en mensajes
