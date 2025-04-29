@@ -1237,8 +1237,8 @@ const notifMap = {
     const lines = [];
   
     lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*`);
-    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
     lines.push(""); // línea en blanco
+    lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
     // Membership
     if (user.expired === "never") {
       lines.push(`✅ *Status:* Unlimited Membership`);
@@ -1376,12 +1376,12 @@ bot.onText(/^\/balance$/, async (msg) => {
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
     { command: 'balance',    description: '💰 Show my SOL balance (USD value)' },
-    { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
-    { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
-    { command: 'notifications', description: '🔔 Configure New Token alerts' },
-    { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
     { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
     { command: 'swaps',         description: '📋 View PnL and Swap Lookup' },
+    { command: 'notifications', description: '🔔 Configure New Token alerts' },
+    { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
+    { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
+    { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
     { command: 'payments',  description: '💳 Show your payment history' }
 ]);
 
