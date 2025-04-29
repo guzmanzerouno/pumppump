@@ -1199,56 +1199,52 @@ const statusGifs = [
     "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2lqaHprenFyb3o1c3MwMGtqaHYyeDZlcWhrd3B3eHNvbDByY3cwciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/gjHkRHSuHqu99y9Yjt/giphy.gif"
   ];  
   
-// ─────────────────────────────────────────────
-// /status with random GIF, user name, help & close buttons
-// ─────────────────────────────────────────────
-bot.onText(/\/status/, async (msg) => {
+// ────────────────────────────────
+// Mapping global de notificaciones
+// ────────────────────────────────
+const notifMap = {
+    always:           "Always On ✅",
+    pauseDuringTrade: "Pause During Trade ⏸",
+    off:              "Turned Off ❌"
+  };
+  
+  // ────────────────────────────────
+  // Comando /status (incluye Alerts extraídas de users.json)
+  // ────────────────────────────────
+  bot.onText(/^\/status$/, async (msg) => {
     const chatId       = msg.chat.id;
     const commandMsgId = msg.message_id;
   
-    // 0) Borra el mensaje del comando
     try {
       await bot.deleteMessage(chatId, commandMsgId);
-    } catch (e) {
-      console.warn("Could not delete /status message:", e.message);
-    }
+    } catch (e) {}
   
     const user = users[chatId];
     if (!user || !user.walletPublicKey) {
       return bot.sendMessage(chatId, "❌ You are not registered. Use /start to begin.");
     }
   
-    // ¿Es el usuario especial?
-    const isSpecial = chatId.toString() === "1631313738";
-
-  // Selección weighed:
-  let gifUrl;
-  if (isSpecial) {
-    // 60% chance extraGifs, 40% chance statusGifs
-    if (Math.random() < 0.6) {
-      gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
-    } else {
-      gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-    }
-  } else {
-    gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
-  }
-
-  const displayName = isSpecial
-    ? "Popochita"
-    : (msg.from.first_name || "there");
-
-  const now   = Date.now();
-  const lines = [];
+    const isSpecial   = chatId.toString() === "1631313738";
+    const displayName = isSpecial ? "Popochita" : (msg.from.first_name || "there");
   
-    lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*\n`);
+    // GIF
+    let gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+    if (isSpecial && Math.random() < 0.6) {
+      gifUrl = extraGifs[Math.floor(Math.random() * extraGifs.length)];
+    }
+  
+    const now   = Date.now();
+    const lines = [];
+  
+    lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*`);
     lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
   
+    // Membership
     if (user.expired === "never") {
       lines.push(`✅ *Status:* Unlimited Membership`);
     } else if (user.expired && now < user.expired) {
       const expDate  = new Date(user.expired).toLocaleDateString();
-      const daysLeft = Math.ceil((user.expired - now) / (1000*60*60*24));
+      const daysLeft = Math.ceil((user.expired - now)/(1000*60*60*24));
       lines.push(`✅ *Status:* Active`);
       lines.push(`📅 *Expires:* ${expDate} (${daysLeft} day(s) left)`);
     } else {
@@ -1265,7 +1261,7 @@ bot.onText(/\/status/, async (msg) => {
     else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
   
-    // Auto-ATA
+    // ATA mode
     const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
     lines.push(`⚡️ *ATA Mode:* ${ataStatus}`);
   
@@ -1273,40 +1269,69 @@ bot.onText(/\/status/, async (msg) => {
     let autobuyStatus = "Off ❌";
     if (user.autoBuyEnabled) {
       const amt = user.autoBuyAmount;
-      const trg = user.autoBuyTrigger === "detect"
-        ? "on Detect"
-        : "on Notify";
+      const trg = user.autoBuyTrigger === "detect" ? "on Detect" : "on Notify";
       autobuyStatus = `On 🚀 (${amt} SOL, ${trg})`;
     }
     lines.push(`🚀 *Auto-Buy:* ${autobuyStatus}`);
   
+    // Alerts (from users.json)
+    const currentNotif = notifMap[user.newTokenNotif || "always"];
+    lines.push(`🔔 *Alerts:* ${currentNotif}`);
+  
     const caption = lines.join("\n");
   
-    // 3) Enviar animación con dos botones en columnas separadas
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [ { text: "❔ Help",  url: "https://gemsniping.com/docs"  } ],
-          [ { text: "❌ Close", callback_data: "status_close"        } ]
+          [ { text: "❔ Help",                  url: "https://gemsniping.com/docs" } ],
+          [
+            { text: "✅ Always On",         callback_data: "notif_always" },
+            { text: "⏸ Pause During Trade", callback_data: "notif_pause"  },
+            { text: "❌ Turn Off",           callback_data: "notif_off"    }
+          ],
+          [ { text: "❌ Close",              callback_data: "status_close" } ]
         ]
       }
     });
   });
-
-// ─────────────────────────────────────────────
-// callback para cerrar el mensaje de /status
-// ─────────────────────────────────────────────
-bot.on("callback_query", async query => {
-  if (query.data === "status_close") {
+  
+  // ────────────────────────────────
+  // Callbacks para /status
+  // ────────────────────────────────
+  bot.on("callback_query", async query => {
     const chatId = query.message.chat.id;
     const msgId  = query.message.message_id;
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-  }
-  // (no olvides responder siempre para quita spinner)
-  await bot.answerCallbackQuery(query.id);
-});
+    const data   = query.data;
+  
+    // Close
+    if (data === "status_close") {
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+      return bot.answerCallbackQuery(query.id);
+    }
+  
+    // Cambiar Alerts y guardar en users.json
+    if (data === "notif_always" || data === "notif_pause" || data === "notif_off") {
+      const user = users[chatId] = users[chatId] || {};
+      if (data === "notif_always")       user.newTokenNotif = "always";
+      else if (data === "notif_pause")   user.newTokenNotif = "pauseDuringTrade";
+      else if (data === "notif_off")     user.newTokenNotif = "off";
+      saveUsers();
+  
+      await bot.answerCallbackQuery(query.id, { text: `Alerts set to ${notifMap[user.newTokenNotif]}` });
+  
+      // Volver a mostrar /status actualizado
+      return bot.emit("text", {
+        chat:       { id: chatId },
+        message_id: msgId,
+        text:       "/status"
+      });
+    }
+  
+    // Siempre responder
+    await bot.answerCallbackQuery(query.id);
+  });
 
 // 2) Handler para /balance
 bot.onText(/^\/balance$/, async (msg) => {
