@@ -3990,66 +3990,91 @@ bot.on("callback_query", async query => {
     }
   }
 
-// View PnL (SOL-based + win/lose counts via USD PnL)
+// View PnL (SOL-based + win/lose counts + share buttons)
 if (data === "swaps_view_pnl") {
-    const displayName = query.from.first_name || query.from.username || "there";
-    const wallet      = users[chatId]?.walletPublicKey;
-    const allSwaps    = loadAllSwaps();
+    // 1) Display name, con override para usuario especial
+    const isSpecial   = chatId.toString() === "1631313738";
+    const displayName = isSpecial
+      ? "Popochita"
+      : (query.from.first_name || query.from.username || "there");
+  
+    // 2) Cargar y filtrar swaps
+    const wallet = users[chatId]?.walletPublicKey;
+    const allSwaps = loadAllSwaps();
     const buys  = allSwaps.filter(s => s.Wallet === wallet && s.type === "Buy");
     const sells = allSwaps.filter(s => s.Wallet === wallet && s.type === "Sell");
   
-    // Sum SOL amounts
+    // 3) Sumar cantidades en SOL
     const sumSpent = buys.reduce((sum, s) => {
-      const val = parseFloat((s.Spent || "0").split(" ")[0]);
-      return sum + (isNaN(val) ? 0 : val);
+      const v = parseFloat((s.Spent || "0").split(" ")[0]);
+      return sum + (isNaN(v) ? 0 : v);
     }, 0);
     const sumGot = sells.reduce((sum, s) => {
-      const val = parseFloat((s.Got   || "0").split(" ")[0]);
-      return sum + (isNaN(val) ? 0 : val);
+      const v = parseFloat((s.Got   || "0").split(" ")[0]);
+      return sum + (isNaN(v) ? 0 : v);
     }, 0);
   
-    // Count wins vs losses based on USD part of SOL PnL
+    // 4) Contar wins/losses por USD en SOL PnL
     let winCount = 0, lossCount = 0;
     sells.forEach(s => {
       const txt = s["SOL PnL"] || "";
-      // Extraemos el signo del USD dentro de los paréntesis
       const m = txt.match(/USD\s*([+-]\$\d+(?:\.\d+)?)/);
       if (m) {
         if (m[1].startsWith("+")) winCount++;
         else if (m[1].startsWith("-")) lossCount++;
       }
     });
+    const totalPairs = sells.length;
+    const winPct     = totalPairs ? (winCount  / totalPairs) * 100 : 0;
+    const lossPct    = totalPairs ? (lossCount / totalPairs) * 100 : 0;
   
-    // Calculate overall PnL
+    // 5) Calcular PnL global
     const pnlSol   = sumGot - sumSpent;
-    const totalTx  = buys.length + sells.length;
     const solPrice = await getSolPriceUSD();
     const investUSD  = sumSpent * solPrice;
     const recoverUSD = sumGot   * solPrice;
     const pnlUSD     = pnlSol   * solPrice;
     const percent    = sumSpent > 0 ? (pnlSol / sumSpent) * 100 : 0;
   
+    // 6) Preparar texto para compartir
+    const shareText =
+      `Hello ${displayName}! Profit and Loss:\n` +
+      `Invest: ${sumSpent.toFixed(4)} SOL ($${investUSD.toFixed(2)})\n` +
+      `Recover: ${sumGot.toFixed(4)} SOL ($${recoverUSD.toFixed(2)})\n` +
+      `PnL: ${pnlSol.toFixed(4)} SOL ($${pnlUSD.toFixed(2)})\n` +
+      `Wins: ${winCount} (${winPct.toFixed(1)}%) Losses: ${lossCount} (${lossPct.toFixed(1)}%)`;
+    const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+    const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+  
+    // 7) Construir resultado final
     const result =
-`👋 Hello *${displayName}*!  
-💼 Wallet: \`${wallet}\`
+  `👋 Hello *${displayName}*!  
+  💼 Wallet: \`${wallet}\`
   
-📊 *Profit and Loss*  
-💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
-💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
-🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
-📈 Percentage: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
-✅ Wins: ${winCount}  🔻 Losses: ${lossCount}  
-🔄 Total Transactions: ${totalTx}`;
+  📊 *Profit and Loss*  
+  💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})  
+  💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})  
+  🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})  
+  📈 PnL %: ${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%  
+  ✅ Wins: (${winCount}) ${winPct.toFixed(1)}%  🔻 Losses: (${lossCount}) ${lossPct.toFixed(1)}%  
+  🔄 Total Pairs: ${totalPairs}`;
   
+    // 8) Editar el mensaje con botones de share y close
     return bot.editMessageText(result, {
       chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
       disable_web_page_preview: true,
       reply_markup: {
-        inline_keyboard: [[
-          { text: "❌ Close", callback_data: "swaps_close" }
-        ]]
+        inline_keyboard: [
+          [
+            { text: "🚀 Share on X",     url: tweetUrl },
+            { text: "💬 WhatsApp",       url: waUrl   }
+          ],
+          [
+            { text: "❌ Close",          callback_data: "swaps_close" }
+          ]
+        ]
       }
     });
   }
