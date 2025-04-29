@@ -3936,7 +3936,7 @@ if (data === 'ata_close') {
   });
 
 // ────────────────────────────────
-// /swaps command with PnL & token-lookup (updated with detailed SOL-based PnL)
+// /swaps command with PnL & token-lookup (updated with detailed SOL-based PnL + win/lose counts)
 // ────────────────────────────────
 const waitingSwapQuery = new Set();
 
@@ -3990,7 +3990,7 @@ bot.on("callback_query", async query => {
     }
   }
 
-  // View PnL (SOL-based)
+  // View PnL (SOL-based + win/lose counts)
   if (data === "swaps_view_pnl") {
     const displayName = query.from.first_name || query.from.username || "there";
     const wallet      = users[chatId]?.walletPublicKey;
@@ -4009,6 +4009,18 @@ bot.on("callback_query", async query => {
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
 
+    // Count wins vs losses from SOL PnL
+    let winCount = 0, lossCount = 0;
+    sells.forEach(s => {
+      const pnlField = s["SOL PnL"] || "";
+      const m = pnlField.match(/([+-]?\d+\.?\d*)/);
+      if (m) {
+        const v = parseFloat(m[1]);
+        if (v > 0) winCount++;
+        else if (v < 0) lossCount++;
+      }
+    });
+
     // Calculate PnL
     const pnlSol = sumGot - sumSpent;
     const totalTx = buys.length + sells.length;
@@ -4021,12 +4033,13 @@ bot.on("callback_query", async query => {
 
     const result =
       `👋 Hello *${displayName}*!\n` +
+      `💼 Wallet: \`${wallet}\`\n\n` +
       `📊 *Profit and Loss*\n\n` +
-      `💼 Wallet: \`${wallet}\`\n` +
       `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
       `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
       `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
       `📈 Percentage: ${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%\n` +
+      `✅ Wins: ${winCount}  🔻 Losses: ${lossCount}\n` +
       `🔄 Total Transactions: ${totalTx}`;
 
     return bot.editMessageText(result, {
@@ -4101,6 +4114,7 @@ bot.on("message", async msg => {
     }
   });
 });
+
 
 // ────────────────────────────────
 // /clear_swaps command to remove all swap entries for a wallet
