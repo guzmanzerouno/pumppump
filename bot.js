@@ -1347,11 +1347,11 @@ bot.onText(/^\/balance$/, async (msg) => {
   
     // 4) Enviar animación con texto y botón Close
     const caption =
-    `👋 Hello *${displayName}*!\n` +
-    `💼 *Wallet Balance*\n\n` +
-    `💼 Wallet: \`${wallet}\`\n` +
-    `💰 Your balance is: *${solBalance.toFixed(4)} SOL*\n` +
-    `💵 USD $${usdValue}`;
+`👋 Hello *${displayName}*!\n` +
+`💼 *Wallet Balance*\n\n` +
+`💼 Wallet: \`${wallet}\`\n` +
+`💰 Your balance is: *${solBalance.toFixed(4)} SOL*\n` +
+`💵 USD $${usdValue}`;
   
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
