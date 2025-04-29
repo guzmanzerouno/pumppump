@@ -1312,7 +1312,8 @@ bot.on("callback_query", async query => {
 bot.onText(/^\/balance$/, async (msg) => {
     const chatId = msg.chat.id;
     const cmdId  = msg.message_id;
-    await bot.deleteMessage(chatId, cmdId).catch(() => {}); // limpiar comando
+    // Borrar el comando para mantener limpio el chat
+    await bot.deleteMessage(chatId, cmdId).catch(() => {});
   
     const wallet = users[chatId]?.walletPublicKey;
     if (!wallet) {
@@ -1343,14 +1344,14 @@ bot.onText(/^\/balance$/, async (msg) => {
       ? (solBalance * solPrice).toFixed(2)
       : "N/A";
   
-    // 4) GIF aleatorio
+    // 3) GIF aleatorio
     const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
   
-    // 5) Enviar animación con texto y botón Close
+    // 4) Enviar animación con texto y botón Close
     const caption =
       `👋 Hello *${displayName}*!\n` +
       `💼 Wallet: \`${wallet}\`\n\n` +
-      `💰 Your balance is: *${solBalance.toFixed(4)} SOL* (USD $${usdValue})\n` +
+      `💰 Your balance is: *${solBalance.toFixed(4)} SOL* (USD $${usdValue})`;
   
     await bot.sendAnimation(chatId, gifUrl, {
       caption,
@@ -1370,7 +1371,7 @@ bot.onText(/^\/balance$/, async (msg) => {
       const msgId  = query.message.message_id;
       await bot.deleteMessage(chatId, msgId).catch(() => {});
     }
-    // siempre responde al callback
+    // Siempre responde al callback para quitar el spinner
     await bot.answerCallbackQuery(query.id);
   });
 
