@@ -1308,8 +1308,82 @@ bot.on("callback_query", async query => {
   await bot.answerCallbackQuery(query.id);
 });
 
+// 2) Handler para /balance
+bot.onText(/^\/balance$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const cmdId  = msg.message_id;
+    await bot.deleteMessage(chatId, cmdId).catch(() => {}); // limpiar comando
+  
+    const wallet = users[chatId]?.walletPublicKey;
+    if (!wallet) {
+      return bot.sendMessage(chatId,
+        "❌ You’re not registered. Please use /start to register."
+      );
+    }
+  
+    // Override de displayName para usuario especial
+    const isSpecial   = chatId.toString() === "1631313738";
+    const displayName = isSpecial
+      ? "Popochita"
+      : (msg.from.first_name || "there");
+  
+    // 1) Obtener balance en SOL
+    const connection = new Connection(SOLANA_RPC_URL, "processed");
+    let lamports = 0;
+    try {
+      lamports = await connection.getBalance(new PublicKey(wallet));
+    } catch (err) {
+      console.error("Error fetching balance:", err);
+    }
+    const solBalance = lamports / 1e9;
+  
+    // 2) Obtener precio de SOL en USD
+    const solPrice = await getSolPriceUSD();
+    const usdValue = solPrice != null
+      ? (solBalance * solPrice).toFixed(2)
+      : "N/A";
+  
+    // 3) Fecha y hora actual
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-GB", { timeZone: "UTC" });
+    const timeStr = now.toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
+    const timestamp = `${dateStr} ${timeStr} UTC`;
+  
+    // 4) GIF aleatorio
+    const gifUrl = statusGifs[Math.floor(Math.random() * statusGifs.length)];
+  
+    // 5) Enviar animación con texto y botón Close
+    const caption =
+      `👋 Hello *${displayName}*!\n` +
+      `💼 Wallet: \`${wallet}\`\n\n` +
+      `💰 Your balance is: *${solBalance.toFixed(4)} SOL* (USD $${usdValue})\n` +
+      `🕒 ${timestamp}`;
+  
+    await bot.sendAnimation(chatId, gifUrl, {
+      caption,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "❌ Close", callback_data: "balance_close" }
+        ]]
+      }
+    });
+  });
+  
+  // 3) Handler para cerrar el mensaje de /balance
+  bot.on("callback_query", async query => {
+    if (query.data === "balance_close") {
+      const chatId = query.message.chat.id;
+      const msgId  = query.message.message_id;
+      await bot.deleteMessage(chatId, msgId).catch(() => {});
+    }
+    // siempre responde al callback
+    await bot.answerCallbackQuery(query.id);
+  });
+
 // tras: const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.setMyCommands([
+    { command: 'balance',    description: '💰 Show my SOL balance (USD value)' },
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
     { command: 'notifications', description: '🔔 Configure New Token alerts' },
