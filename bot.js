@@ -1315,6 +1315,7 @@ bot.setMyCommands([
     { command: 'notifications', description: '🔔 Configure New Token alerts' },
     { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
     { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
+    { command: 'swaps',         description: '📋 View PnL and Swap Lookup' },
     { command: 'payments',  description: '💳 Show your payment history' }
 ]);
 
@@ -3964,7 +3965,7 @@ bot.onText(/^\/swaps$/, async (msg) => {
   }
 
   const text =
-    "📋 *📋 View PnL and Swap Lookup*\n\n" +
+    "📋 *View PnL and Swap Lookup*\n\n" +
     "• Press *View PnL* to see your total profits and losses.\n" +
     "• Press *Lookup by Token* to query swaps for a specific token.";
   const keyboard = [
@@ -4075,7 +4076,7 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
       }
     });
   }
-  
+
 // ────────────────────────────────
 // Lookup by Token (click en “🔍 Lookup by Token”)
 // ────────────────────────────────
