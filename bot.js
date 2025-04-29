@@ -4033,8 +4033,8 @@ bot.on("callback_query", async query => {
 
     const result =
       `👋 Hello *${displayName}*!\n` +
-      `💼 Wallet: \`${wallet}\`\n\n` +
       `📊 *Profit and Loss*\n\n` +
+      `💼 Wallet: \`${wallet}\`\n` +
       `💰 Total Investment: ${sumSpent.toFixed(4)} SOL (USD $${investUSD.toFixed(2)})\n` +
       `💵 Recover: ${sumGot.toFixed(4)} SOL (USD $${recoverUSD.toFixed(2)})\n` +
       `🏦 PnL: ${pnlSol.toFixed(4)} SOL (USD $${pnlUSD.toFixed(2)})\n` +
