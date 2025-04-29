@@ -1793,7 +1793,7 @@ async function fetchRugCheckData(tokenAddress) {
       name:                 dexData.name               || "Unknown",
       symbol:               dexData.symbol             || "Unknown",
       tokenAddress:         dexData.tokenAddress       || "N/A",
-      tokenLogo:            dexData.tokenLogo          || "",
+      tokenLogo:            dexData.tokenLogo          || rugCheckData.imageUrl || "",
       USD:                  dexData.priceUsd           || "N/A",
       SOL:                  dexData.priceSol           || "N/A",
       liquidity:            dexData.liquidity          || "N/A",
