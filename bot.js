@@ -3964,7 +3964,7 @@ bot.onText(/^\/swaps$/, async (msg) => {
   }
 
   const text =
-    "📋 *Swap History Help*\n\n" +
+    "📋 *📋 View PnL and Swap Lookup*\n\n" +
     "• Press *View PnL* to see your total profits and losses.\n" +
     "• Press *Lookup by Token* to query swaps for a specific token.";
   const keyboard = [
@@ -4075,8 +4075,10 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
       }
     });
   }
-
-  // Lookup by Token
+  
+// ────────────────────────────────
+// Lookup by Token (click en “🔍 Lookup by Token”)
+// ────────────────────────────────
   if (data === "swaps_lookup") {
     waitingSwapQuery.add(chatId);
     const prompt =
@@ -4096,41 +4098,66 @@ const waUrl    = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareT
 });
 
 // now your message handler can see loadAllSwaps()
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  if (!waitingSwapQuery.has(chatId)) return;
-  waitingSwapQuery.delete(chatId);
-
-  await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-
-  const token  = msg.text.trim();
-  const wallet = users[chatId]?.walletPublicKey;
-  const allSwaps = loadAllSwaps();
-  const userSwaps = allSwaps.filter(s =>
-    s.Wallet === wallet &&
-    (s["Received Token Address"] === token || s.Pair?.includes(token))
-  );
-  if (!userSwaps.length) {
-    return bot.sendMessage(chatId,
-      `📭 No swaps found for token \`${token}\`.`,
-      { parse_mode: "Markdown" }
+bot.on("message", async msg => {
+    const chatId = msg.chat.id;
+    if (!waitingSwapQuery.has(chatId)) return;
+    waitingSwapQuery.delete(chatId);
+  
+    // 1) Borrar el mensaje donde el user envió el token
+    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+  
+    const tokenAddress = msg.text.trim();
+    const wallet       = users[chatId]?.walletPublicKey;
+    if (!wallet) return;
+  
+    // 2) Cargar todos los swaps
+    const allSwaps = loadAllSwaps();
+  
+    // 3) Obtener el símbolo a partir de la dirección (para las ventas)
+    const { symbol: tokenSymbol = "" } = getTokenInfo(tokenAddress);
+  
+    // 4) Filtrar compras **y** ventas
+    const buys = allSwaps.filter(s =>
+      s.Wallet === wallet &&
+      s.type === "Buy" &&
+      s["Received Token Address"] === tokenAddress
     );
-  }
-  const content = userSwaps.map(s => s.messageText).join("\n\n");
-  const waUrl   = `https://api.whatsapp.com/send?text=${encodeURIComponent(content)}`;
-  await bot.sendMessage(chatId, content, {
-    parse_mode: "Markdown",
-    disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "💬 Share on WhatsApp", url: waUrl },
-    ],
-    [
-        { text: "❌ Close",            callback_data: "swaps_close" }
-      ]]
+    const sells = allSwaps.filter(s =>
+      s.Wallet === wallet &&
+      s.type === "Sell" &&
+      typeof s.Pair === "string" &&
+      s.Pair.startsWith(`${tokenSymbol}/`)
+    );
+  
+    const userSwaps = [...buys, ...sells];
+  
+    if (userSwaps.length === 0) {
+      return bot.sendMessage(chatId,
+        `📭 No swaps found for token \`${tokenAddress}\`.`,
+        { parse_mode: "Markdown" }
+      );
     }
+  
+    // 5) Unir todos los messageText en un solo bloque
+    const content = userSwaps
+      .map(s => s.messageText)
+      .join("\n\n");
+  
+    // 6) Construir URL para compartir por WhatsApp
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(content)}`;
+  
+    // 7) Enviar mensaje con todos los swaps + botones
+    await bot.sendMessage(chatId, content, {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "💬 Share on WhatsApp", url: waUrl },
+          { text: "❌ Close",            callback_data: "swaps_close" }
+        ]]
+      }
+    });
   });
-});
 
 
 // ────────────────────────────────
