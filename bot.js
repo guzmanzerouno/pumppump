@@ -1238,7 +1238,7 @@ const notifMap = {
   
     lines.push(`👋 Hello *${displayName}*!\n👤 *Account Status*`);
     lines.push(`💼 Wallet: \`${user.walletPublicKey}\``);
-  
+    lines.push(""); // línea en blanco
     // Membership
     if (user.expired === "never") {
       lines.push(`✅ *Status:* Unlimited Membership`);
@@ -1260,6 +1260,7 @@ const notifMap = {
     if (user.swapLimit === Infinity) swapInfo = "Unlimited";
     else if (typeof user.swapLimit === "number") swapInfo = `${user.swapLimit} swaps`;
     lines.push(`🔄 *Swap Limit:* ${swapInfo}`);
+    lines.push(""); // línea en blanco
   
     // ATA mode
     const ataStatus = user.ataAutoCreationEnabled ? "Enabled ✅" : "Disabled ❌";
@@ -1291,7 +1292,7 @@ const notifMap = {
       }
     });
   });
-  
+
 // ─────────────────────────────────────────────
 // callback para cerrar el mensaje de /status
 // ─────────────────────────────────────────────
