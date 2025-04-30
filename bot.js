@@ -1699,7 +1699,7 @@ async function getDexScreenerData(pairAddress) {
   }
 
   // 🔹 Obtener datos desde Dexscreener
-async function getDexscreenerData(pairAddress) {
+async function fetchDexscreenerData(pairAddress) {
   const url = `https://api.dexscreener.com/latest/dex/pairs/solana/${pairAddress}`;
   const maxRetries = 30;
   const delayMs    = 2000;
