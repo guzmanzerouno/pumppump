@@ -1619,6 +1619,11 @@ async function getPairAddressFromSolanaTracker(tokenAddress) {
     }
   }
 
+  // Alias para llamada a Moralis
+async function getMoralisData(pairAddress) {
+  return getDexScreenerData(pairAddress);
+}
+
 // 🔹 Obtener datos desde Moralis
 async function getDexScreenerData(pairAddress) {
     const url = `https://solana-gateway.moralis.io/token/mainnet/pairs/${pairAddress}/stats`;
