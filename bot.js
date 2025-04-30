@@ -1782,61 +1782,49 @@ async function fetchRugCheckData(tokenAddress) {
     }
   }
 
-  function saveTokenData(dexData, mintData, rugCheckData, source, age, priceChange24h) {
+  function saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h) {
     // Validaciones iniciales
     if (!dexData || !mintData || !rugCheckData) {
       return;
     }
-  
+
     // Formatear la información a guardar
     const tokenInfo = {
       name:                 dexData.name               || "Unknown",
       symbol:               dexData.symbol             || "Unknown",
-      tokenAddress:         dexData.tokenAddress       // Moralis
-                            || dexData.address          // DexScreener
-                            || mintData.mintAddress     // fallback
-                            || "N/A",
-      tokenLogo:            dexData.tokenLogo          // Moralis
-                            || rugCheckData.imageUrl    // fallback RugCheck/SolanaTracker
-                            || "",
+      tokenAddress:         dexData.tokenAddress       || "N/A",
+      tokenLogo:            dexData.tokenLogo          || rugCheckData.imageUrl || "",
       USD:                  dexData.priceUsd           || "N/A",
       SOL:                  dexData.priceSol           || "N/A",
       liquidity:            dexData.liquidity          || "N/A",
-      liquidityChange24h:   dexData.liquidityChange24h // Moralis
-                            || dexData.priceChange24h   // DexScreener
-                            || "N/A",
+      liquidityChange24h:   dexData.liquidityChange24h || "N/A",
       priceChange24h:       dexData.priceChange24h     || "N/A",
       buyVolume24h:         dexData.buyVolume24h       || "N/A",
-      sellVolume24h:        dexData.sellVolume24h      || 0,
+      sellVolume24h:        dexData.sellVolume24h      || "N/A",
       totalVolume24h:       dexData.totalVolume24h     || "N/A",
-      buys24h:              dexData.buys24h            || 0,
-      sells24h:             dexData.sells24h           || 0,
-      buyers24h:            dexData.buyers24h          || 0,
-      sellers24h:           dexData.sellers24h         || 0,
+      buys24h:              dexData.buys24h            || "0",
+      sells24h:             dexData.sells24h           || "0",
+      buyers24h:            dexData.buyers24h          || "0",
+      sellers24h:           dexData.sellers24h         || "0",
       riskLevel:            rugCheckData.riskLevel     || "N/A",
       warning:              rugCheckData.riskDescription || "No risks detected",
       LPLOCKED:             rugCheckData.lpLocked      || "N/A",
       freezeAuthority:      rugCheckData.freezeAuthority || "N/A",
       mintAuthority:        rugCheckData.mintAuthority || "N/A",
-      chain:                dexData.chain              || "Solana",
+      chain:                dexData.chain              || "solana",
       dex:                  dexData.dex                || "N/A",
-      pair:                 dexData.pairAddress        // Moralis
-                            || dexData.pairAddress      // DexScreener
-                            || "N/A",
-      pairLabel:            dexData.pairLabel          // Moralis
-                            || dexData.pairLabel        // DexScreener
-                            || "N/A",
-      exchangeAddress:      dexData.exchangeAddress    || "",
+      pair:                 dexData.pairAddress        || "N/A",
+      pairLabel:            dexData.pairLabel          || "N/A",
+      exchangeAddress:      dexData.exchangeAddress    || "N/A",
       exchangeLogo:         dexData.exchangeLogo       || "",
       migrationDate:        typeof mintData.date === "number" ? mintData.date : null,
       status:               mintData.status            || "N/A",
-      token:                mintData.mintAddress       || "N/A",
-      source                               // <-- aquí guardamos "moralis" o "dexscreener"
+      token:                mintData.mintAddress       || "N/A"
     };
-  
+
     const filePath = 'tokens.json';
     let tokens = {};
-  
+
     // Leer o inicializar el archivo
     if (fs.existsSync(filePath)) {
       try {
@@ -1847,13 +1835,13 @@ async function fetchRugCheckData(tokenAddress) {
         tokens = {};
       }
     }
-  
+
     // Validar que tengamos un mint válido
     const key = mintData.mintAddress;
     if (!key || key === "N/A") {
       return;
     }
-  
+
     // Actualizar y guardar
     tokens[key] = tokenInfo;
     try {
@@ -1861,7 +1849,7 @@ async function fetchRugCheckData(tokenAddress) {
     } catch {
       // Silenciar errores de escritura
     }
-  }
+}
 
 // Función de lectura sin logs
 function getTokenInfo(mintAddress) {
@@ -2396,278 +2384,200 @@ bot.onText(/\/notifications/, async (msg) => {
 
 // ─── Función principal actualizada ───
 async function analyzeTransaction(signature, forceCheck = false) {
-  if (!forceCheck && processedSignatures.has(signature)) return;
-  if (!forceCheck) processedSignatures.add(signature);
-
-  // 1) Obtener mint desde la tx
-  const mintData = await getMintAddressFromTransaction(signature);
-  if (!mintData?.mintAddress) return;
-
-  // 2) No procesar dos veces el mismo mint
-  if (processedMints[mintData.mintAddress]) return;
-  processedMints[mintData.mintAddress] = true;
-  saveProcessedMints();
-
-  // Pre-creación de ATAs (fire-and-forget)
-  preCreateATAsForToken(mintData.mintAddress)
-    .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
-
-  // ——— AUTO-BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
-  for (const [chatId, user] of Object.entries(users)) {
-    if (
-      user.subscribed &&
-      user.privateKey &&
-      user.autoBuyEnabled &&
-      user.autoBuyTrigger === 'detect'
-    ) {
-      const amountSOL = user.autoBuyAmount;
-      const mint      = mintData.mintAddress;
-      user.autoBuyEnabled = false;
-      saveUsers();
-
-      try {
-        const sent      = await bot.sendMessage(
-          chatId,
-          `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
-        );
-        const messageId = sent.message_id;
-
-        const txSignature = await buyToken(chatId, mint, amountSOL);
-        if (!txSignature) {
-          await bot.editMessageText(
-            `❌ Auto-Buy failed for ${mint}.`,
-            { chat_id: chatId, message_id }
+    if (!forceCheck && processedSignatures.has(signature)) return;
+    if (!forceCheck) processedSignatures.add(signature);
+  
+    // 1) Obtener mint desde la tx
+    const mintData = await getMintAddressFromTransaction(signature);
+    if (!mintData?.mintAddress) return;
+  
+    // 2) No procesar dos veces el mismo mint
+    if (processedMints[mintData.mintAddress]) return;
+    processedMints[mintData.mintAddress] = true;
+    saveProcessedMints();
+  
+    // Pre-creación de ATAs (fire-and-forget)
+    preCreateATAsForToken(mintData.mintAddress)
+      .catch(err => console.error("❌ Error pre-creating ATAs:", err.message));
+  
+    // ——— AUTO-BUY INMEDIATO AL DETECTAR TOKEN “POSITIVO” ———
+    for (const [chatId, user] of Object.entries(users)) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'detect'
+      ) {
+        const amountSOL = user.autoBuyAmount;
+        const mint      = mintData.mintAddress;
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
+        try {
+          const sent      = await bot.sendMessage(
+            chatId,
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
           );
-          continue;
+          const messageId = sent.message_id;
+  
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(
+              `❌ Auto-Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
+            );
+            continue;
+          }
+  
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+        } catch (err) {
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
         }
-
-        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
-        await confirmBuy(chatId, swapDetails, messageId, txSignature);
-      } catch (err) {
-        console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
-        await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
       }
     }
-  }
-
-  // ——— Resto del flujo manual de análisis ———
-
-  // 1) Filtrar destinatarios para la alerta inicial:
-  const alertTargets = Object.entries(users)
-    .filter(([id, u]) => {
-      if (!u.subscribed || !u.privateKey) return false;
-      switch (u.newTokenNotif || "always") {
-        case "always":
-          return true;
-        case "pauseDuringTrade":
-          return !buyReferenceMap[id];
-        case "off":
-          return false;
-        default:
-          return true;
+  
+    // ——— Resto del flujo manual de análisis ———
+  
+    // 1) Filtrar destinatarios para la alerta inicial:
+    const alertTargets = Object.entries(users)
+      .filter(([id, u]) => {
+        if (!u.subscribed || !u.privateKey) return false;
+        switch (u.newTokenNotif || "always") {
+          case "always":
+            return true;
+          case "pauseDuringTrade":
+            return !buyReferenceMap[id];
+          case "off":
+            return false;
+          default:
+            return true;
+        }
+      })
+      .map(([id]) => Number(id));
+  
+    // 2) Enviar “🚨 Token incoming…” sólo a esos targets
+    const alertPromises = alertTargets.map(chatId =>
+      bot.sendMessage(
+        chatId,
+        "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
+        { parse_mode: "Markdown" }
+      )
+      .then(msg => ({ chatId, messageId: msg.message_id }))
+      .catch(() => null)
+    );
+    const alertResults = await Promise.all(alertPromises);
+  
+    // 3) Borrar cada alerta tras 60s
+    for (const res of alertResults) {
+      if (res) {
+        setTimeout(() => {
+          bot.deleteMessage(res.chatId, res.messageId).catch(() => {});
+        }, 60_000);
       }
-    })
-    .map(([id]) => Number(id));
-
-  // 2) Enviar “🚨 Token incoming…” sólo a esos targets
-  const alertPromises = alertTargets.map(chatId =>
-    bot.sendMessage(
-      chatId,
-      "🚨 Token incoming. *Prepare to Buy‼️* 🚨",
-      { parse_mode: "Markdown" }
-    )
-    .then(msg => ({ chatId, messageId: msg.message_id }))
-    .catch(() => null)
-  );
-  const alertResults = await Promise.all(alertPromises);
-
-  // 3) Borrar cada alerta tras 60s
-  for (const res of alertResults) {
-    if (res) {
-      setTimeout(() => {
-        bot.deleteMessage(res.chatId, res.messageId).catch(() => {});
-      }, 60_000);
     }
-  }
-
-  // 4) Obtener datos en SolanaTracker → MORALIS y DEXSCREENER en paralelo
-  const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
-  if (!pairAddress) return;
-
-   // 4a) Promesas para ambas fuentes
-   const moralisP = getDexScreenerData(pairAddress)
-   .then(data => {
-     // Moralis devuelve data o null; errores 404 entran al catch
-     return data ? { source: 'moralis', data } : null;
-   })
-   .catch(err => {
-     // Si es 404, lo desechamos; otros errores los volvemos nulos también
-     if (err.response?.status === 404) return null;
-     console.warn('⚠️ Moralis error (non-404):', err.message);
-     return null;
-   });
-
- const dexscreenerP = fetchDexscreenerData(pairAddress)
-   .then(raw => {
-     // Sólo válido si dexId es pumpswap
-     if (raw?.pair?.dexId === 'pumpswap') {
-       return { source: 'dexscreener', data: raw.pair };
-     }
-     return null;
-   })
-   .catch(err => {
-     console.warn('⚠️ DexScreener error:', err.message);
-     return null;
-   });
-
- // 4b) Esperar ambas y elegir la que venga primero con datos válidos
- const [moralisRes, dexsRes] = await Promise.all([moralisP, dexscreenerP]);
- const firstResult = moralisRes || dexsRes;
- if (!firstResult) {
-   // abortar y limpiar alerts
-   for (const res of alertResults) {
-     if (res) {
-       await bot.editMessageText(
-         "⚠️ Token discarded due to insufficient info for analysis.",
-         {
-           chat_id: res.chatId,
-           message_id: res.messageId,
-           parse_mode: "Markdown"
-         }
-       ).catch(() => {});
-     }
-   }
-   return;
- }
-
-  // 4c) Normalizar dexData según la fuente
-  const { source, data: rawData } = firstResult;
-  let dexData;
-  if (source === 'moralis') {
-    dexData = rawData;
-  } else {
-    dexData = {
-      symbol:             rawData.baseToken.symbol,
-      name:               rawData.baseToken.name,
-      priceUsd:           rawData.priceUsd,
-      priceSol:           rawData.priceNative,
-      liquidity:          rawData.liquidity.usd,
-      liquidityChange24h: rawData.priceChange.h24,
-      buys24h:            rawData.txns.h24.buys,
-      sells24h:           rawData.txns.h24.sells,
-      buyVolume24h:       rawData.volume.h24,
-      sellVolume24h:      0,
-      priceChange24h:     rawData.priceChange.h24,
-      chain:              rawData.chainId,
-      dex:                rawData.dexId,
-      tokenLogo:          null
-    };
-  }
-
-  // 5) Obtener datos de riesgo + logo fallback
-  const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
-  if (!rugCheckData) return;
-
-  // ——— AUTO-BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
-  for (const [chatId, user] of Object.entries(users)) {
-    if (
-      user.subscribed &&
-      user.privateKey &&
-      user.autoBuyEnabled &&
-      user.autoBuyTrigger === 'notify'
-    ) {
-      const amountSOL = user.autoBuyAmount;
-      const mint      = mintData.mintAddress;
-      user.autoBuyEnabled = false;
-      saveUsers();
-
-      try {
-        const sent      = await bot.sendMessage(
-          chatId,
-          `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
-        );
-        const messageId = sent.message_id;
-
-        const txSignature = await buyToken(chatId, mint, amountSOL);
-        if (!txSignature) {
+  
+    // 4) Obtener datos en SolanaTracker → Moralis → RugCheck
+    const pairAddress = await getPairAddressFromSolanaTracker(mintData.mintAddress);
+    if (!pairAddress) return;
+  
+    const dexData = await getDexScreenerData(pairAddress);
+    if (!dexData) {
+      // si no hay dexData, editar cada alerta existente
+      for (const res of alertResults) {
+        if (res) {
           await bot.editMessageText(
-            `❌ Auto-Buy failed for ${mint}.`,
-            { chat_id: chatId, message_id }
-          );
-          continue;
+            "⚠️ Token discarded due to insufficient info for analysis.",
+            {
+              chat_id: res.chatId,
+              message_id: res.messageId,
+              parse_mode: "Markdown"
+            }
+          ).catch(() => {});
         }
-
-        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
-        await confirmBuy(chatId, swapDetails, messageId, txSignature);
-      } catch (err) {
-        console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
-        await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
+      }
+      return;
+    }
+  
+    const rugCheckData = await fetchRugCheckData(mintData.mintAddress);
+    if (!rugCheckData) return;
+  
+    // ——— AUTO-BUY INMEDIATO AL NOTIFICAR EL TOKEN ———
+    for (const [chatId, user] of Object.entries(users)) {
+      if (
+        user.subscribed &&
+        user.privateKey &&
+        user.autoBuyEnabled &&
+        user.autoBuyTrigger === 'notify'
+      ) {
+        const amountSOL = user.autoBuyAmount;
+        const mint      = mintData.mintAddress;
+        user.autoBuyEnabled = false;
+        saveUsers();
+  
+        try {
+          const sent      = await bot.sendMessage(
+            chatId,
+            `🛒 Auto-buying ${amountSOL} SOL for ${mint}…`
+          );
+          const messageId = sent.message_id;
+  
+          const txSignature = await buyToken(chatId, mint, amountSOL);
+          if (!txSignature) {
+            await bot.editMessageText(
+              `❌ Auto-Buy failed for ${mint}.`,
+              { chat_id: chatId, message_id }
+            );
+            continue;
+          }
+  
+          const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          await confirmBuy(chatId, swapDetails, messageId, txSignature);
+        } catch (err) {
+          console.error(`❌ Error en Auto-Buy para ${chatId}:`, err);
+          await bot.sendMessage(chatId, `❌ Auto-Buy error: ${err.message}`);
+        }
       }
     }
+  
+    // ——— Continuar con tu flujo de notificaciones ———
+    const priceChange24h = dexData.priceChange24h !== "N/A"
+      ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
+      : "N/A";
+    const liquidityChange = dexData.liquidityChange24h || 0;
+    const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
+    const migrationTimestamp = mintData.date || Date.now();
+    const age = calculateAge(migrationTimestamp);
+    const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
+    const buys24h   = Number(dexData.buys24h)   || 0;
+    const sells24h  = Number(dexData.sells24h)  || 0;
+    const buyers24h = Number(dexData.buyers24h) || 0;
+    const sellers24h= Number(dexData.sellers24h)|| 0;
+  
+    saveTokenData(dexData, mintData, rugCheckData, age, priceChange24h);
+  
+    let message = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
+    message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
+    message += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(liquidity24hFormatted)}\n\n`;
+    message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
+    message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
+    message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n`;
+    message += `🟩 Buys 24h: ${buys24h} 🟥 Sells 24h: ${sells24h}\n`;
+    message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
+    message += `🧑‍🤝‍🧑 Buyers: ${buyers24h} 👤 Sellers: ${sellers24h}\n\n`;
+    message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
+    message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
+    message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
+    message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
+    message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)} ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
+    message += `📆 **Created:** ${createdDate}\n\n`;
+    message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
+  
+    const imageUrl = dexData.tokenLogo || rugCheckData.imageUrl || null;
+    await notifySubscribers(message, imageUrl, mintData.mintAddress);
   }
-
-  // ——— Continuar con tu flujo de notificaciones ———
-  const priceChange24h = dexData.priceChange24h !== "N/A"
-  ? `${dexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(dexData.priceChange24h).toFixed(2)}%`
-  : "N/A";
-const liquidityChange = dexData.liquidityChange24h || 0;
-const liquidity24hFormatted = `${liquidityChange >= 0 ? "🟢 +" : "🔴 "}${Number(liquidityChange).toFixed(2)}%`;
-const migrationTimestamp = mintData.date || Date.now();
-const age = calculateAge(migrationTimestamp);
-const createdDate = formatTimestampToUTCandEST(migrationTimestamp);
-const buys24h   = Number(dexData.buys24h)   || 0;
-const sells24h  = Number(dexData.sells24h)  || 0;
-const buyers24h = Number(dexData.buyers24h) || 0;
-const sellers24h= Number(dexData.sellers24h)|| 0;
-
-// 5) Guardar todos los datos junto al origen (source)
-saveTokenData(dexData, mintData, rugCheckData, source, age, priceChange24h);
-
-// 6) Construir mensaje según la fuente
-let message;
-if (source === 'moralis') {
-  // Plantilla Moralis
-  const pc24 = dexData.liquidityChange24h !== "N/A"
-    ? `${dexData.liquidityChange24h >= 0 ? "🟢 +" : "🔴 "}${Number(dexData.liquidityChange24h).toFixed(2)}%`
-    : "N/A";
-  message  = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-  message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)}  📊 **24H:** ${escapeMarkdown(pc24)}\n\n`;
-  message += `💲 **USD:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-  message += `💰 **SOL:** ${escapeMarkdown(dexData.priceSol)}\n`;
-  message += `💧 **Liquidity:** $${Number(dexData.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n`;
-  message += `🟩 Buys 24h: ${dexData.buys24h}  🟥 Sells 24h: ${dexData.sells24h}\n`;
-  message += `💵 Buy Vol 24h: $${Number(dexData.buyVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
-  message += `💸 Sell Vol 24h: $${Number(dexData.sellVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n`;
-  message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-  message += `🔒 **LPLOCKED:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-  message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-  message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-  message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)}  ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-  message += `📆 **Created:** ${createdDate}\n\n`;
-  message += `🔗 **Token:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-} else {
-  // Plantilla DexScreener
-  message  = `💎 **Symbol:** ${escapeMarkdown(dexData.symbol)}\n`;
-  message += `💎 **Name:** ${escapeMarkdown(dexData.name)}\n`;
-  message += `⏳ **Age:** ${escapeMarkdown(age)}  📊 **24H Change:** ${escapeMarkdown(dexData.priceChange24h)}%\n\n`;
-  message += `💲 **USD Price:** ${escapeMarkdown(dexData.priceUsd)}\n`;
-  message += `💰 **SOL Price:** ${escapeMarkdown(dexData.priceSol)}\n`;
-  message += `💧 **Liquidity (USD):** $${Number(dexData.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}\n\n`;
-  message += `🟩 **Buys 24h:** ${dexData.buys24h}   🟥 **Sells 24h:** ${dexData.sells24h}\n`;
-  message += `💵 **Volume 24h:** $${Number(dexData.buyVolume24h + dexData.sellVolume24h).toLocaleString(undefined,{maximumFractionDigits:2})}\n\n`;
-  message += `**${escapeMarkdown(rugCheckData.riskLevel)}:** ${escapeMarkdown(rugCheckData.riskDescription)}\n`;
-  message += `🔒 **LP Locked:** ${escapeMarkdown(rugCheckData.lpLocked)}%\n`;
-  message += `🔐 **Freeze Authority:** ${escapeMarkdown(rugCheckData.freezeAuthority)}\n`;
-  message += `🪙 **Mint Authority:** ${escapeMarkdown(rugCheckData.mintAuthority)}\n\n`;
-  message += `⛓️ **Chain:** ${escapeMarkdown(dexData.chain)}   ⚡ **Dex:** ${escapeMarkdown(dexData.dex)}\n`;
-  message += `🔗 **Token Address:** \`${escapeMarkdown(mintData.mintAddress)}\`\n\n`;
-}
-
-// 7) Enviar con fallback de imagen y botones
-const imageUrl = dexData.tokenLogo || rugCheckData.imageUrl || null;
-await notifySubscribers(message, imageUrl, mintData.mintAddress);
-}
   
   async function notifySubscribers(message, imageUrl, mint) {
     if (!mint) {
@@ -3018,9 +2928,9 @@ bot.on('callback_query', async (query) => {
   });
 
   bot.on("callback_query", async (query) => {
-    const chatId    = query.message.chat.id;
+    const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
-    const data      = query.data;
+    const data = query.data;
   
     try {
       // ─────────────────────────────────────────────
@@ -3039,191 +2949,153 @@ bot.on('callback_query', async (query) => {
       if (data.startsWith("refresh_")) {
         const mint = data.split("_")[1];
   
-        // 1) Leemos los datos estáticos guardados
-        const original = getTokenInfo(mint);
-        if (!original) {
+        // Se obtienen los datos guardados (estáticos) en tokens.json
+        const originalTokenData = getTokenInfo(mint);
+        if (!originalTokenData) {
           await bot.answerCallbackQuery(query.id, { text: "Token not found." });
           return;
         }
   
-        // 2) Pair address (Moralis o DexScreener)
-        const pairAddress = original.pair || original.pairAddress;
+        // Se obtiene el pairAddress almacenado en el token
+        const pairAddress = originalTokenData.pair || originalTokenData.pairAddress;
         if (!pairAddress) {
           await bot.answerCallbackQuery(query.id, { text: "Pair not available." });
           return;
         }
   
-        // 3) Riesgo sólo cada 16 refresh
-        refreshRiskCount[mint] = (refreshRiskCount[mint] || 0) + 1;
+        // Actualización de datos de riesgo solo cada 10 refresh para este token:
+        if (!refreshRiskCount[mint]) {
+          refreshRiskCount[mint] = 1;
+        } else {
+          refreshRiskCount[mint]++;
+        }
         let updatedRiskLevel, updatedWarning;
         if (refreshRiskCount[mint] % 16 === 1) {
-          const rc = await fetchRugCheckData(mint);
-          if (rc) {
-            updatedRiskLevel = rc.riskLevel;
-            updatedWarning   = rc.riskDescription;
+          // Solo en el primer refresh (y cada 16 refresh) se actualiza la data de riesgo
+          const rugCheckData = await fetchRugCheckData(mint);
+          if (rugCheckData) {
+            updatedRiskLevel = rugCheckData.riskLevel;
+            updatedWarning = rugCheckData.riskDescription;
+            // Opcional: se podría actualizar la información en originalTokenData para cachear la nueva data
           } else {
-            updatedRiskLevel = original.riskLevel;
-            updatedWarning   = original.warning;
+            updatedRiskLevel = originalTokenData.riskLevel;
+            updatedWarning = originalTokenData.warning;
           }
         } else {
-          updatedRiskLevel = original.riskLevel;
-          updatedWarning   = original.warning;
+          // En los refrescos intermedios se usa la data ya almacenada
+          updatedRiskLevel = originalTokenData.riskLevel;
+          updatedWarning = originalTokenData.warning;
         }
   
-        // 4) Live market: Moralis vs DexScreener en paralelo
-        const moralisP = getDexScreenerData(pairAddress)
-          .then(d => d ? { source: 'moralis', data: d } : null)
-          .catch(() => null);
-  
-        const dexsP = fetchDexscreenerData(pairAddress)
-          .then(raw => raw?.pair?.dexId === 'pumpswap'
-            ? { source: 'dexscreener', data: raw.pair }
-            : null
-          )
-          .catch(() => null);
-  
-        const [morRes, dexRes] = await Promise.all([moralisP, dexsP]);
-        const first = morRes || dexRes;
-        if (!first) {
+        // Obtener datos "live" de mercado (actualización siempre)
+        let updatedDexData;
+        try {
+          updatedDexData = await getDexScreenerData(pairAddress);
+        } catch (err) {
+          await bot.answerCallbackQuery(query.id, { text: "Error updating data." });
+          return;
+        }
+        if (!updatedDexData) {
           await bot.answerCallbackQuery(query.id, { text: "Could not fetch updated data." });
           return;
         }
-
-  // 5) Normalizar updatedDexData
-  let upd;
-  if (first.source === 'moralis') {
-    upd = first.data;
-  } else {
-    const r = first.data;
-    upd = {
-      symbol:             r.baseToken.symbol,
-      name:               r.baseToken.name,
-      priceUsd:           r.priceUsd,
-      priceSol:           r.priceNative,
-      liquidity:          r.liquidity.usd,
-      liquidityChange24h: r.priceChange.h24,
-      buys24h:            r.txns.h24.buys,
-      sells24h:           r.txns.h24.sells,
-      buyVolume24h:       r.volume.h24,
-      sellVolume24h:      0,
-      buyers24h:          r.txns.h24.buys,
-      sellers24h:         r.txns.h24.sells,
-      chain:              r.chainId,
-      dex:                r.dexId,
-    };
-  }
-
-  // 6) Calcular y formatear
-  const age         = calculateAge(original.migrationDate) || "N/A";
-  const createdDate = formatTimestampToUTCandEST(original.migrationDate);
-  const pc24        = !isNaN(Number(upd.priceChange24h))
-    ? `${upd.priceChange24h >= 0 ? "🟢 +" : "🔴 "}${Number(upd.priceChange24h).toFixed(2)}%`
-    : "N/A";
-  const liveUsd     = !isNaN(Number(upd.priceUsd))
-    ? Number(upd.priceUsd).toFixed(6) : "N/A";
-  const liveSol     = !isNaN(Number(upd.priceSol))
-    ? Number(upd.priceSol).toFixed(9) : "N/A";
-  const liveLiq     = !isNaN(Number(upd.liquidity))
-    ? Number(upd.liquidity).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})
-    : "N/A";
-
-  // 7) Reconstruir mensaje según la fuente
-  let updatedMessage;
-  if (first.source === 'moralis') {
-    // Moralis: mantenemos estructura original
-    updatedMessage =
-      `💎 **Symbol:** ${escapeMarkdown(upd.symbol)}\n` +
-      `💎 **Name:** ${escapeMarkdown(upd.name)}\n` +
-      `💲 **USD:** ${escapeMarkdown(String(upd.priceUsd))}\n` +
-      `💰 **SOL:** ${escapeMarkdown(String(upd.priceSol))}\n\n` +
-
-      `📊 **Live Market Update:**\n` +
-      `⏳ **Age:** ${escapeMarkdown(age)}  📊 **24H:** ${escapeMarkdown(pc24)}\n` +
-      `💵 **Buys 24h:** ${upd.buys24h}  🟥 **Sells 24h:** ${upd.sells24h}\n` +
-      `💵 Buy Vol 24h: $${Number(upd.buyVolume24h).toLocaleString()}\n\n` +
-
-      `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n` +
-      `🔒 **LPLOCKED:** ${escapeMarkdown(String(original.LPLOCKED))}%\n` +
-      `🔐 **Freeze Authority:** ${escapeMarkdown(String(original.freezeAuthority||"N/A"))}\n` +
-      `🪙 **Mint Authority:** ${escapeMarkdown(String(original.mintAuthority||"N/A"))}\n\n` +
-
-      `⛓️ **Chain:** ${escapeMarkdown(upd.chain)}  ⚡ **Dex:** ${escapeMarkdown(upd.dex)}\n` +
-      `📆 **Created:** ${createdDate}\n\n` +
-      `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
-  } else {
-    // DexScreener: incluimos USD/SOL estáticos y estructura adaptada
-    updatedMessage =
-      `💎 **Symbol:** ${escapeMarkdown(upd.symbol)}\n` +
-      `💎 **Name:** ${escapeMarkdown(upd.name)}\n` +
-      `💲 **USD Price:** ${escapeMarkdown(String(upd.priceUsd))}\n` +
-      `💰 **SOL Price:** ${escapeMarkdown(String(upd.priceSol))}\n\n` +
-      `📊 **Live Market Update:**\n` +
-      `⏳ **Age:** ${escapeMarkdown(age)}  📊 **24H:** ${escapeMarkdown(pc24)}\n` +
-      `💲 **USD:** ${escapeMarkdown(liveUsd)}\n` +
-      `💰 **SOL:** ${escapeMarkdown(liveSol)}\n` +
-      `💧 **Liquidity:** $${escapeMarkdown(liveLiq)}\n\n` +
-      `🟩 **Buys 24h:** ${upd.buys24h}   🟥 **Sells 24h:** ${upd.sells24h}\n` +
-      `💵 **Volume 24h:** $${Number((upd.buyVolume24h||0)+(upd.sellVolume24h||0)).toLocaleString()}\n\n` +
-      `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n` +
-      `🔒 **LP Locked:** ${escapeMarkdown(String(original.LPLOCKED))}%\n` +
-      `🔐 **Freeze Authority:** ${escapeMarkdown(String(original.freezeAuthority||"N/A"))}\n` +
-      `🪙 **Mint Authority:** ${escapeMarkdown(String(original.mintAuthority||"N/A"))}\n\n` +
-      `⛓️ **Chain:** ${escapeMarkdown(upd.chain)}   ⚡ **Dex:** ${escapeMarkdown(upd.dex)}\n` +
-      `🔗 **Token Address:** \`${escapeMarkdown(mint)}\`\n`;
-  }
-
-  const reply_markup = {
-    inline_keyboard: [
-      [
-        { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-        { text: "📊 Chart+Txns",   url: `https://app.gemsniping.com/solana/${mint}` }
+  
+        // Calcular y formatear datos
+        const age = calculateAge(originalTokenData.migrationDate) || "N/A";
+        const createdDate = formatTimestampToUTCandEST(originalTokenData.migrationDate);
+        const priceChange24h = updatedDexData.priceChange24h !== "N/A" && !isNaN(Number(updatedDexData.priceChange24h))
+          ? `${Number(updatedDexData.priceChange24h) > 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.priceChange24h).toFixed(2)}%`
+          : "N/A";
+        const liveUsd = !isNaN(Number(updatedDexData.priceUsd))
+          ? Number(updatedDexData.priceUsd).toFixed(6)
+          : "N/A";
+        const liveSol = !isNaN(Number(updatedDexData.priceSol))
+          ? Number(updatedDexData.priceSol).toFixed(9)
+          : "N/A";
+        const liveLiquidity = !isNaN(Number(updatedDexData.liquidity))
+          ? Number(updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : "N/A";
+  
+        // Construir el mensaje actualizado combinando datos guardados y en vivo
+        let updatedMessage = `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n`;
+        updatedMessage += `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n`;
+        updatedMessage += `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n`;
+        updatedMessage += `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n`;
+        
+        updatedMessage += `📊 **Live Market Update:**\n`;
+        updatedMessage += `⏳ **Age:** ${escapeMarkdown(age)} 📊 **24H:** ${escapeMarkdown(priceChange24h)}\n`;
+        updatedMessage += `💲 **USD:** ${escapeMarkdown(liveUsd)}\n`;
+        updatedMessage += `💰 **SOL:** ${escapeMarkdown(liveSol)}\n`;
+        updatedMessage += `💧 **Liquidity:** $${escapeMarkdown(liveLiquidity)}\n\n`;
+        
+        updatedMessage += `🟩 **Buys 24h:** ${updatedDexData.buys24h ?? "N/A"} 🟥 **Sells 24h:** ${updatedDexData.sells24h ?? "N/A"}\n`;
+        updatedMessage += `💵 Buy Vol 24h: $${Number(updatedDexData.buyVolume24h ?? 0).toLocaleString()}\n`;
+        updatedMessage += `💸 Sell Vol 24h: $${Number(updatedDexData.sellVolume24h ?? 0).toLocaleString()}\n`;
+        updatedMessage += `🧑‍🤝‍🧑 Buyers: ${updatedDexData.buyers24h ?? "N/A"} 👤 Sellers: ${updatedDexData.sellers24h ?? "N/A"}\n`;
+        const liqChange = updatedDexData.liquidityChange24h !== "N/A" && !isNaN(Number(updatedDexData.liquidityChange24h))
+          ? `${Number(updatedDexData.liquidityChange24h) >= 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.liquidityChange24h).toFixed(2)}%`
+          : "N/A";
+        updatedMessage += `📊 **Liquidity Δ 24h:** ${liqChange}\n\n`;
+        
+        updatedMessage += `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n`;
+        updatedMessage += `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n`;
+        updatedMessage += `🔐 **Freeze Authority:** ${escapeMarkdown(String(originalTokenData.freezeAuthority || "N/A"))}\n`;
+        updatedMessage += `🪙 **Mint Authority:** ${escapeMarkdown(String(originalTokenData.mintAuthority || "N/A"))}\n\n`;
+        
+        updatedMessage += `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)} ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n`;
+        updatedMessage += `📆 **Created:** ${createdDate}\n\n`;
+        updatedMessage += `🔗 **Token:** \`${escapeMarkdown(mint)}\`\n`;
+        if (originalTokenData.signature) {
+          updatedMessage += `🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``;
+        }
+        
+        const reply_markup = {
+          inline_keyboard: [
+            [
+                { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+                { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
+              ],
+              [
+                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
+                { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
       ],
       [
-        { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-        { text: "💰 0.2 Sol",  callback_data: `buy_${mint}_0.2` },
-        { text: "💰 0.3 Sol",  callback_data: `buy_${mint}_0.3` }
-      ],
-      [
-        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-        { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-        { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-      ],
-      [
-        { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
-      ]
-    ]
-  };
-
-  // 9) Editar el mensaje
-  if (query.message.photo) {
-    await bot.editMessageCaption(updatedMessage, {
-      chat_id:    chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      reply_markup
-    });
-  } else {
-    await bot.editMessageText(updatedMessage, {
-      chat_id:    chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      reply_markup
-    });
-  }
-
-  await bot.answerCallbackQuery(query.id, { text: "✅ Data updated." });
-  return;
-}
-
-// ─────────────────────────────────────────────
-// Otros callbacks (buy_, sell_, etc.)
-// ─────────────────────────────────────────────
-await bot.answerCallbackQuery(query.id);
-} catch (err) {
-console.error("❌ Error en callback_query:", err);
-await bot.answerCallbackQuery(query.id, { text: "An error occurred." });
-}
-});
+                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
+                { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
+              ],
+              [
+                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+            ]
+          ]
+        };
+  
+        if (query.message.photo) {
+          await bot.editMessageCaption(updatedMessage, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "Markdown",
+            reply_markup
+          });
+        } else {
+          await bot.editMessageText(updatedMessage, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: "Markdown",
+            reply_markup
+          });
+        }
+  
+        await bot.answerCallbackQuery(query.id, { text: "Data updated." });
+      } else {
+        await bot.answerCallbackQuery(query.id);
+      }
+    } catch (err) {
+      console.error("❌ Error en callback_query:", err);
+      await bot.answerCallbackQuery(query.id, { text: "An error occurred." });
+    }
+  });
 
 
 function formatTimestampToUTCandEST(timestamp) {
