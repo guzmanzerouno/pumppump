@@ -3081,111 +3081,81 @@ bot.on('callback_query', async (query) => {
         return;
       }
 
-      // ── 2) Calcular tiempos y cambios
-      const age         = calculateAge(original.migrationDate) || "N/A";
-      const createdDate = formatTimestampToUTCandEST(original.migrationDate);
-      const priceChange24h = updatedDexData.priceChange24h !== "N/A"
+      // ── Cálculos comunes ──
+      const age         = calculateAge(originalTokenData.migrationDate) || "N/A";
+      const createdDate = formatTimestampToUTCandEST(originalTokenData.migrationDate);
+      const priceChange = updatedDexData.priceChange24h !== "N/A"
         ? `${updatedDexData.priceChange24h > 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.priceChange24h).toFixed(2)}%`
         : "N/A";
-      const liveUsd = !isNaN(Number(updatedDexData.priceUsd))
-        ? Number(updatedDexData.priceUsd).toFixed(6)
-        : "N/A";
-      const liveSol = !isNaN(Number(updatedDexData.priceSol))
-        ? Number(updatedDexData.priceSol).toFixed(9)
-        : "N/A";
-      const liveLiq = !isNaN(Number(updatedDexData.liquidity))
-        ? Number(updatedDexData.liquidity)
-            .toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})
+      const liveUsd     = isNaN(+updatedDexData.priceUsd) ? "N/A" : (+updatedDexData.priceUsd).toFixed(6);
+      const liveSol     = isNaN(+updatedDexData.priceSol) ? "N/A" : (+updatedDexData.priceSol).toFixed(9);
+      const liveLiq     = isNaN(+updatedDexData.liquidity)
+        ? "N/A"
+        : (+updatedDexData.liquidity).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+      const liqChange   = (!isNaN(+updatedDexData.liquidityChange24h) && updatedDexData.liquidityChange24h !== "N/A")
+        ? `${updatedDexData.liquidityChange24h >= 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.liquidityChange24h).toFixed(2)}%`
         : "N/A";
 
-      // ── 3) Construir mensaje
+      // ── Construir mensaje ──
       let updatedMessage =
-        `💎 **Symbol:** ${escapeMarkdown(original.symbol)}\n` +
-        `💎 **Name:** ${escapeMarkdown(original.name)}\n` +
-        `💲 **USD:** ${escapeMarkdown(String(original.USD))}\n` +
-        `💰 **SOL:** ${escapeMarkdown(String(original.SOL))}\n\n` +
+        `💎 **Symbol:** ${escapeMarkdown(originalTokenData.symbol)}\n` +
+        `💎 **Name:** ${escapeMarkdown(originalTokenData.name)}\n` +
+        `💲 **USD:** ${escapeMarkdown(String(originalTokenData.USD))}\n` +
+        `💰 **SOL:** ${escapeMarkdown(String(originalTokenData.SOL))}\n\n` +
 
         `📊 **Live Market Update:**\n` +
-        `⏳ **Age:** ${escapeMarkdown(age)}  📈 **Δ24H:** ${escapeMarkdown(priceChange24h)}\n` +
+        `⏳ **Age:** ${escapeMarkdown(age)}  📈 **Δ24H:** ${escapeMarkdown(priceChange)}\n` +
         `💲 **USD:** ${escapeMarkdown(liveUsd)}\n` +
         `💰 **SOL:** ${escapeMarkdown(liveSol)}\n` +
         `💧 **Liquidity:** $${escapeMarkdown(liveLiq)}\n\n` +
 
-        // Siempre mostramos buys/sells
         `🟩 **Buys 24h:** ${updatedDexData.buys24h ?? "N/A"}  🟥 **Sells 24h:** ${updatedDexData.sells24h ?? "N/A"}\n`;
 
-      // Sólo Moralis tiene volúmenes y contadores de addresses
-      if (dataSource === 'moralis') {
+      if (dataSource === "moralis") {
         updatedMessage +=
           `💵 **Buy Vol 24h:** $${Number(updatedDexData.buyVolume24h || 0).toLocaleString()}\n` +
           `💸 **Sell Vol 24h:** $${Number(updatedDexData.sellVolume24h || 0).toLocaleString()}\n` +
           `👥 **Buyers:** ${updatedDexData.buyers24h ?? "N/A"}  **Sellers:** ${updatedDexData.sellers24h ?? "N/A"}\n`;
       }
 
-      const liqChange = updatedDexData.liquidityChange24h !== "N/A" && !isNaN(Number(updatedDexData.liquidityChange24h))
-        ? `${updatedDexData.liquidityChange24h >= 0 ? "🟢 +" : "🔴 "}${Number(updatedDexData.liquidityChange24h).toFixed(2)}%`
-        : "N/A";
-
-      updatedMessage += `📊 **Liquidity Δ 24h:** ${liqChange}\n\n`;
-
-      // Siempre mostramos rug-check y demás
       updatedMessage +=
+        `📊 **Liquidity Δ 24h:** ${liqChange}\n\n` +
         `**${escapeMarkdown(updatedRiskLevel)}:** ${escapeMarkdown(updatedWarning)}\n` +
-        `🔒 **LPLOCKED:** ${escapeMarkdown(String(original.LPLOCKED))}%\n` +
-        `🔐 **Freeze Authority:** ${escapeMarkdown(String(original.freezeAuthority || "N/A"))}\n` +
-        `🪙 **Mint Authority:** ${escapeMarkdown(String(original.mintAuthority || "N/A"))}\n\n` +
-        `⛓️ **Chain:** ${escapeMarkdown(original.chain)}  ⚡ **Dex:** ${escapeMarkdown(original.dex)}\n` +
+        `🔒 **LPLOCKED:** ${escapeMarkdown(String(originalTokenData.LPLOCKED))}%\n` +
+        `🔐 **Freeze Authority:** ${escapeMarkdown(originalTokenData.freezeAuthority || "N/A")}\n` +
+        `🪙 **Mint Authority:** ${escapeMarkdown(originalTokenData.mintAuthority || "N/A")}\n\n` +
+        `⛓️ **Chain:** ${escapeMarkdown(originalTokenData.chain)}  ⚡ **Dex:** ${escapeMarkdown(originalTokenData.dex)}\n` +
         `📆 **Created:** ${createdDate}\n\n` +
         `🔗 **Token:** \`${escapeMarkdown(mint)}\`` +
-        (original.signature ? `\n🔗 **Signature:** \`${escapeMarkdown(original.signature)}\`` : "");
+        (originalTokenData.signature
+          ? `\n🔗 **Signature:** \`${escapeMarkdown(originalTokenData.signature)}\``
+          : "");
         
-        const reply_markup = {
+         // ── Editar el mensaje ──
+      await bot.editMessageText(updatedMessage, {
+        chat_id:    chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
           inline_keyboard: [
             [
-                { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
-                { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
-              ],
-              [
-                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
-                { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
-                { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
-      ],
-      [
-                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
-                { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
-                { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
-              ],
-              [
-                { text: "💯 Sell MAX", callback_data: `sell_${mint}_max` }
+              { text: "🔄 Refresh Info", callback_data: `refresh_${mint}` },
+              { text: "📊 Chart+Txns",   url: `https://app.gemsniping.com/solana/${mint}` }
             ]
           ]
-        };
-  
-        if (query.message.photo) {
-          await bot.editMessageCaption(updatedMessage, {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            reply_markup
-          });
-        } else {
-          await bot.editMessageText(updatedMessage, {
-            chat_id: chatId,
-            message_id: messageId,
-            parse_mode: "Markdown",
-            reply_markup
-          });
         }
-  
-        await bot.answerCallbackQuery(query.id, { text: "Data updated." });
-      } else {
-        await bot.answerCallbackQuery(query.id);
-      }
-    } catch (err) {
-      console.error("❌ Error en callback_query:", err);
-      await bot.answerCallbackQuery(query.id, { text: "An error occurred." });
+      });
+
+      await bot.answerCallbackQuery(query.id, { text: "Data updated." });
+    } else {
+      await bot.answerCallbackQuery(query.id);
     }
-  });
+  } catch (err) {
+    console.error("❌ Error en callback_query:", err);
+    await bot.answerCallbackQuery(query.id, { text: "An error occurred." });
+  }
+});
 
 
 function formatTimestampToUTCandEST(timestamp) {
