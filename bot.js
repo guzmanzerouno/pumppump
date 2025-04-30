@@ -2457,9 +2457,21 @@ async function analyzeTransaction(signature, forceCheck = false) {
   if (!forceCheck && processedSignatures.has(signature)) return;
   if (!forceCheck) processedSignatures.add(signature);
 
-  // 1) Obtener mint desde la tx
-  const mintData = await getMintAddressFromTransaction(signature);
-  if (!mintData?.mintAddress) return;
+  // 1) Determinar si es signature o mint
+  let mintData;
+  const isMint = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input);
+  if (isMint) {
+    mintData = {
+      mintAddress: input,
+      date:        Date.now(),
+      status:      "Manual Check"
+    };
+  } else {
+    // caso original: input es signature
+    const txData = await getMintAddressFromTransaction(input);
+    if (!txData?.mintAddress) return;
+    mintData = txData;
+  }
 
   // 2) No procesar dos veces el mismo mint
   if (processedMints[mintData.mintAddress]) return;
@@ -4501,43 +4513,18 @@ bot.onText(/^\/clear_swaps(?:\s+(\S+))?$/, async (msg, match) => {
 });
 
 
-// 🔹 Escuchar firmas de transacción o mint addresses en mensajes
-bot.onText(/^check (.+)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const input = match[1].trim(); // Obtiene la entrada después de "check"
+bot.onText(/^\/check (.+)$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const input  = match[1].trim();
 
-    // Validar si es una firma de transacción (Base58 de 87+ caracteres)
-    const isTransactionSignature = /^[A-HJ-NP-Za-km-z1-9]{87,}$/.test(input);
+  // Feedback inmediato
+  await bot.sendMessage(chatId, "🔄 Checking token…");
 
-    bot.sendMessage(chatId, "🔄 Fetching details...");
+  // Llamada al análisis forzada
+  await analyzeTransaction(input, true);
 
-    try {
-        let transactionSignature = null;
-        let mintAddress = input;
-
-        if (isTransactionSignature) {
-            // Caso 1: El usuario ingresó una firma de transacción, buscamos el Mint Address
-            transactionSignature = input;
-            const transactionData = await getMintAddressFromTransaction(transactionSignature);
-
-            if (!transactionData || !transactionData.mintAddress) {
-                bot.sendMessage(chatId, "⚠️ Could not retrieve transaction details.");
-                return;
-            }
-
-            mintAddress = transactionData.mintAddress;
-        }
-
-        // Ejecutar la función principal analyzeTransaction() con el Mint Address
-        const analysisMessage = await analyzeTransaction(mintAddress, chatId);
-
-        // Enviar el resultado solo al usuario que hizo la consulta
-        bot.sendMessage(chatId, analysisMessage, { parse_mode: "Markdown" });
-
-    } catch (error) {
-        console.error("❌ Error processing request:", error);
-        bot.sendMessage(chatId, "❌ Error retrieving data.");
-    }
+  // Opcional: puedes confirmar
+  await bot.sendMessage(chatId, "✅ Check completed.");
 });
 
 // Comando /ip: consulta la IP pública a través del proxy y la devuelve al usuario.
