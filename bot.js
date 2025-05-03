@@ -4370,17 +4370,18 @@ bot.onText(/^\/ip$/, async (msg) => {
   }
 });
 
+
 // ────────────────────────────────
 // 2) Estado interno para el flujo
 // ────────────────────────────────
 const STAGES = {
   MAIN:        'main',
   SLIPPAGE:    'slippage',
-  SLIP_CUSTOM: 'slip_custom',
+  SLIP_CUSTOM:'slip_custom',
   FEE:         'fee',
-  FEE_CUSTOM:  'fee_custom',
+  FEE_CUSTOM: 'fee_custom',
   JITO:        'jito',
-  JITO_CUSTOM: 'jito_custom'
+  JITO_CUSTOM:'jito_custom'
 };
 
 // ────────────────────────────────
@@ -4392,8 +4393,8 @@ bot.onText(/^\/swapsettings$/, async msg => {
   // Inicializar espacio
   users[chatId] = users[chatId] || {};
   users[chatId].swapSettings = users[chatId].swapSettings || {
-    mode: 'ultraV2',              // valor por defecto
-    slippageBps: 50,              // 0.5%
+    mode: 'ultraV2',        // valor por defecto
+    slippageBps: 50,        // 0.5%
     priorityFeeLamports: 1500000, // 0.0015 SOL
     jitoTipLamports: 0
   };
@@ -4504,9 +4505,9 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
     };
 
     return bot.editMessageText(text, {
-      chat_id:      chatId,
-      message_id:   msgId,
-      parse_mode:   "Markdown",
+      chat_id:    chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
       reply_markup: keyboard
     });
   }
@@ -4520,7 +4521,7 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
       `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
       `*Max Slippage*\nChoose a fixed slippage tolerance:`,
       {
-        chat_id: chatId,
+        chat_id:    chatId,
         message_id: msgId,
         parse_mode: "Markdown",
         reply_markup: {
@@ -4557,7 +4558,7 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
       `• Turbo: 0.0035 SOL\n` +
       `• Extreme: 0.0075 SOL`,
       {
-        chat_id: chatId,
+        chat_id:    chatId,
         message_id: msgId,
         parse_mode: "Markdown",
         reply_markup: {
@@ -4578,7 +4579,7 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
   }
 
   // ── Priority Fee fijo ──
-  if (state.stage === STAGES.FEE && data.startsWith('ss_fee_')) {
+  if (state.stage === STAGES.FEE && data.startsWith('ss_fee_') && data !== 'ss_fee_custom') {
     const map = { fast: 1500000, turbo: 3500000, extreme: 7500000 };
     const key = data.split('_')[2];
     swapSettings.priorityFeeLamports = map[key];
@@ -4591,7 +4592,7 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
       `• Tip 2: 0.002 SOL\n` +
       `• Tip 3: 0.003 SOL`,
       {
-        chat_id: chatId,
+        chat_id:    chatId,
         message_id: msgId,
         parse_mode: "Markdown",
         reply_markup: {
@@ -4615,7 +4616,7 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
   }
 
   // ── Jito fijo / off ──
-  if (state.stage === STAGES.JITO && data.startsWith('ss_jito_')) {
+  if (state.stage === STAGES.JITO && (data.startsWith('ss_jito_'))) {
     if (data === 'ss_jito_off') {
       swapSettings.jitoTipLamports = 0;
     } else {
@@ -4631,14 +4632,14 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
                     : 'Off'}.\n` +
       `Use /swapsettings to review or change.`,
       {
-        chat_id: chatId,
+        chat_id:    chatId,
         message_id: msgId,
         parse_mode: "Markdown"
       }
     );
   }
 
-}); // <— cierre correcto de callback_query
+}); // <-- cierre de bot.on('callback_query'
 
 // ────────────────────────────────
 // 5) Captura de mensajes de texto para custom inputs
@@ -4647,55 +4648,47 @@ bot.on('message', async msg => {
   const chatId = msg.chat.id;
   const text   = msg.text?.trim();
   if (!text || !users[chatId]?.swapState) return;
-  const state    = users[chatId].swapState;
+  const state = users[chatId].swapState;
   const settings = users[chatId].swapSettings;
 
   // Slippage custom
   if (state.stage === STAGES.SLIP_CUSTOM) {
     const val = Number(text);
-    if (!val || val < 1 || val > 100) {
+    if (!val || val<1 || val>100) {
       return bot.sendMessage(chatId, "⚠️ Enter a number between 1 and 100.");
     }
-    settings.slippageBps = Math.round(val * 100);
+    settings.slippageBps = Math.round(val*100);
     state.stage = STAGES.FEE;
     saveUsers();
     // borrar el prompt del usuario
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+    await bot.deleteMessage(chatId, msg.message_id).catch(()=>{});
     // reenviar prioridad de fee
-    return bot.emit('callback_query', {
-      message: { chat: { id: chatId }, message_id: msg.message_id },
-      data: 'ss_fee_fast',
-      id: null
-    });
+    return bot.emit('callback_query', { message:{chat:{id:chatId}, message_id:msg.message_id}, data:'ss_fee_fast', id:null });
   }
 
   // Fee custom
   if (state.stage === STAGES.FEE_CUSTOM) {
     const sol = Number(text);
-    if (!sol || sol <= 0) {
+    if (!sol || sol<=0) {
       return bot.sendMessage(chatId, "⚠️ Enter a positive SOL value (e.g. 0.002).");
     }
-    settings.priorityFeeLamports = Math.floor(sol * 1e9);
+    settings.priorityFeeLamports = Math.floor(sol*1e9);
     state.stage = STAGES.JITO;
     saveUsers();
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-    return bot.emit('callback_query', {
-      message: { chat: { id: chatId }, message_id: msg.message_id },
-      data: 'ss_jito_1000000',
-      id: null
-    });
+    await bot.deleteMessage(chatId, msg.message_id).catch(()=>{});
+    return bot.emit('callback_query', { message:{chat:{id:chatId}, message_id:msg.message_id}, data:'ss_jito_1000000', id:null });
   }
 
   // Jito custom
   if (state.stage === STAGES.JITO_CUSTOM) {
     const sol = Number(text);
-    if (!sol || sol < 0) {
+    if (!sol || sol<0) {
       return bot.sendMessage(chatId, "⚠️ Enter a non-negative SOL value (e.g. 0.001).");
     }
-    settings.jitoTipLamports = Math.floor(sol * 1e9);
+    settings.jitoTipLamports = Math.floor(sol*1e9);
     delete users[chatId].swapState;
     saveUsers();
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+    await bot.deleteMessage(chatId, msg.message_id).catch(()=>{});
     return bot.sendMessage(chatId,
       `✅ Manual swap settings saved! Slippage: ${(settings.slippageBps/100).toFixed(2)}%, ` +
       `Fee: ${(settings.priorityFeeLamports/1e9).toFixed(6)} SOL, ` +
@@ -4705,7 +4698,6 @@ bot.on('message', async msg => {
     );
   }
 });
-
 
 // 🔥 Cargar suscriptores al iniciar
 loadUsers();
