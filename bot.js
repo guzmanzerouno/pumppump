@@ -4370,13 +4370,6 @@ bot.onText(/^\/ip$/, async (msg) => {
   }
 });
 
-// ────────────────────────────────
-// 1) Registrar el comando en el menú principal
-// ────────────────────────────────
-bot.setMyCommands([
-  // …tus otros comandos…
-  { command: 'swapsettings', description: '⚙️ Configure swap settings (Ultra V2 or Manual)' },
-]);
 
 // ────────────────────────────────
 // 2) Estado interno para el flujo
