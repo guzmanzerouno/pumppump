@@ -4394,8 +4394,8 @@ bot.onText(/^\/swapsettings$/, async msg => {
   users[chatId] = users[chatId] || {};
   users[chatId].swapSettings = users[chatId].swapSettings || {
     mode: 'ultraV2',             // valor por defecto
-    slippageBps: 50,             // 0.5%
-    priorityFeeLamports: 1500000, // 0.0015 SOL
+    dynamicSlippage: true,
+    priorityFeeLamports: 5000000, 
     jitoTipLamports: 0
   };
   users[chatId].swapState = { stage: STAGES.MAIN };
@@ -4437,11 +4437,26 @@ bot.on('callback_query', async query => {
     return bot.deleteMessage(chatId, msgId).catch(() => {});
   }
 
-  // Back: reabrir menú principal
-  if (data === "ss_back") {
-    await bot.deleteMessage(chatId, msgId).catch(() => {});
-    return bot.emit("text", { chat: { id: chatId }, text: "/swapsettings" });
-  }
+  // Back: volver al menú principal
+if (data === "ss_back") {
+  const mainText =
+    `*Swap Settings*\n\n` +
+    `Select how you want me to execute your swaps:`;
+  const mainKeyboard = {
+    inline_keyboard: [
+      [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
+      [{ text: "⚙️ Manual",                callback_data: "ss_manual" }],
+      [{ text: "🔍 View Current",          callback_data: "ss_view"   }],
+      [{ text: "❌ Close",                 callback_data: "ss_close"  }]
+    ]
+  };
+  return bot.editMessageText(mainText, {
+    chat_id:      chatId,
+    message_id:   msgId,
+    parse_mode:   "Markdown",
+    reply_markup: mainKeyboard
+  });
+}
 
   // ── View Current ──
   if (data === 'ss_view') {
@@ -4502,82 +4517,85 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
     });
   }
 
-  // Confirmación de Ultra V2
-  if (data === "ss_confirm") {
-    swapSettings.mode = 'ultraV2';
-    delete users[chatId].swapState;
-    saveUsers();
-    return bot.editMessageText(
-      "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
-      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
-    );
-  }
-
-  // ── Manual: iniciar slippage ──
-  if (data === 'ss_manual') {
-    swapSettings.mode = 'manual';
-    state.stage       = STAGES.SLIPPAGE;
-    saveUsers();
-    return bot.editMessageText(
-      `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
-      `*Max Slippage*\nChoose a fixed slippage tolerance:`,
-      {
-        chat_id:    chatId,
-        message_id: msgId,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "1%",  callback_data: "ss_slip_100"  },
-              { text: "5%",  callback_data: "ss_slip_500"  },
-              { text: "10%", callback_data: "ss_slip_1000" }
-            ],
-            [
-              { text: "15%", callback_data: "ss_slip_1500" },
-              { text: "20%", callback_data: "ss_slip_2000" },
-              { text: "30%", callback_data: "ss_slip_3000" }
-            ],
-            [
-              { text: "◀️ Back", callback_data: "ss_back"  },
-              { text: "❌ Close", callback_data: "ss_close" }
+    // Confirmación de Ultra V2
+    if (data === "ss_confirm") {
+      swapSettings.mode = 'ultraV2';
+      delete users[chatId].swapState;
+      saveUsers();
+      return bot.editMessageText(
+        "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
+        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+      );
+    }
+  
+    // ── Manual: iniciar slippage ──
+    if (data === 'ss_manual') {
+      swapSettings.mode = 'manual';
+      state.stage       = STAGES.SLIPPAGE;
+      saveUsers();
+      return bot.editMessageText(
+        `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
+        `*Max Slippage*\nChoose a fixed slippage tolerance:`,
+        {
+          chat_id:    chatId,
+          message_id: msgId,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "1%",  callback_data: "ss_slip_100"  },
+                { text: "5%",  callback_data: "ss_slip_500"  },
+                { text: "10%", callback_data: "ss_slip_1000" }
+              ],
+              [
+                { text: "20%",     callback_data: "ss_slip_2000"    },
+                { text: "Dynamic", callback_data: "ss_slip_dynamic" }
+              ],
+              [
+                { text: "◀️ Back", callback_data: "ss_back"  },
+                { text: "❌ Close", callback_data: "ss_close" }
+              ]
             ]
-          ]
+          }
         }
+      );
+    }
+  
+    // ── Selección de Slippage ──
+    if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
+      if (data === 'ss_slip_dynamic') {
+        swapSettings.dynamicSlippage = true;
+      } else {
+        swapSettings.slippageBps = parseInt(data.split('_')[2], 10);
+        swapSettings.dynamicSlippage = false;
       }
-    );
-  }
-
-  // ── Selección fija Slippage ──
-  if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
-    const bps = parseInt(data.split('_')[2], 10);
-    swapSettings.slippageBps = bps;
-    state.stage = STAGES.FEE;
-    saveUsers();
-    return bot.editMessageText(
-      `*Priority Fee*\nWe'll adjust fee up to your max:\n` +
-      `• Fast: 0.0015 SOL\n` +
-      `• Turbo: 0.0035 SOL\n` +
-      `• Extreme: 0.0075 SOL`,
-      {
-        chat_id:    chatId,
-        message_id: msgId,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "Fast",    callback_data: "ss_fee_fast"    },
-              { text: "Turbo",   callback_data: "ss_fee_turbo"   },
-              { text: "Extreme", callback_data: "ss_fee_extreme" }
-            ],
-            [
-              { text: "◀️ Back", callback_data: "ss_back"  },
-              { text: "❌ Close", callback_data: "ss_close" }
+      state.stage = STAGES.FEE;
+      saveUsers();
+      return bot.editMessageText(
+        `*Priority Fee*\nWe'll adjust fee up to your max:\n` +
+        `• Fast: 0.0015 SOL\n` +
+        `• Turbo: 0.0035 SOL\n` +
+        `• Extreme: 0.0075 SOL`,
+        {
+          chat_id:    chatId,
+          message_id: msgId,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "Fast",    callback_data: "ss_fee_fast"    },
+                { text: "Turbo",   callback_data: "ss_fee_turbo"   },
+                { text: "Extreme", callback_data: "ss_fee_extreme" }
+              ],
+              [
+                { text: "◀️ Back", callback_data: "ss_back"  },
+                { text: "❌ Close", callback_data: "ss_close" }
+              ]
             ]
-          ]
+          }
         }
-      }
-    );
-  }
+      );
+    }
 
   // ── Priority Fee fijo ──
   if (state.stage === STAGES.FEE && data.startsWith('ss_fee_') && data !== 'ss_fee_custom') {
