@@ -4418,9 +4418,6 @@ bot.onText(/^\/swapsettings$/, async msg => {
   );
 });
 
-// ────────────────────────────────
-// 4) Callback flow
-// ────────────────────────────────
 bot.on('callback_query', async query => {
   const chatId = query.message.chat.id;
   const msgId  = query.message.message_id;
@@ -4439,27 +4436,24 @@ bot.on('callback_query', async query => {
 
   // Back: reabrir menú principal
   if (data === "ss_back") {
-    // simplemente reenviamos el comando /swapsettings
     await bot.deleteMessage(chatId, msgId).catch(() => {});
     return bot.emit("text", { chat:{ id: chatId }, text: "/swapsettings" });
   }
 
   // ── View Current ──
   if (data === 'ss_view') {
-    // Construimos el texto base
     let text = `*Current Swap Settings:*\n\n`;
 
     if (swapSettings.mode === 'ultraV2') {
-      // Modo Ultra V2
       text += `Mode: 🌟 *Ultra V2 activated!*`;
     } else {
-      // Modo Manual con sus valores actuales
-      text += `Mode: ⚙️ *Manual*\n` +
-              `• Slippage: ${(swapSettings.slippageBps / 100).toFixed(2)}%\n` +
-              `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
-              `• Jito Tip: ${swapSettings.jitoTipLamports
-                             ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
-                             : 'Off'}`;
+      text += 
+        `Mode: ⚙️ *Manual*\n` +
+        `• Slippage: ${(swapSettings.slippageBps / 100).toFixed(2)}%\n` +
+        `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
+        `• Jito Tip: ${swapSettings.jitoTipLamports
+                        ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
+                        : 'Off'}`;
     }
 
     return bot.editMessageText(text, {
@@ -4475,14 +4469,8 @@ bot.on('callback_query', async query => {
     });
   }
 
-  // ── Back to main ──
-  if (data === 'ss_back') {
-    return bot.emit('text', { chat:{id:chatId}, text:'/swapsettings' });
-  }
-
   // ── Ultra V2 seleccionado ──
   if (data === "ss_ultra") {
-    // mostramos la descripción de Ultra V2 y los botones
     const text =
 `*Ultra V2* is designed to help you get the most out of every swap by optimising for the transaction’s success rate and slippage.
 
