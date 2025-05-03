@@ -1381,6 +1381,7 @@ bot.setMyCommands([
     { command: 'status',    description: '🎟️ Check your subscription status & swap limit' },
     { command: 'swaps',         description: '📋 View PnL and Swap Lookup' },
     { command: 'notifications', description: '🔔 Configure New Token alerts' },
+    { command: 'swapsettings',  description: '⚙️ Configure Swap Settings (slippage, fees, MEV)' },
     { command: 'autobuy',  description: '🚀 Enable auto‑buy (for a single token only) or stop auto‑buy' },
     { command: 'ata',         description: '⚡️ Accelerate Associated Token Account creation or stop auto-creation' },
     { command: 'close', description: '🔒 close empty ATAs and instantly reclaim your SOL rent deposits' },
