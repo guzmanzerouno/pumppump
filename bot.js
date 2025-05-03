@@ -3114,6 +3114,153 @@ function formatTimestampToUTCandEST(timestamp) {
   return `${utcTime} UTC | ${estTime} EST`;
 }
 
+bot.onText(/\/swapsettings/, async (msg) => {
+  const chatId = msg.chat.id;
+  // Borrar el comando
+  await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
+  // Menú principal
+  await bot.sendMessage(chatId,
+    "*Swap Settings*\n\n" +
+    "Select how you want me to execute your swaps:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
+          [{ text: "⚙️ Manual",                callback_data: "ss_manual" }],
+          [{ text: "❌ Close",                 callback_data: "ss_close"  }]
+        ]
+      }
+    }
+  );
+});
+
+bot.on("callback_query", async query => {
+  const chatId = query.message.chat.id;
+  const data   = query.data;
+
+  await bot.answerCallbackQuery(query.id);
+
+  if (data === "ss_close") {
+    return bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+  }
+
+  // Inyectamos un espacio en users[chatId].swapSettings
+  users[chatId] = users[chatId] || {};
+  users[chatId].swapSettings ||= {};
+
+  if (data === "ss_ultra") {
+    // Guardamos la elección
+    users[chatId].swapSettings.mode = "ultraV2";
+    saveUsers();
+    // Mostramos descripción
+    return bot.editMessageText(
+`*Ultra V2* is designed to help you get the most out of every swap by optimising for the transaction’s success rate and slippage.
+
+➤ *Optimised Transaction Landing*  
+Ultra V2 dynamically fine-tunes the optimal settings required to land your transaction fast and successfully, while offering MEV mitigation.
+
+➤ *Real-Time Slippage Estimation (RTSE)*  
+RTSE analyses current market conditions, monitors price impact and volatility,  
+and adjusts slippage settings automatically to balance success vs. price protection.
+
+➤ *Gasless Support*  
+If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade when eligible.
+
+`,
+      {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Activate Ultra V2", callback_data: "ss_confirm" },
+              { text: "◀️ Back",           callback_data: "ss_back"    }
+            ],
+            [{ text: "❌ Close",            callback_data: "ss_close"   }]
+          ]
+        }
+      }
+    );
+  }
+
+  if (data === "ss_manual") {
+    users[chatId].swapSettings.mode = "manual";
+    saveUsers();
+    return bot.editMessageText(
+`*Manual Mode*  
+You have full control—please proceed with caution.
+
+➤ *Max Slippage*  
+Choose a fixed slippage tolerance:  
+[1%] [10%] [20%] [Custom]
+
+➤ *Priority Fee*  
+We'll adjust fee up to your max:  
+[Fast 0.0015 SOL] [Turbo 0.0035 SOL] [Extreme 0.0075 SOL] [Custom]
+
+➤ *Jito (MEV Protection)*  
+Send via Jito relayer to reduce MEV risk:  
+[Tip 0.001 SOL] [Tip 0.002 SOL] [Custom] [Off]
+
+`,
+      {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "1%", callback_data: "ss_slip_100" },
+              { text: "10%", callback_data: "ss_slip_1000" },
+              { text: "20%", callback_data: "ss_slip_2000" }
+            ],
+            [{ text: "Custom Slippage", callback_data: "ss_slip_custom" }],
+            [
+              { text: "Fast",   callback_data: "ss_fee_fast"   },
+              { text: "Turbo",  callback_data: "ss_fee_turbo"  },
+              { text: "Extreme",callback_data: "ss_fee_extreme"}
+            ],
+            [{ text: "Custom Fee", callback_data: "ss_fee_custom" }],
+            [
+              { text: "Tip 0.001", callback_data: "ss_jito_100000" },
+              { text: "Tip 0.002", callback_data: "ss_jito_200000" }
+            ],
+            [
+              { text: "Custom Jito", callback_data: "ss_jito_custom" },
+              { text: "Off",         callback_data: "ss_jito_off"    }
+            ],
+            [
+              { text: "✅ Save Settings", callback_data: "ss_confirm" },
+              { text: "◀️ Back",           callback_data: "ss_back"    }
+            ],
+            [{ text: "❌ Close",            callback_data: "ss_close"   }]
+          ]
+        }
+      }
+    );
+  }
+
+  // «Back» vuelve al menú principal
+  if (data === "ss_back") {
+    return bot.deleteMessage(chatId, query.message.message_id)
+      .then(() => bot.emit('text', { chat:{id:chatId}, text:"/swapsettings" }));
+  }
+
+  // Confirmar y cerrar
+  if (data === "ss_confirm") {
+    saveUsers();
+    return bot.editMessageText(
+      "✅ *Swap Settings saved.*\nYou can change them anytime with /swapsettings",
+      { chat_id: chatId, message_id: query.message.message_id, parse_mode:"Markdown" }
+    );
+  }
+
+  // Aquí añadimos todos los handlers de "ss_slip_*", "ss_fee_*", "ss_jito_*" para guardar 
+  // users[chatId].swapSettings.slippageBps, priorityFeeLamports, jitoTipLamports, etc.
+});
+
 // Constante para el mint de SOL envuelto
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
