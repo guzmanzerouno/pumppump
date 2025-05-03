@@ -4437,6 +4437,13 @@ bot.on('callback_query', async query => {
     return bot.deleteMessage(chatId, msgId).catch(() => {});
   }
 
+  // Back: reabrir menú principal
+  if (data === "ss_back") {
+    // simplemente reenviamos el comando /swapsettings
+    await bot.deleteMessage(chatId, msgId).catch(() => {});
+    return bot.emit("text", { chat:{ id: chatId }, text: "/swapsettings" });
+  }
+
   // ── View Current ──
   if (data === 'ss_view') {
     let text = `*Current Swap Settings:*\n\n` +
@@ -4464,15 +4471,46 @@ bot.on('callback_query', async query => {
     return bot.emit('text', { chat:{id:chatId}, text:'/swapsettings' });
   }
 
-  // ── Ultra V2 ──
-  if (data === 'ss_ultra') {
-    swapSettings.mode = 'ultraV2';
-    saveUsers();
-    delete users[chatId].swapState;
-    return bot.editMessageText(
-      `✅ *Ultra V2 activated!* Use /swapsettings to review or change.`,
-      { chat_id: chatId, message_id: msgId, parse_mode:"Markdown" }
+  // Ultra V2 seleccionado
+  if (data === "ss_ultra") {
+    // mostramos la descripción de Ultra V2 y los botones
+    const text =
+`*Ultra V2* is designed to help you get the most out of every swap by optimising for the transaction’s success rate and slippage.
+
+➤ *Optimised Transaction Landing*  
+Ultra V2 dynamically fine-tunes the optimal settings required to land your transaction fast and successfully, while offering MEV mitigation.
+
+➤ *Real-Time Slippage Estimation (RTSE)*  
+RTSE analyses current market conditions, monitors price impact and volatility,  
+and adjusts slippage settings automatically to balance success vs. price protection.
+
+➤ *Gasless Support*  
+If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade when eligible.`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: "✅ Activate Ultra V2", callback_data: "ss_confirm" }],
+        [{ text: "◀️ Back",             callback_data: "ss_back"    }],
+        [{ text: "❌ Close",            callback_data: "ss_close"   }]
+      ]
+    };
+
+    return bot.editMessageText(text, {
+      chat_id:      chatId,
+      message_id:   msgId,
+      parse_mode:   "Markdown",
+      reply_markup: keyboard
+    });
+  }
+
+  // Confirmación de Ultra V2
+  if (data === "ss_confirm") {
+    // guardamos en users[chatId].swapSettings.mode = 'ultraV2' en tu lógica previa
+    await bot.editMessageText(
+      "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
+      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
     );
+    return;
   }
 
   // ── Manual: iniciar slippage ──
