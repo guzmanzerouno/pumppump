@@ -4487,6 +4487,10 @@ bot.on('callback_query', async query => {
   const data   = query.data;
   await bot.answerCallbackQuery(query.id).catch(() => {});
 
+  // ← 1) Aseguramos que exista users[chatId] y swapState antes de usar state.stage
+  users[chatId] = users[chatId] || {};
+  users[chatId].swapState = users[chatId].swapState || { stage: STAGES.MAIN };
+
   // Helpers
   const swapSettings = users[chatId].swapSettings;
   const state        = users[chatId].swapState;
@@ -4497,35 +4501,34 @@ bot.on('callback_query', async query => {
     return bot.deleteMessage(chatId, msgId).catch(() => {});
   }
 
-  // Back: volver al menú principal
-if (data === "ss_back") {
-  const mainText =
-    `*Swap Settings*\n\n` +
-    `Select how you want me to execute your swaps:`;
-  const mainKeyboard = {
-    inline_keyboard: [
-      [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
-      [{ text: "⚙️ Manual",                callback_data: "ss_manual" }],
-      [{ text: "🔍 View Current",          callback_data: "ss_view"   }],
-      [{ text: "❌ Close",                 callback_data: "ss_close"  }]
-    ]
-  };
-  return bot.editMessageText(mainText, {
-    chat_id:      chatId,
-    message_id:   msgId,
-    parse_mode:   "Markdown",
-    reply_markup: mainKeyboard
-  });
-}
+  // ── Back: volver al menú principal ──
+  if (data === "ss_back") {
+    const mainText =
+      `*Swap Settings*\n\n` +
+      `Select how you want me to execute your swaps:`;
+    const mainKeyboard = {
+      inline_keyboard: [
+        [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
+        [{ text: "⚙️ Manual",                callback_data: "ss_manual" }],
+        [{ text: "🔍 View Current",          callback_data: "ss_view"   }],
+        [{ text: "❌ Close",                 callback_data: "ss_close"  }]
+      ]
+    };
+    return bot.editMessageText(mainText, {
+      chat_id:      chatId,
+      message_id:   msgId,
+      parse_mode:   "Markdown",
+      reply_markup: mainKeyboard
+    });
+  }
 
   // ── View Current ──
   if (data === 'ss_view') {
     let text = `*Current Swap Settings:*\n\n`;
+
     if (swapSettings.mode === 'ultraV2') {
-      // Modo Ultra V2
       text += `Mode: 🌟 *Ultra V2 activated!*`;
     } else {
-      // Modo Manual con sus valores actuales
       text += `Mode: ⚙️ *Manual*\n` +
               `• Slippage: ${(swapSettings.slippageBps / 100).toFixed(2)}%\n` +
               `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
@@ -4533,6 +4536,7 @@ if (data === "ss_back") {
                              ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
                              : 'Off'}`;
     }
+
     return bot.editMessageText(text, {
       chat_id: chatId,
       message_id: msgId,
