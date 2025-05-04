@@ -1874,11 +1874,13 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("User not registered or missing privateKey.");
     }
 
-    // 1) Elegir endpoint (Jito o Helius)
-    rpcUrl = user.swapSettings.jitoTipLamports > 0
-      ? "https://rpc.jito.network"
-      : getNextRpc();
-    console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
+    // ── 1) Elegir endpoint (Jito o Helius) ──
+if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
+  rpcUrl = "https://rpc.jito.network";
+} else {
+  rpcUrl = getNextRpc();
+}
+console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
 
     // 2) Conexión
     const connection = new Connection(rpcUrl, "processed");
@@ -2046,12 +2048,13 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       return null;
     }
 
-    // 1) Elegir endpoint Jito o Helius
-    rpcUrl = user.swapSettings.jitoTipLamports > 0
-      ? "https://rpc.jito.network"
-      : getNextRpc();
-    console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
-    const connection = new Connection(rpcUrl, "processed");
+    // ── 1) Elegir endpoint (Jito o Helius) ──
+if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
+  rpcUrl = "https://rpc.jito.network";
+} else {
+  rpcUrl = getNextRpc();
+}
+console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
 
     // 2) Keypair y params de orden
     const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
@@ -4596,16 +4599,18 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
     });
   }
 
-    // Confirmación de Ultra V2
-    if (data === "ss_confirm") {
-      swapSettings.mode = 'ultraV2';
-      delete users[chatId].swapState;
-      saveUsers();
-      return bot.editMessageText(
-        "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
-        { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
-      );
-    }
+    // ── Confirmación de Ultra V2 ──
+if (data === "ss_confirm") {
+  swapSettings.mode = 'ultraV2';
+  // 👉 Resetear cualquier tip que hubiera quedado de manual
+  swapSettings.jitoTipLamports = 0;
+  delete users[chatId].swapState;
+  saveUsers();
+  return bot.editMessageText(
+    "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
+    { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+  );
+}
   
     // ── Manual: iniciar slippage ──
 if (data === 'ss_manual') {
