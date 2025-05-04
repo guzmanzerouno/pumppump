@@ -4,7 +4,7 @@ import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -1862,116 +1862,128 @@ function getTokenInfo(mintAddress) {
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
 
-// Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
+// Función para comprar tokens usando Ultra API de Jupiter con Jito
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-    let rpcUrl;
-    try {
-      const user = users[chatId];
-      if (!user || !user.privateKey) {
-        throw new Error("User not registered or missing privateKey.");
-      }
-  
-      // 1) Reservar un RPC distinto
-      rpcUrl = getNextRpc();
-      const connection = new Connection(rpcUrl, "processed");
-  
-      // 2) Keypair y wallet
-      const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const userPublicKey = userKeypair.publicKey;
-  
-      // 3) Crear/asegurar ATA y chequear balance simultáneo
-      const [ata, balanceLamports] = await Promise.all([
-        ensureAssociatedTokenAccount(userKeypair, mint, connection),
-        connection.getBalance(userPublicKey, "processed")
-      ]);
-      if (!ata) {
-        await new Promise(r => setTimeout(r, 1000));
-        return buyToken(chatId, mint, amountSOL, attempt + 1);
-      }
-      const balanceSOL = balanceLamports / 1e9;
-      if (balanceSOL < amountSOL) {
-        throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
-      }
-  
-      // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
-      const orderParams = {
-        inputMint:  "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
-        outputMint: mint,
-        amount:     Math.floor(amountSOL * 1e9).toString(),
-        taker:      userPublicKey.toBase58(),
-        dynamicSlippage: true
-      };
-      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-        params: orderParams,
-        headers: { Accept: "application/json" }
-      });
-      if (!orderRes.data) {
-        throw new Error("Failed to receive order details from Ultra API.");
-      }
-      let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
-      const requestId = orderRes.data.requestId;
-      if (!unsignedTx || !requestId) {
-        throw new Error("Invalid order response from Ultra API.");
-      }
-      unsignedTx = unsignedTx.trim();
-  
-      // Deserializar, firmar y volver a serializar la transacción
-      const txBuf = Buffer.from(unsignedTx, "base64");
-      let signedTxBase64;
-      try {
-        const vtx = VersionedTransaction.deserialize(txBuf);
-        vtx.sign([userKeypair]);
-        signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-      } catch {
-        const legacy = Transaction.from(txBuf);
-        legacy.sign(userKeypair);
-        signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-      }
-  
-      // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
-      const executePayload = {
-        signedTransaction:          signedTxBase64,
-        requestId:                  requestId,
-        prioritizationFeeLamports:  5000000 // Valor configurable
-      };
-      const execRes = await axios.post(
-        "https://lite-api.jup.ag/ultra/v1/execute",
-        executePayload,
-        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
-      );
-      const exec = execRes.data || {};
-      if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-        throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
-      }
-      const txSignature = exec.txSignature || exec.signature;
-  
-      // ── GUARDAR EN buyReferenceMap ──
-      buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = {
-        txSignature,
-        executeResponse: exec
-      };
-  
-      return txSignature;
-  
-    } catch (error) {
-      const errorMessage = error.message || "";
-      console.error(
-        `❌ Error in purchase attempt ${attempt}:`,
-        errorMessage,
-        error.response ? JSON.stringify(error.response.data) : ""
-      );
-      if (attempt < 6) {
-        await new Promise(r => setTimeout(r, 500));
-        return buyToken(chatId, mint, amountSOL, attempt + 1);
-      }
-      return Promise.reject(error);
-  
-    } finally {
-      // Liberar el RPC para futuras llamadas
-      if (rpcUrl) releaseRpc(rpcUrl);
+  let rpcUrl;
+  try {
+    const user = users[chatId];
+    if (!user || !user.privateKey) {
+      throw new Error("User not registered or missing privateKey.");
     }
+
+    // 1) Elegir endpoint (Jito o Helius)
+    rpcUrl = user.swapSettings.jitoTipLamports > 0
+      ? "https://rpc.jito.network"
+      : getNextRpc();
+    const connection = new Connection(rpcUrl, "processed");
+
+    // 2) Keypair y wallet
+    const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const userPublicKey = userKeypair.publicKey;
+
+    // 3) Crear/asegurar ATA y chequear balance
+    const [ata, balanceLamports] = await Promise.all([
+      ensureAssociatedTokenAccount(userKeypair, mint, connection),
+      connection.getBalance(userPublicKey, "processed")
+    ]);
+    if (!ata) {
+      await new Promise(r => setTimeout(r, 1000));
+      return buyToken(chatId, mint, amountSOL, attempt + 1);
+    }
+    const balanceSOL = balanceLamports / 1e9;
+    if (balanceSOL < amountSOL) {
+      throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
+    }
+
+    // 4) Parámetros de orden, con slippage dinámico o fijo
+    const orderParams = {
+      inputMint:  "So11111111111111111111111111111111111111112",
+      outputMint: mint,
+      amount:     Math.floor(amountSOL * 1e9).toString(),
+      taker:      userPublicKey.toBase58(),
+    };
+    if (user.swapSettings.dynamicSlippage) {
+      orderParams.dynamicSlippage = true;
+    } else {
+      orderParams.slippageBps = user.swapSettings.slippageBps;
+    }
+
+    const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
+      params: orderParams,
+      headers: { Accept: "application/json" }
+    });
+    if (!orderRes.data) {
+      throw new Error("Failed to receive order details from Ultra API.");
+    }
+    let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
+    const requestId = orderRes.data.requestId;
+    if (!unsignedTx || !requestId) {
+      throw new Error("Invalid order response from Ultra API.");
+    }
+    unsignedTx = unsignedTx.trim();
+
+    // 5) Deserializar, inyectar tip Jito si aplica y firmar
+    const txBuf = Buffer.from(unsignedTx, "base64");
+    let signedTxBase64;
+    try {
+      const vtx = VersionedTransaction.deserialize(txBuf);
+      if (user.swapSettings.jitoTipLamports > 0) {
+        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
+          user.swapSettings.jitoTipLamports
+        );
+        vtx.message.instructions.unshift(computeIx);
+      }
+      vtx.sign([userKeypair]);
+      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    } catch {
+      const legacy = Transaction.from(txBuf);
+      if (user.swapSettings.jitoTipLamports > 0) {
+        legacy.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
+        );
+      }
+      legacy.sign(userKeypair);
+      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
+    }
+
+    // 6) Ejecutar con Ultra Execute usando tarifas configuradas
+    const executePayload = {
+      signedTransaction:         signedTxBase64,
+      requestId:                 requestId,
+      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+    };
+    const execRes = await axios.post(
+      "https://lite-api.jup.ag/ultra/v1/execute",
+      executePayload,
+      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
+    );
+    const exec = execRes.data || {};
+    if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
+      throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
+    }
+    const txSignature = exec.txSignature || exec.signature;
+
+    // 7) Guardar referencia para confirmBuy
+    buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
+    buyReferenceMap[chatId][mint] = {
+      txSignature,
+      executeResponse: exec
+    };
+
+    return txSignature;
+
+  } catch (error) {
+    console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
+    if (attempt < 6) {
+      await new Promise(r => setTimeout(r, 500));
+      return buyToken(chatId, mint, amountSOL, attempt + 1);
+    }
+    return Promise.reject(error);
+
+  } finally {
+    if (rpcUrl) releaseRpc(rpcUrl);
   }
+}
 
 async function getTokenBalance(chatId, mint) {
     try {
@@ -2003,94 +2015,110 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// Función para vender tokens usando Ultra API de Jupiter
+// Función para vender tokens usando Ultra API de Jupiter con Jito
 async function sellToken(chatId, mint, amount, attempt = 1) {
-    const SOL_MINT = "So11111111111111111111111111111111111111112";
-    let rpcUrl;
-  
-    try {
-      const user = users[chatId];
-      if (!user?.privateKey) return null;
-  
-      // 1) Reservar un endpoint distinto
-      rpcUrl = getNextRpc();
-      const connection = new Connection(rpcUrl, "processed");
-  
-      // 2) Keypair y pedir orden unsigned
-      const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-      const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-        params: {
-          inputMint:  mint,
-          outputMint: SOL_MINT,
-          amount:     amount.toString(),
-          taker:      wallet.publicKey.toBase58(),
-          dynamicSlippage: true
-        },
-        headers: { Accept: "application/json" }
-      });
-      const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
-      const txData = (unsignedTransaction || transaction || "").trim();
-      if (!txData || !requestId) {
-        throw new Error("Invalid order response from Ultra API for sell.");
-      }
-  
-      // 3) Deserializar y firmar localmente
-      const txBuf = Buffer.from(txData, "base64");
-      let signedTxBase64;
-      try {
-        const vtx = VersionedTransaction.deserialize(txBuf);
-        vtx.sign([wallet]);
-        signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-      } catch {
-        const legacy = Transaction.from(txBuf);
-        legacy.sign(wallet);
-        signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-      }
-  
-      // 4) Ejecutar con Ultra Execute
-      const executePayload = {
-        signedTransaction:         signedTxBase64,
-        requestId:                 requestId,
-        prioritizationFeeLamports: 6000000
-      };
-      const execRes = await axios.post(
-        "https://lite-api.jup.ag/ultra/v1/execute",
-        executePayload,
-        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
-      );
-      const exec = execRes.data || {};
-      if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-        throw new Error("Invalid execute response from Ultra API for sell: " + JSON.stringify(exec));
-      }
-      const txSignatureFinal = exec.txSignature || exec.signature;
-  
-      // 5) Merge de la referencia sin perder solBeforeBuy
-      buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-      buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
-      Object.assign(buyReferenceMap[chatId][mint], {
-        txSignature:     txSignatureFinal,
-        executeResponse: exec
-      });
-  
-      // 6) Disparar el cierre silencioso de ATAs tras la venta
-      setImmediate(() => {
-        closeEmptyATAsAfterSell(chatId);
-      });
-  
-      return txSignatureFinal;
-  
-    } catch (error) {
-      if (attempt < 6) {
-        const delay = 500 * Math.pow(2, attempt - 1);
-        await new Promise(r => setTimeout(r, delay));
-        return sellToken(chatId, mint, amount, attempt + 1);
-      }
-      return Promise.reject(error);
-    } finally {
-      // 7) Liberar el RPC
-      if (rpcUrl) releaseRpc(rpcUrl);
+  const SOL_MINT = "So11111111111111111111111111111111111111112";
+  let rpcUrl;
+
+  try {
+    const user = users[chatId];
+    if (!user?.privateKey) return null;
+
+    // 1) Elegir endpoint Jito o Helius
+    rpcUrl = user.swapSettings.jitoTipLamports > 0
+      ? "https://rpc.jito.network"
+      : getNextRpc();
+    const connection = new Connection(rpcUrl, "processed");
+
+    // 2) Keypair y params de orden
+    const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const orderParams = {
+      inputMint:  mint,
+      outputMint: SOL_MINT,
+      amount:     amount.toString(),
+      taker:      wallet.publicKey.toBase58(),
+    };
+    if (user.swapSettings.dynamicSlippage) {
+      orderParams.dynamicSlippage = true;
+    } else {
+      orderParams.slippageBps = user.swapSettings.slippageBps;
     }
+
+    const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
+      params: orderParams,
+      headers: { Accept: "application/json" }
+    });
+    const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
+    const txData = (unsignedTransaction || transaction || "").trim();
+    if (!txData || !requestId) {
+      throw new Error("Invalid order response from Ultra API for sell.");
+    }
+
+    // 3) Deserializar e inyectar tip Jito antes de firmar
+    const txBuf = Buffer.from(txData, "base64");
+    let signedTxBase64;
+    try {
+      const vtx = VersionedTransaction.deserialize(txBuf);
+      if (user.swapSettings.jitoTipLamports > 0) {
+        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
+          user.swapSettings.jitoTipLamports
+        );
+        vtx.message.instructions.unshift(computeIx);
+      }
+      vtx.sign([wallet]);
+      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    } catch {
+      const legacy = Transaction.from(txBuf);
+      if (user.swapSettings.jitoTipLamports > 0) {
+        legacy.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
+        );
+      }
+      legacy.sign(wallet);
+      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
+    }
+
+    // 4) Ejecutar con Ultra Execute
+    const executePayload = {
+      signedTransaction:         signedTxBase64,
+      requestId:                 requestId,
+      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+    };
+    const execRes = await axios.post(
+      "https://lite-api.jup.ag/ultra/v1/execute",
+      executePayload,
+      { headers: { "Content-Type":"application/json", Accept:"application/json"} }
+    );
+    const exec = execRes.data || {};
+    if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
+      throw new Error("Invalid execute response for sell: "+JSON.stringify(exec));
+    }
+    const txSignatureFinal = exec.txSignature || exec.signature;
+
+    // 5) Merge en buyReferenceMap sin perder solBeforeBuy
+    buyReferenceMap[chatId] = buyReferenceMap[chatId]||{};
+    buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint]||{};
+    Object.assign(buyReferenceMap[chatId][mint], {
+      txSignature:     txSignatureFinal,
+      executeResponse: exec
+    });
+
+    // 6) Cerrar ATAs al vuelo
+    setImmediate(() => closeEmptyATAsAfterSell(chatId));
+
+    return txSignatureFinal;
+
+  } catch (error) {
+    if (attempt < 6) {
+      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt-1)));
+      return sellToken(chatId, mint, amount, attempt+1);
+    }
+    return Promise.reject(error);
+
+  } finally {
+    if (rpcUrl) releaseRpc(rpcUrl);
   }
+}
 
 // 🔹 Obtener los decimales del token
 async function getTokenDecimals(mint) {
@@ -4394,7 +4422,9 @@ bot.onText(/^\/swapsettings$/, async msg => {
   users[chatId] = users[chatId] || {};
   users[chatId].swapSettings = users[chatId].swapSettings || {
     mode: 'ultraV2',             // valor por defecto
+    // Ambos campos han de existir:
     dynamicSlippage: true,
+    slippageBps:     50,         // por defecto 0.5%
     priorityFeeLamports: 5000000, 
     jitoTipLamports: 0
   };
@@ -4529,77 +4559,80 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
     }
   
     // ── Manual: iniciar slippage ──
-    if (data === 'ss_manual') {
-      swapSettings.mode = 'manual';
-      state.stage       = STAGES.SLIPPAGE;
-      saveUsers();
-      return bot.editMessageText(
-        `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
-        `*Max Slippage*\nChoose a fixed slippage tolerance:`,
-        {
-          chat_id:    chatId,
-          message_id: msgId,
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "1%",  callback_data: "ss_slip_100"  },
-                { text: "5%",  callback_data: "ss_slip_500"  },
-                { text: "10%", callback_data: "ss_slip_1000" }
-              ],
-              [
-                { text: "20%",     callback_data: "ss_slip_2000"    },
-                { text: "Dynamic", callback_data: "ss_slip_dynamic" }
-              ],
-              [
-                { text: "◀️ Back", callback_data: "ss_back"  },
-                { text: "❌ Close", callback_data: "ss_close" }
-              ]
-            ]
-          }
-        }
-      );
-    }
-  
-    // ── Selección de Slippage ──
-    if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
-      if (data === 'ss_slip_dynamic') {
-        swapSettings.dynamicSlippage = true;
-      } else {
-        swapSettings.slippageBps = parseInt(data.split('_')[2], 10);
-        swapSettings.dynamicSlippage = false;
+if (data === 'ss_manual') {
+  swapSettings.mode = 'manual';
+  state.stage       = STAGES.SLIPPAGE;
+  saveUsers();
+  return bot.editMessageText(
+    `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
+    `*Max Slippage*\nChoose a fixed slippage tolerance:`,
+    {
+      chat_id:    chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "1%",       callback_data: "ss_slip_100"    },
+            { text: "5%",       callback_data: "ss_slip_500"    },
+            { text: "10%",      callback_data: "ss_slip_1000"   }
+          ],
+          [
+            { text: "20%",      callback_data: "ss_slip_2000"   },
+            { text: "Dynamic",  callback_data: "ss_slip_dynamic"}
+          ],
+          [
+            { text: "◀️ Back",   callback_data: "ss_back"        },
+            { text: "❌ Close",  callback_data: "ss_close"       }
+          ]
+        ]
       }
-      state.stage = STAGES.FEE;
-      saveUsers();
-      return bot.editMessageText(
-        `*Priority Fee*\nWe'll adjust fee up to your max:\n` +
-        `• Fast: 0.0015 SOL\n` +
-        `• Turbo: 0.0035 SOL\n` +
-        `• Extreme: 0.0075 SOL`,
-        {
-          chat_id:    chatId,
-          message_id: msgId,
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "Fast",    callback_data: "ss_fee_fast"    },
-                { text: "Turbo",   callback_data: "ss_fee_turbo"   },
-                { text: "Extreme", callback_data: "ss_fee_extreme" }
-              ],
-              [
-                { text: "◀️ Back", callback_data: "ss_back"  },
-                { text: "❌ Close", callback_data: "ss_close" }
-              ]
-            ]
-          }
-        }
-      );
     }
+  );
+}
+
+// ── Selección de Slippage ──
+if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
+  if (data === 'ss_slip_dynamic') {
+    // activar slippage dinámico
+    swapSettings.dynamicSlippage = true;
+    delete swapSettings.slippageBps;  // opcional: elimina el valor fijo
+  } else {
+    // porcentaje fijo
+    swapSettings.slippageBps = parseInt(data.split('_')[2], 10);
+    swapSettings.dynamicSlippage = false;
+  }
+  state.stage = STAGES.FEE;
+  saveUsers();
+  return bot.editMessageText(
+    `*Priority Fee*\nWe'll adjust fee up to your max:\n` +
+    `• Fast: 0.0035 SOL\n` +
+    `• Turbo: 0.0055 SOL\n` +
+    `• Extreme: 0.0075 SOL`,
+    {
+      chat_id:    chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Fast",    callback_data: "ss_fee_fast"    },
+            { text: "Turbo",   callback_data: "ss_fee_turbo"   },
+            { text: "Extreme", callback_data: "ss_fee_extreme" }
+          ],
+          [
+            { text: "◀️ Back", callback_data: "ss_back"  },
+            { text: "❌ Close", callback_data: "ss_close" }
+          ]
+        ]
+      }
+    }
+  );
+}
 
   // ── Priority Fee fijo ──
   if (state.stage === STAGES.FEE && data.startsWith('ss_fee_') && data !== 'ss_fee_custom') {
-    const map = { fast: 1500000, turbo: 3500000, extreme: 7500000 };
+    const map = { fast: 3500000, turbo: 5500000, extreme: 7500000 };
     const key = data.split('_')[2];
     swapSettings.priorityFeeLamports = map[key];
     state.stage = STAGES.JITO;
