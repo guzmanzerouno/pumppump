@@ -1877,7 +1877,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
 
     // ── 1) Elegir endpoint de envío (Jito o Helius) ──
-    if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
+    const useJito = user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0;
+    if (useJito) {
       rpcUrl = "https://rpc.jito.network/api/v1/transactions";
     } else {
       rpcUrl = getNextRpc();
@@ -1885,10 +1886,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
 
     // 2) Conexión para firma/envío
-    const connection = new Connection(
-      rpcUrl.startsWith("http") && rpcUrl.includes("/api/") 
-        ? "https://dummy" // no se usa para lectura
-        : rpcUrl, 
+    const connection = new Connection(rpcUrl.startsWith("https://rpc.jito.network")
+      ? getNextRpc() // no usar Jito endpoint para lectura en connection
+      : rpcUrl,
       "processed"
     );
 
@@ -1896,7 +1896,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 4) Asegurar ATA usando Helius RPC (lectura siempre en Helius) ──
+    // ── 4) Asegurar ATA (solo lectura en Helius) ──
     const readRpcUrl     = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
@@ -1910,7 +1910,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       releaseRpc(fallbackRpc);
     }
 
-    // ── 5) Chequear balance SOLO con Helius ──
+    // ── 5) Comprobar balance SOLO con Helius ──
     let balanceLamports;
     try {
       balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
@@ -1956,30 +1956,31 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // ── 7) Deserializar (transaction o mensaje) e inyectar Jito tip ──
+    // ── 7) Deserializar y firmar, inyectando tip Jito si aplica ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     let vtx;
     try {
-      // primero intentar deserializar transacción completa
       vtx = VersionedTransaction.deserialize(txBuf);
-    } catch (e) {
-      // si falla con el mensaje versionado, usar VersionedMessage
-      if (e.message.includes("Versioned messages must")) {
-        const message = VersionedMessage.deserialize(txBuf);
-        vtx = new VersionedTransaction(message);
-      } else throw e;
+    } catch (err) {
+      // si viene un mensaje versionado, usar VersionedMessage
+      const message = VersionedMessage.deserialize(txBuf);
+      vtx = new VersionedTransaction(message);
     }
-    if (user.swapSettings.jitoTipLamports > 0) {
-      console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-      const ix = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
+
+    // Inyección BigInt del tip Jito
+    const tipLamports = BigInt(user.swapSettings.jitoTipLamports || 0);
+    if (tipLamports > 0n) {
+      console.log(`[buyToken] Inyectando Jito tip: ${tipLamports}`);
+      const ix = ComputeBudgetProgram.setComputeUnitPrice(tipLamports);
       vtx.message.instructions.unshift(ix);
     }
+
     vtx.sign([userKeypair]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // ── 8) Envío final ──
     let txSignature;
-    if (user.swapSettings.jitoTipLamports > 0) {
+    if (useJito) {
       // JSON-RPC v2 al Block Engine Jito
       const payload = {
         jsonrpc: "2.0",
@@ -2030,8 +2031,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return Promise.reject(error);
 
   } finally {
-    // Sólo liberamos el RPC de envío
-    if (rpcUrl && !rpcUrl.startsWith("https://rpc.jito.network")) {
+    // Sólo liberamos el RPC de envío cuando no es Jito
+    if (rpcUrl && !rpcUrl.includes("/api/v1/transactions")) {
       releaseRpc(rpcUrl);
     }
   }
