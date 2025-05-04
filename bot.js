@@ -1882,9 +1882,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     } else {
       rpcUrl = getNextRpc();
     }
-    console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
+    console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
 
-    // 2) Conexión
+    // 2) Conexión para envío (firma/execution)
     const connection = new Connection(rpcUrl, "processed");
 
     // 3) Keypair y wallet
@@ -1892,26 +1892,32 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const userPublicKey = userKeypair.publicKey;
 
     // ── 4) Crear/asegurar ATA usando Helius RPC (no Jito) ──
-    const readRpcUrl = getNextRpc();
+    const readRpcUrl     = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
       await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
       console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
       console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
-      const fallbackRpc = getNextRpc();
-      const fallbackConn = new Connection(fallbackRpc, "processed");
+      const fallbackRpc    = getNextRpc();
+      const fallbackConn   = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
       console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
+      releaseRpc(fallbackRpc);
     }
 
-    // 5) Chequear balance con try/catch propio para ver el error exacto
+    // ── 5) Chequear balance usando SOLO Helius (readConnection) ──
     let balanceLamports;
     try {
-      balanceLamports = await connection.getBalance(userPublicKey, "processed");
+      balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
     } catch (err) {
-      console.error(`[buyToken] getBalance falló en ${rpcUrl}:`, err);
-      throw err;
+      console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
+      // fallback balance
+      const fallbackRpc2  = getNextRpc();
+      const fallbackConn2 = new Connection(fallbackRpc2, "processed");
+      balanceLamports     = await fallbackConn2.getBalance(userPublicKey, "processed");
+      console.log(`[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports/1e9} SOL`);
+      releaseRpc(fallbackRpc2);
     }
     const balanceSOL = balanceLamports / 1e9;
     console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
@@ -1935,7 +1941,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
 
     const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-      params: orderParams,
+      params:  orderParams,
       headers: { Accept: "application/json" }
     });
     if (!orderRes.data) {
@@ -2009,10 +2015,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return Promise.reject(error);
 
   } finally {
+    // Sólo liberamos el RPC que usamos para envío
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
-
 async function getTokenBalance(chatId, mint) {
     try {
         if (!users[chatId] || !users[chatId].walletPublicKey) {
