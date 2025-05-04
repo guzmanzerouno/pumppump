@@ -5,7 +5,7 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedTransaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -1899,25 +1899,24 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
       console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
-      const fallbackRpc    = getNextRpc();
-      const fallbackConn   = new Connection(fallbackRpc, "processed");
+      const fallbackRpc  = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
       console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
       releaseRpc(fallbackRpc);
     }
 
-    // ── 5) Chequear balance usando SOLO Helius (readConnection) ──
+    // ── 5) Chequear balance usando SOLO Helius ──
     let balanceLamports;
     try {
       balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
     } catch (err) {
       console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
-      // fallback balance
-      const fallbackRpc2  = getNextRpc();
-      const fallbackConn2 = new Connection(fallbackRpc2, "processed");
-      balanceLamports     = await fallbackConn2.getBalance(userPublicKey, "processed");
-      console.log(`[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports/1e9} SOL`);
-      releaseRpc(fallbackRpc2);
+      const fbRpc  = getNextRpc();
+      const fbConn = new Connection(fbRpc, "processed");
+      balanceLamports = await fbConn.getBalance(userPublicKey, "processed");
+      console.log(`[buyToken] Balance fallback en ${fbRpc}: ${balanceLamports/1e9} SOL`);
+      releaseRpc(fbRpc);
     }
     const balanceSOL = balanceLamports / 1e9;
     console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
@@ -1958,12 +1957,12 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
-      const vtx = VersionedTransaction.deserialize(txBuf);
+      // Usamos VersionedMessage para deserializar correctamente
+      const message = VersionedMessage.deserialize(txBuf);
+      const vtx     = new VersionedTransaction(message);
       if (user.swapSettings.jitoTipLamports > 0) {
         console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
-          user.swapSettings.jitoTipLamports
-        );
+        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
         vtx.message.instructions.unshift(computeIx);
       }
       vtx.sign([userKeypair]);
@@ -2019,6 +2018,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
+
 async function getTokenBalance(chatId, mint) {
     try {
         if (!users[chatId] || !users[chatId].walletPublicKey) {
