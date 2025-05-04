@@ -1866,9 +1866,6 @@ function getTokenInfo(mintAddress) {
 // ────────────────────────────────
 // Función para comprar tokens usando Ultra API de Jupiter con Jito
 // ────────────────────────────────
-// ────────────────────────────────
-// Función para comprar tokens usando Ultra API de Jupiter con Jito
-// ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
   try {
@@ -1960,12 +1957,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
-      // Extraer sólo la parte de mensaje para VersionedMessage
-      const numSignatures = txBuf.readUInt32LE(0);
-      const headerSize    = 4 + numSignatures * 64;
-      const messageBuf    = txBuf.slice(headerSize);
-      const message       = VersionedMessage.deserialize(messageBuf);
-      const vtx           = new VersionedTransaction(message);
+      const vtx = VersionedTransaction.deserialize(txBuf);
       if (user.swapSettings.jitoTipLamports > 0) {
         console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
         vtx.message.instructions.unshift(
