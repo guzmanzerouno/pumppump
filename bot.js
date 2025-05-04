@@ -1862,7 +1862,7 @@ function getTokenInfo(mintAddress) {
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
 
-// Función para comprar tokens usando Ultra API de Jupiter con Jito
+// Función para comprar tokens usando Ultra API de Jupiter con conexión a Helius optimizada
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
   try {
@@ -1871,17 +1871,15 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("User not registered or missing privateKey.");
     }
 
-    // 1) Elegir endpoint (Jito o Helius)
-    rpcUrl = user.swapSettings.jitoTipLamports > 0
-      ? "https://rpc.jito.network"
-      : getNextRpc();
+    // 1) Reservar un RPC distinto
+    rpcUrl = getNextRpc();
     const connection = new Connection(rpcUrl, "processed");
 
     // 2) Keypair y wallet
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // 3) Crear/asegurar ATA y chequear balance
+    // 3) Crear/asegurar ATA y chequear balance simultáneo
     const [ata, balanceLamports] = await Promise.all([
       ensureAssociatedTokenAccount(userKeypair, mint, connection),
       connection.getBalance(userPublicKey, "processed")
@@ -1895,19 +1893,14 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
     }
 
-    // 4) Parámetros de orden, con slippage dinámico o fijo
+    // ── USANDO LOS ENDPOINTS ULTRA DE JUPITER ──
     const orderParams = {
-      inputMint:  "So11111111111111111111111111111111111111112",
+      inputMint:  "So11111111111111111111111111111111111111112", // SOL (Wrapped SOL)
       outputMint: mint,
       amount:     Math.floor(amountSOL * 1e9).toString(),
       taker:      userPublicKey.toBase58(),
+      dynamicSlippage: true
     };
-    if (user.swapSettings.dynamicSlippage) {
-      orderParams.dynamicSlippage = true;
-    } else {
-      orderParams.slippageBps = user.swapSettings.slippageBps;
-    }
-
     const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
       params: orderParams,
       headers: { Accept: "application/json" }
@@ -1922,35 +1915,24 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 5) Deserializar, inyectar tip Jito si aplica y firmar
+    // Deserializar, firmar y volver a serializar la transacción
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
-          user.swapSettings.jitoTipLamports
-        );
-        vtx.message.instructions.unshift(computeIx);
-      }
       vtx.sign([userKeypair]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     } catch {
       const legacy = Transaction.from(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
-      }
       legacy.sign(userKeypair);
       signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
     }
 
-    // 6) Ejecutar con Ultra Execute usando tarifas configuradas
+    // Ejecutar la transacción mediante Ultra Execute (incluyendo prioritizationFeeLamports)
     const executePayload = {
-      signedTransaction:         signedTxBase64,
-      requestId:                 requestId,
-      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+      signedTransaction:          signedTxBase64,
+      requestId:                  requestId,
+      prioritizationFeeLamports:  5000000 // Valor configurable
     };
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
@@ -1963,7 +1945,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     const txSignature = exec.txSignature || exec.signature;
 
-    // 7) Guardar referencia para confirmBuy
+    // ── GUARDAR EN buyReferenceMap ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
@@ -1973,7 +1955,12 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return txSignature;
 
   } catch (error) {
-    console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
+    const errorMessage = error.message || "";
+    console.error(
+      `❌ Error in purchase attempt ${attempt}:`,
+      errorMessage,
+      error.response ? JSON.stringify(error.response.data) : ""
+    );
     if (attempt < 6) {
       await new Promise(r => setTimeout(r, 500));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
@@ -1981,6 +1968,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return Promise.reject(error);
 
   } finally {
+    // Liberar el RPC para futuras llamadas
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
@@ -2015,7 +2003,7 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// Función para vender tokens usando Ultra API de Jupiter con Jito
+// Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
@@ -2024,28 +2012,20 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const user = users[chatId];
     if (!user?.privateKey) return null;
 
-    // 1) Elegir endpoint Jito o Helius
-    rpcUrl = user.swapSettings.jitoTipLamports > 0
-      ? "https://rpc.jito.network"
-      : getNextRpc();
+    // 1) Reservar un endpoint distinto
+    rpcUrl = getNextRpc();
     const connection = new Connection(rpcUrl, "processed");
 
-    // 2) Keypair y params de orden
+    // 2) Keypair y pedir orden unsigned
     const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
-    const orderParams = {
-      inputMint:  mint,
-      outputMint: SOL_MINT,
-      amount:     amount.toString(),
-      taker:      wallet.publicKey.toBase58(),
-    };
-    if (user.swapSettings.dynamicSlippage) {
-      orderParams.dynamicSlippage = true;
-    } else {
-      orderParams.slippageBps = user.swapSettings.slippageBps;
-    }
-
     const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-      params: orderParams,
+      params: {
+        inputMint:  mint,
+        outputMint: SOL_MINT,
+        amount:     amount.toString(),
+        taker:      wallet.publicKey.toBase58(),
+        dynamicSlippage: true
+      },
       headers: { Accept: "application/json" }
     });
     const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
@@ -2054,26 +2034,15 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       throw new Error("Invalid order response from Ultra API for sell.");
     }
 
-    // 3) Deserializar e inyectar tip Jito antes de firmar
+    // 3) Deserializar y firmar localmente
     const txBuf = Buffer.from(txData, "base64");
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
-          user.swapSettings.jitoTipLamports
-        );
-        vtx.message.instructions.unshift(computeIx);
-      }
       vtx.sign([wallet]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     } catch {
       const legacy = Transaction.from(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
-      }
       legacy.sign(wallet);
       signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
     }
@@ -2082,40 +2051,43 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const executePayload = {
       signedTransaction:         signedTxBase64,
       requestId:                 requestId,
-      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+      prioritizationFeeLamports: 6000000
     };
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
-      { headers: { "Content-Type":"application/json", Accept:"application/json"} }
+      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
     );
     const exec = execRes.data || {};
     if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-      throw new Error("Invalid execute response for sell: "+JSON.stringify(exec));
+      throw new Error("Invalid execute response from Ultra API for sell: " + JSON.stringify(exec));
     }
     const txSignatureFinal = exec.txSignature || exec.signature;
 
-    // 5) Merge en buyReferenceMap sin perder solBeforeBuy
-    buyReferenceMap[chatId] = buyReferenceMap[chatId]||{};
-    buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint]||{};
+    // 5) Merge de la referencia sin perder solBeforeBuy
+    buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
+    buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
     Object.assign(buyReferenceMap[chatId][mint], {
       txSignature:     txSignatureFinal,
       executeResponse: exec
     });
 
-    // 6) Cerrar ATAs al vuelo
-    setImmediate(() => closeEmptyATAsAfterSell(chatId));
+    // 6) Disparar el cierre silencioso de ATAs tras la venta
+    setImmediate(() => {
+      closeEmptyATAsAfterSell(chatId);
+    });
 
     return txSignatureFinal;
 
   } catch (error) {
     if (attempt < 6) {
-      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt-1)));
-      return sellToken(chatId, mint, amount, attempt+1);
+      const delay = 500 * Math.pow(2, attempt - 1);
+      await new Promise(r => setTimeout(r, delay));
+      return sellToken(chatId, mint, amount, attempt + 1);
     }
     return Promise.reject(error);
-
   } finally {
+    // 7) Liberar el RPC
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
