@@ -4632,12 +4632,17 @@ If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade 
     // ── Confirmación de Ultra V2 ──
 if (data === "ss_confirm") {
   swapSettings.mode = 'ultraV2';
-  // 👉 Resetear cualquier tip que hubiera quedado de manual
+  // 1) Siempre slippage dinámico
+  swapSettings.dynamicSlippage = true;
+  delete swapSettings.slippageBps;
+  // 2) Desactivar Jito y Exact Fee custom si estaban activos
   swapSettings.jitoTipLamports = 0;
+  swapSettings.useExactFee    = false;
+  // Limpio el estado de flujo
   delete users[chatId].swapState;
   saveUsers();
   return bot.editMessageText(
-    "✅ *Ultra V2 activated!* Use /swapsettings to review or change.",
+    "✅ *Ultra V2 activated!* Slippage will now be dynamic. Use /swapsettings to review or change.",
     { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
   );
 }
