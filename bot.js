@@ -1878,27 +1878,38 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     rpcUrl = user.swapSettings.jitoTipLamports > 0
       ? "https://rpc.jito.network"
       : getNextRpc();
+    console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
+
+    // 2) Conexión
     const connection = new Connection(rpcUrl, "processed");
 
-    // 2) Keypair y wallet
+    // 3) Keypair y wallet
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // 3) Crear/asegurar ATA y chequear balance
-    const [ata, balanceLamports] = await Promise.all([
-      ensureAssociatedTokenAccount(userKeypair, mint, connection),
-      connection.getBalance(userPublicKey, "processed")
-    ]);
+    // 4) Crear/asegurar ATA
+    const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
     if (!ata) {
+      console.warn("[buyToken] ATA no lista, reintentando...");
       await new Promise(r => setTimeout(r, 1000));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
+
+    // 5) Chequear balance con try/catch propio para ver el error exacto
+    let balanceLamports;
+    try {
+      balanceLamports = await connection.getBalance(userPublicKey, "processed");
+    } catch (err) {
+      console.error(`[buyToken] getBalance falló en ${rpcUrl}:`, err);
+      throw err;
+    }
     const balanceSOL = balanceLamports / 1e9;
+    console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
     if (balanceSOL < amountSOL) {
       throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
     }
 
-    // 4) Parámetros de orden, con slippage dinámico o fijo
+    // 6) Parámetros de orden, con slippage dinámico o fijo
     const orderParams = {
       inputMint:  "So11111111111111111111111111111111111111112",
       outputMint: mint,
@@ -1907,8 +1918,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     };
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
+      console.log("[buyToken] Usando slippage dinámico");
     } else {
       orderParams.slippageBps = user.swapSettings.slippageBps;
+      console.log(`[buyToken] Usando slippage fijo: ${user.swapSettings.slippageBps} bps`);
     }
 
     const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
@@ -1925,12 +1938,13 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 5) Deserializar, inyectar tip Jito si aplica y firmar
+    // 7) Deserializar, inyectar tip Jito si aplica y firmar
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
       if (user.swapSettings.jitoTipLamports > 0) {
+        console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
         const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
           user.swapSettings.jitoTipLamports
         );
@@ -1949,7 +1963,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
     }
 
-    // 6) Ejecutar con Ultra Execute usando tarifas configuradas
+    // 8) Ejecutar con Ultra Execute usando tarifas configuradas
     const executePayload = {
       signedTransaction:         signedTxBase64,
       requestId:                 requestId,
@@ -1965,8 +1979,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
     }
     const txSignature = exec.txSignature || exec.signature;
+    console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
 
-    // 7) Guardar referencia para confirmBuy
+    // 9) Guardar referencia para confirmBuy
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
@@ -1976,7 +1991,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return txSignature;
 
   } catch (error) {
-    console.error(`❌ Error in purchase attempt ${attempt}:`, error.message);
+    console.error(`❌ Error in purchase attempt ${attempt}:`, error);
     if (attempt < 6) {
       await new Promise(r => setTimeout(r, 500));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
