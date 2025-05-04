@@ -1863,7 +1863,9 @@ function getTokenInfo(mintAddress) {
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
 
+// ────────────────────────────────
 // Función para comprar tokens usando Ultra API de Jupiter con Jito
+// ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
   try {
@@ -1875,12 +1877,12 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
 
     // ── 1) Elegir endpoint (Jito o Helius) ──
-if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
-  rpcUrl = "https://rpc.jito.network";
-} else {
-  rpcUrl = getNextRpc();
-}
-console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
+    if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
+      rpcUrl = "https://rpc.jito.network";
+    } else {
+      rpcUrl = getNextRpc();
+    }
+    console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
 
     // 2) Conexión
     const connection = new Connection(rpcUrl, "processed");
@@ -1889,12 +1891,18 @@ console.log(`[buyToken] Usando RPC: ${rpcUrl}`);
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // 4) Crear/asegurar ATA
-    const ata = await ensureAssociatedTokenAccount(userKeypair, mint, connection);
-    if (!ata) {
-      console.warn("[buyToken] ATA no lista, reintentando...");
-      await new Promise(r => setTimeout(r, 1000));
-      return buyToken(chatId, mint, amountSOL, attempt + 1);
+    // ── 4) Crear/asegurar ATA usando Helius RPC (no Jito) ──
+    const readRpcUrl = getNextRpc();
+    const readConnection = new Connection(readRpcUrl, "processed");
+    try {
+      await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
+      console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    } catch (err) {
+      console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
+      const fallbackRpc = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
+      await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
+      console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
     }
 
     // 5) Chequear balance con try/catch propio para ver el error exacto
@@ -2049,15 +2057,31 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     }
 
     // ── 1) Elegir endpoint (Jito o Helius) ──
-if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
-  rpcUrl = "https://rpc.jito.network";
-} else {
-  rpcUrl = getNextRpc();
-}
-console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
+    if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
+      rpcUrl = "https://rpc.jito.network";
+    } else {
+      rpcUrl = getNextRpc();
+    }
+    console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
 
-    // 2) Keypair y params de orden
+    // ── 2) Keypair ──
     const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+
+    // ── 3) Asegurar ATA del token a vender usando Helius RPC (evitar Jito para lecturas) ──
+    const readRpcUrl = getNextRpc();
+    const readConnection = new Connection(readRpcUrl, "processed");
+    try {
+      await ensureAssociatedTokenAccount(wallet, mint, readConnection);
+      console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    } catch (err) {
+      console.warn(`[sellToken] Falló asegurar ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
+      const fallbackRpc = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
+      await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
+      console.log(`[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
+    }
+
+    // ── 4) Params de orden ──
     const orderParams = {
       inputMint:  mint,
       outputMint: SOL_MINT,
@@ -2085,7 +2109,7 @@ console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
       throw new Error("Invalid order response from Ultra API for sell.");
     }
 
-    // 3) Deserializar e inyectar tip Jito antes de firmar
+    // ── 5) Deserializar e inyectar tip Jito antes de firmar ──
     const txBuf = Buffer.from(txData, "base64");
     console.log(`[sellToken] Tamaño de txBuf: ${txBuf.length}`);
     let signedTxBase64;
@@ -2114,7 +2138,7 @@ console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
     }
     console.log(`[sellToken] signedTxBase64 length: ${signedTxBase64.length}`);
 
-    // 4) Ejecutar con Ultra Execute
+    // ── 6) Ejecutar con Ultra Execute ──
     const executePayload = {
       signedTransaction:         signedTxBase64,
       requestId:                 requestId,
@@ -2134,7 +2158,7 @@ console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
     const txSignatureFinal = exec.txSignature || exec.signature;
     console.log(`[sellToken] txSignatureFinal: ${txSignatureFinal}`);
 
-    // 5) Merge en buyReferenceMap sin perder solBeforeBuy
+    // ── 7) Merge en buyReferenceMap sin perder solBeforeBuy ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
     Object.assign(buyReferenceMap[chatId][mint], {
@@ -2143,7 +2167,7 @@ console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
     });
     console.log(`[sellToken] buyReferenceMap actualizado`);
 
-    // 6) Cerrar ATAs al vuelo
+    // ── 8) Cerrar ATAs al vuelo ──
     setImmediate(() => {
       console.log(`[sellToken] Cerrando ATAs tras venta`);
       closeEmptyATAsAfterSell(chatId);
