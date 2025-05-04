@@ -1876,47 +1876,50 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("User not registered or missing privateKey.");
     }
 
-    // ── 1) Elegir endpoint (Jito o Helius) ──
+    // ── 1) Elegir endpoint de envío (Jito o Helius) ──
     if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
-      rpcUrl = "https://rpc.jito.network";
+      rpcUrl = "https://rpc.jito.network/api/v1/transactions";
     } else {
       rpcUrl = getNextRpc();
     }
     console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
 
-    // 2) Conexión para envío (firma/execution)
-    const connection = new Connection(rpcUrl, "processed");
+    // 2) Conexión para firma/envío
+    const connection = new Connection(
+      rpcUrl.startsWith("http") && rpcUrl.includes("/api/") 
+        ? "https://dummy" // no se usa para lectura
+        : rpcUrl, 
+      "processed"
+    );
 
     // 3) Keypair y wallet
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 4) Crear/asegurar ATA usando Helius RPC (no Jito) ──
+    // ── 4) Asegurar ATA usando Helius RPC (lectura siempre en Helius) ──
     const readRpcUrl     = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
       await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
       console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
-    } catch (err) {
-      console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
-      const fallbackRpc    = getNextRpc();
-      const fallbackConn   = new Connection(fallbackRpc, "processed");
+    } catch {
+      const fallbackRpc  = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
       console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
       releaseRpc(fallbackRpc);
     }
 
-    // ── 5) Chequear balance usando SOLO Helius (readConnection) ──
+    // ── 5) Chequear balance SOLO con Helius ──
     let balanceLamports;
     try {
       balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
-    } catch (err) {
-      console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
-      const fallbackRpc2  = getNextRpc();
-      const fallbackConn2 = new Connection(fallbackRpc2, "processed");
-      balanceLamports     = await fallbackConn2.getBalance(userPublicKey, "processed");
-      console.log(`[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports/1e9} SOL`);
-      releaseRpc(fallbackRpc2);
+    } catch {
+      const fbRpc  = getNextRpc();
+      const fbConn = new Connection(fbRpc, "processed");
+      balanceLamports = await fbConn.getBalance(userPublicKey, "processed");
+      console.log(`[buyToken] Balance fallback en ${fbRpc}: ${balanceLamports/1e9} SOL`);
+      releaseRpc(fbRpc);
     }
     const balanceSOL = balanceLamports / 1e9;
     console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
@@ -1924,7 +1927,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
     }
 
-    // 6) Parámetros de orden, con slippage dinámico o fijo
+    // ── 6) Parámetros de orden Jupiter Ultra ──
     const orderParams = {
       inputMint:  "So11111111111111111111111111111111111111112",
       outputMint: mint,
@@ -1953,54 +1956,68 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 7) Deserializar, inyectar tip Jito si aplica y firmar
+    // ── 7) Deserializar (transaction o mensaje) e inyectar Jito tip ──
     const txBuf = Buffer.from(unsignedTx, "base64");
-    let signedTxBase64;
+    let vtx;
     try {
-      const vtx = VersionedTransaction.deserialize(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-        vtx.message.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
+      // primero intentar deserializar transacción completa
+      vtx = VersionedTransaction.deserialize(txBuf);
+    } catch (e) {
+      // si falla con el mensaje versionado, usar VersionedMessage
+      if (e.message.includes("Versioned messages must")) {
+        const message = VersionedMessage.deserialize(txBuf);
+        vtx = new VersionedTransaction(message);
+      } else throw e;
+    }
+    if (user.swapSettings.jitoTipLamports > 0) {
+      console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
+      const ix = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
+      vtx.message.instructions.unshift(ix);
+    }
+    vtx.sign([userKeypair]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+
+    // ── 8) Envío final ──
+    let txSignature;
+    if (user.swapSettings.jitoTipLamports > 0) {
+      // JSON-RPC v2 al Block Engine Jito
+      const payload = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: [ signedTxBase64, { encoding: "base64" } ]
+      };
+      const jitoRes = await axios.post(rpcUrl, payload, {
+        headers: { "Content-Type": "application/json" }
+      });
+      if (jitoRes.data.error) {
+        throw new Error(`Jito RPC error: ${JSON.stringify(jitoRes.data.error)}`);
       }
-      vtx.sign([userKeypair]);
-      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-    } catch {
-      const legacy = Transaction.from(txBuf);
-      if (user.swapSettings.jitoTipLamports > 0) {
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
+      txSignature = jitoRes.data.result;
+      console.log(`[buyToken] Enviado via Jito, signature: ${txSignature}`);
+    } else {
+      // Ultra Execute normal
+      const executePayload = {
+        signedTransaction:         signedTxBase64,
+        requestId:                 requestId,
+        prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+      };
+      const execRes = await axios.post(
+        "https://lite-api.jup.ag/ultra/v1/execute",
+        executePayload,
+        { headers: { "Content-Type": "application/json", Accept: "application/json" } }
+      );
+      const exec = execRes.data || {};
+      if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
+        throw new Error("Invalid execute response: " + JSON.stringify(exec));
       }
-      legacy.sign(userKeypair);
-      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
+      txSignature = exec.txSignature || exec.signature;
+      console.log(`[buyToken] Enviado via Jupiter Ultra, signature: ${txSignature}`);
     }
 
-    // 8) Ejecutar con Ultra Execute usando tarifas configuradas
-    const executePayload = {
-      signedTransaction:         signedTxBase64,
-      requestId:                 requestId,
-      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
-    };
-    const execRes = await axios.post(
-      "https://lite-api.jup.ag/ultra/v1/execute",
-      executePayload,
-      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
-    );
-    const exec = execRes.data || {};
-    if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-      throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
-    }
-    const txSignature = exec.txSignature || exec.signature;
-    console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
-
-    // 9) Guardar referencia para confirmBuy
+    // ── 9) Guardar referencia para confirmBuy ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
-    buyReferenceMap[chatId][mint] = {
-      txSignature,
-      executeResponse: exec
-    };
+    buyReferenceMap[chatId][mint] = { txSignature, executeResponse: null };
 
     return txSignature;
 
@@ -2013,8 +2030,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     return Promise.reject(error);
 
   } finally {
-    // Sólo liberamos el RPC que usamos para envío
-    if (rpcUrl) releaseRpc(rpcUrl);
+    // Sólo liberamos el RPC de envío
+    if (rpcUrl && !rpcUrl.startsWith("https://rpc.jito.network")) {
+      releaseRpc(rpcUrl);
+    }
   }
 }
 
