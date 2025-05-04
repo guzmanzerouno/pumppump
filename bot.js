@@ -4502,7 +4502,8 @@ bot.onText(/^\/swapsettings$/, async msg => {
     // Ambos campos han de existir:
     dynamicSlippage: true,
     slippageBps:     50,         // por defecto 0.5%
-    priorityFeeLamports: 5000000, 
+    priorityFeeLamports: 5000000,
+    useExactFee:          false,        // <— nueva bandera
     jitoTipLamports: 0
   };
   users[chatId].swapState = { stage: STAGES.MAIN };
@@ -4642,6 +4643,7 @@ if (data === "ss_confirm") {
 }
   
     // ── Manual: iniciar slippage ──
+// ── Manual: iniciar slippage ──
 if (data === 'ss_manual') {
   swapSettings.mode = 'manual';
   state.stage       = STAGES.SLIPPAGE;
@@ -4677,35 +4679,29 @@ if (data === 'ss_manual') {
 // ── Selección de Slippage ──
 if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
   if (data === 'ss_slip_dynamic') {
-    // activar slippage dinámico
     swapSettings.dynamicSlippage = true;
-    delete swapSettings.slippageBps;  // opcional: elimina el valor fijo
+    delete swapSettings.slippageBps;
   } else {
-    // porcentaje fijo
-    swapSettings.slippageBps = parseInt(data.split('_')[2], 10);
+    swapSettings.slippageBps     = parseInt(data.split('_')[2], 10);
     swapSettings.dynamicSlippage = false;
   }
+  //  Ahora vamos al paso de Fee Type
   state.stage = STAGES.FEE;
   saveUsers();
   return bot.editMessageText(
-    `*Priority Fee*\nWe'll adjust fee up to your max:\n` +
-    `• Fast: 0.0035 SOL\n` +
-    `• Turbo: 0.0055 SOL\n` +
-    `• Extreme: 0.0075 SOL`,
+    `*Fee Type*\n\nFor _Max Cap_, Jupiter will intelligently minimize your fees.\n` +
+    `Use _Exact Fee_ to specify your own fee value:`,
     {
       chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: "Fast",    callback_data: "ss_fee_fast"    },
-            { text: "Turbo",   callback_data: "ss_fee_turbo"   },
-            { text: "Extreme", callback_data: "ss_fee_extreme" }
-          ],
+          [{ text: "Max Cap",   callback_data: "ss_fee_max"   }],
+          [{ text: "Exact Fee", callback_data: "ss_fee_exact" }],
           [
             { text: "◀️ Back", callback_data: "ss_back"  },
-            { text: "❌ Close", callback_data: "ss_close" }
+            { text: "❌ Close",callback_data: "ss_close"}
           ]
         ]
       }
@@ -4713,19 +4709,14 @@ if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
   );
 }
 
-  // ── Priority Fee fijo ──
-  if (state.stage === STAGES.FEE && data.startsWith('ss_fee_') && data !== 'ss_fee_custom') {
-    const map = { fast: 3500000, turbo: 5500000, extreme: 7500000 };
-    const key = data.split('_')[2];
-    swapSettings.priorityFeeLamports = map[key];
-    state.stage = STAGES.JITO;
+// ── Selección de Fee Type y Priority Fee ──
+if (state.stage === STAGES.FEE) {
+  // 1) Elegir Max Cap vs Exact Fee
+  if (data === 'ss_fee_max' || data === 'ss_fee_exact') {
+    swapSettings.useExactFee = (data === 'ss_fee_exact');
     saveUsers();
     return bot.editMessageText(
-      `*Jito (MEV Protection)*\n` +
-      `Send via Jito relayer to reduce MEV risk:\n` +
-      `• Tip 1: 0.001 SOL\n` +
-      `• Tip 2: 0.002 SOL\n` +
-      `• Tip 3: 0.003 SOL`,
+      `*Priority Fee*\nChoose how much you want to pay:`,
       {
         chat_id:    chatId,
         message_id: msgId,
@@ -4733,12 +4724,43 @@ if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "Tip 1", callback_data: "ss_jito_1000000" },
-              { text: "Tip 2", callback_data: "ss_jito_2000000" }
+              { text: "Fast (0.0035 SOL)",    callback_data: "ss_fee_fast"    },
+              { text: "Turbo (0.0055 SOL)",   callback_data: "ss_fee_turbo"   },
+              { text: "Extreme (0.0075 SOL)", callback_data: "ss_fee_extreme" }
             ],
             [
-              { text: "Tip 3", callback_data: "ss_jito_3000000" },
-              { text: "Off",   callback_data: "ss_jito_off"     }
+              { text: "◀️ Back",   callback_data: "ss_back"  },
+              { text: "❌ Close",  callback_data: "ss_close" }
+            ]
+          ]
+        }
+      }
+    );
+  }
+
+  // 2) Priority Fee fijo (Fast/Turbo/Extreme)
+  if (['ss_fee_fast','ss_fee_turbo','ss_fee_extreme'].includes(data)) {
+    const map = { fast: 3500000, turbo: 5500000, extreme: 7500000 };
+    const key = data.split('_')[2];
+    swapSettings.priorityFeeLamports = map[key];
+    state.stage = STAGES.JITO;
+    saveUsers();
+    // Pasamos al Jito
+    return bot.editMessageText(
+      `*Jito (MEV Protection)*\nSend via Jito relayer to reduce MEV risk:`,
+      {
+        chat_id:    chatId,
+        message_id: msgId,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Tip 1 (0.001 SOL)", callback_data: "ss_jito_1000000" },
+              { text: "Tip 2 (0.002 SOL)", callback_data: "ss_jito_2000000" }
+            ],
+            [
+              { text: "Tip 3 (0.003 SOL)", callback_data: "ss_jito_3000000" },
+              { text: "Off",               callback_data: "ss_jito_off"     }
             ],
             [
               { text: "◀️ Back",  callback_data: "ss_back"  },
@@ -4749,6 +4771,7 @@ if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
       }
     );
   }
+}
 
   // ── Jito fijo / off ──
   if (state.stage === STAGES.JITO && data.startsWith('ss_jito_')) {
