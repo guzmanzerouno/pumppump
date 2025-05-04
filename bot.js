@@ -1866,6 +1866,9 @@ function getTokenInfo(mintAddress) {
 // ────────────────────────────────
 // Función para comprar tokens usando Ultra API de Jupiter con Jito
 // ────────────────────────────────
+// ────────────────────────────────
+// Función para comprar tokens usando Ultra API de Jupiter con Jito
+// ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
   try {
@@ -1912,7 +1915,6 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
     } catch (err) {
       console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
-      // fallback balance
       const fallbackRpc2  = getNextRpc();
       const fallbackConn2 = new Connection(fallbackRpc2, "processed");
       balanceLamports     = await fallbackConn2.getBalance(userPublicKey, "processed");
@@ -1958,13 +1960,17 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
-      const vtx = VersionedTransaction.deserialize(txBuf);
+      // Extraer sólo la parte de mensaje para VersionedMessage
+      const numSignatures = txBuf.readUInt32LE(0);
+      const headerSize    = 4 + numSignatures * 64;
+      const messageBuf    = txBuf.slice(headerSize);
+      const message       = VersionedMessage.deserialize(messageBuf);
+      const vtx           = new VersionedTransaction(message);
       if (user.swapSettings.jitoTipLamports > 0) {
         console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
-          user.swapSettings.jitoTipLamports
+        vtx.message.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
         );
-        vtx.message.instructions.unshift(computeIx);
       }
       vtx.sign([userKeypair]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
@@ -2019,6 +2025,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
+
 async function getTokenBalance(chatId, mint) {
     try {
         if (!users[chatId] || !users[chatId].walletPublicKey) {
