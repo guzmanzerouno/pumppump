@@ -1953,21 +1953,28 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 7) Deserializar, inyectar tip Jito si aplica y firmar
+    // ── 7) Deserializar correctamente y firmar ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     let signedTxBase64;
     try {
-      // Usamos VersionedMessage para deserializar correctamente
-      const message = VersionedMessage.deserialize(txBuf);
+      // 1) Extraer número de firmas y saltar esa parte
+      const numSignatures = txBuf.readUInt32LE(0);
+      const sigSectionLen = 4 + (numSignatures * 64);
+      const messageBuf    = txBuf.slice(sigSectionLen);
+      // 2) Deserializar solo el mensaje
+      const message = VersionedMessage.deserialize(messageBuf);
       const vtx     = new VersionedTransaction(message);
+      // 3) Inyectar tip Jito si aplica
       if (user.swapSettings.jitoTipLamports > 0) {
         console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
         const computeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
         vtx.message.instructions.unshift(computeIx);
       }
+      // 4) Firmar
       vtx.sign([userKeypair]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-    } catch {
+    } catch (err) {
+      // Fallback legacy
       const legacy = Transaction.from(txBuf);
       if (user.swapSettings.jitoTipLamports > 0) {
         legacy.instructions.unshift(
