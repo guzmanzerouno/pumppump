@@ -1971,36 +1971,39 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // ── 7) Deserializar, inyectar Exact Fee si corresponde y firmar ──
-    const txBuf = Buffer.from(unsignedTx, "base64");
-    let signedTxBase64;
+   // ── 7) Deserializar, inyectar Exact Fee si corresponde y firmar ──
+const txBuf = Buffer.from(unsignedTx, "base64");
+let signedTxBase64;
 
-    // Intentar primero como VersionedTransaction completo
-    let vtx;
-    try {
-      vtx = VersionedTransaction.deserialize(txBuf);
-      console.log("[buyToken] Parsed as full VersionedTransaction");
-    } catch {
-      // Si falla, es sólo un VersionedMessage
-      const msg = VersionedMessage.deserialize(txBuf);
-      console.log("[buyToken] Parsed as VersionedMessage");
-      vtx = new VersionedTransaction(msg);
-    }
+// Intentar primero como VersionedTransaction completo
+let vtx;
+try {
+  vtx = VersionedTransaction.deserialize(txBuf);
+  console.log("[buyToken] Parsed as full VersionedTransaction");
+} catch {
+  // Si falla, es sólo un VersionedMessage
+  const msg = VersionedMessage.deserialize(txBuf);
+  console.log("[buyToken] Parsed as VersionedMessage");
+  vtx = new VersionedTransaction(msg);
+}
 
-    // Inyectar Exact Fee (sólo si está activado)
-    if (user.swapSettings.useExactFee) {
-      const cuPrice = user.swapSettings.priorityFeeLamports;
-      console.log("[DEBUG] priorityFeeLamports =", cuPrice);
-      if (typeof cuPrice !== "number") {
-        throw new Error("Invalid computeUnitPrice: " + cuPrice);
-      }
-      const feeIx = ComputeBudgetProgram.setComputeUnitPrice(cuPrice);
-      vtx.message.instructions.unshift(feeIx);
-    }
+// ── Inyectar Exact Fee (solo si está activado y es válido) ──
+if (user.swapSettings.useExactFee) {
+  const cuPrice = user.swapSettings.priorityFeeLamports;
+  console.log("[DEBUG] priorityFeeLamports =", cuPrice);
+  // Validar que sea entero y no undefined
+  if (!Number.isInteger(cuPrice)) {
+    console.warn("[buyToken] Exact Fee habilitado pero 'priorityFeeLamports' no es un entero válido:", cuPrice);
+  } else {
+    console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${cuPrice}`);
+    const feeIx = ComputeBudgetProgram.setComputeUnitPrice(cuPrice);
+    vtx.message.instructions.unshift(feeIx);
+  }
+}
 
-    // Firmar y serializar
-    vtx.sign([userKeypair]);
-    signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+// ── Firmar y serializar ──
+vtx.sign([userKeypair]);
+signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // ── 8) Ejecutar con Ultra Execute usando tarifas configuradas ──
     const executePayload = {
