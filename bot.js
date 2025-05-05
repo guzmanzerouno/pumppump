@@ -1891,7 +1891,9 @@ function getTokenInfo(mintAddress) {
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
   try {
-    console.log(`[buyToken] Iniciando compra para chat ${chatId}, mint ${mint}, amountSOL ${amountSOL}, intento ${attempt}`);
+    console.log(
+      `[buyToken] Iniciando compra para chat ${chatId}, mint ${mint}, amountSOL ${amountSOL}, intento ${attempt}`
+    );
 
     const user = users[chatId];
     if (!user || !user.privateKey) {
@@ -1902,113 +1904,108 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     rpcUrl = getNextRpc();
     console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
 
-    // 2) Conexión para envío (firma/execution)
+    // 2) Conexión para firma/execution
     const connection = new Connection(rpcUrl, "processed");
-
-    // 3) Keypair y wallet
-    const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    const userKeypair = Keypair.fromSecretKey(
+      new Uint8Array(bs58.decode(user.privateKey))
+    );
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 4) Crear/asegurar ATA usando Helius RPC ──
-    const readRpcUrl     = getNextRpc();
+    // ── 3) Asegurar ATA con Helius ──
+    const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
       await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
       console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
-      console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
-      const fallbackRpc  = getNextRpc();
+      console.warn(
+        `[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+      );
+      const fallbackRpc = getNextRpc();
       const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
-      console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
+      console.log(
+        `[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+      );
       releaseRpc(fallbackRpc);
     }
 
-    // ── 5) Chequear balance usando SOLO Helius ──
+    // ── 4) Chequear balance ──
     let balanceLamports;
     try {
-      balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
+      balanceLamports = await readConnection.getBalance(
+        userPublicKey,
+        "processed"
+      );
     } catch (err) {
       console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
-      const fallbackRpc2  = getNextRpc();
+      const fallbackRpc2 = getNextRpc();
       const fallbackConn2 = new Connection(fallbackRpc2, "processed");
-      balanceLamports     = await fallbackConn2.getBalance(userPublicKey, "processed");
-      console.log(`[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports/1e9} SOL`);
+      balanceLamports = await fallbackConn2.getBalance(
+        userPublicKey,
+        "processed"
+      );
+      console.log(
+        `[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports / 1e9} SOL`
+      );
       releaseRpc(fallbackRpc2);
     }
     const balanceSOL = balanceLamports / 1e9;
     console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
     if (balanceSOL < amountSOL) {
-      throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
+      throw new Error(
+        `Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`
+      );
     }
 
-    // ── 6) Parámetros de orden, con slippage dinámico o fijo ──
+    // ── 5) Construir parámetros de orden ──
     const orderParams = {
-      inputMint:  "So11111111111111111111111111111111111111112",
+      inputMint: "So11111111111111111111111111111111111111112",
       outputMint: mint,
-      amount:     Math.floor(amountSOL * 1e9).toString(),
-      taker:      userPublicKey.toBase58(),
+      amount: Math.floor(amountSOL * 1e9).toString(),
+      taker: userPublicKey.toBase58(),
+      // inyectamos el exact fee aquí:
+      computeUnitPriceMicroLamports: user.swapSettings.priorityFeeLamports
     };
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
     } else {
       orderParams.slippageBps = user.swapSettings.slippageBps;
-      console.log(`[buyToken] Usando slippage fijo: ${user.swapSettings.slippageBps} bps`);
+      console.log(
+        `[buyToken] Usando slippage fijo: ${user.swapSettings.slippageBps} bps`
+      );
     }
 
-    const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-      params:  orderParams,
-      headers: { Accept: "application/json" }
-    });
+    // ── 6) Obtener transacción sin firmar ──
+    const orderRes = await axios.get(
+      "https://lite-api.jup.ag/ultra/v1/order",
+      {
+        params: orderParams,
+        headers: { Accept: "application/json" }
+      }
+    );
     if (!orderRes.data) {
       throw new Error("Failed to receive order details from Ultra API.");
     }
-    let unsignedTx = orderRes.data.unsignedTransaction || orderRes.data.transaction;
+    let unsignedTx =
+      orderRes.data.unsignedTransaction || orderRes.data.transaction;
     const requestId = orderRes.data.requestId;
     if (!unsignedTx || !requestId) {
       throw new Error("Invalid order response from Ultra API.");
     }
     unsignedTx = unsignedTx.trim();
 
-   // ── 7) Deserializar, inyectar Exact Fee si corresponde y firmar ──
-const txBuf = Buffer.from(unsignedTx, "base64");
-let signedTxBase64;
+    // ── 7) Firmar la transacción ──
+    const txBuf = Buffer.from(unsignedTx, "base64");
+    const vtx = VersionedTransaction.deserialize(txBuf);
+    vtx.sign([userKeypair]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
-// Intentar primero como VersionedTransaction completo
-let vtx;
-try {
-  vtx = VersionedTransaction.deserialize(txBuf);
-  console.log("[buyToken] Parsed as full VersionedTransaction");
-} catch {
-  // Si falla, es sólo un VersionedMessage
-  const msg = VersionedMessage.deserialize(txBuf);
-  console.log("[buyToken] Parsed as VersionedMessage");
-  vtx = new VersionedTransaction(msg);
-}
-
-// ── Inyectar Exact Fee (solo si está activado y es válido) ──
-if (user.swapSettings.useExactFee) {
-  const cuPrice = user.swapSettings.priorityFeeLamports;
-  console.log("[DEBUG] priorityFeeLamports =", cuPrice);
-  // Validar que sea entero y no undefined
-  if (!Number.isInteger(cuPrice)) {
-    console.warn("[buyToken] Exact Fee habilitado pero 'priorityFeeLamports' no es un entero válido:", cuPrice);
-  } else {
-    console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${cuPrice}`);
-    const feeIx = ComputeBudgetProgram.setComputeUnitPrice(cuPrice);
-    vtx.message.instructions.unshift(feeIx);
-  }
-}
-
-// ── Firmar y serializar ──
-vtx.sign([userKeypair]);
-signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-
-    // ── 8) Ejecutar con Ultra Execute usando tarifas configuradas ──
+    // ── 8) Ejecutar con Ultra Execute ──
     const executePayload = {
-      signedTransaction:         signedTxBase64,
-      requestId:                 requestId,
+      signedTransaction: signedTxBase64,
+      requestId,
       prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
     };
     const execRes = await axios.post(
@@ -2018,12 +2015,14 @@ signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     );
     const exec = execRes.data || {};
     if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-      throw new Error("Invalid execute response from Ultra API: " + JSON.stringify(exec));
+      throw new Error(
+        "Invalid execute response from Ultra API: " + JSON.stringify(exec)
+      );
     }
     const txSignature = exec.txSignature || exec.signature;
     console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
 
-    // ── 9) Guardar referencia para confirmBuy ──
+    // ── 9) Guardar referencia ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
@@ -2031,15 +2030,13 @@ signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     };
 
     return txSignature;
-
   } catch (error) {
     console.error(`❌ Error in purchase attempt ${attempt}:`, error);
     if (attempt < 6) {
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
     return Promise.reject(error);
-
   } finally {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
@@ -2074,144 +2071,127 @@ async function getTokenBalance(chatId, mint) {
         return 0;
     }
 }
-
-// Función para vender tokens usando Ultra API de Jupiter (con logging)
+// Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
   try {
-    console.log(`[sellToken] Iniciando venta para chat ${chatId}, mint ${mint}, amount ${amount}, intento ${attempt}`);
+    console.log(
+      `[sellToken] Iniciando venta para chat ${chatId}, mint ${mint}, amount ${amount}, intento ${attempt}`
+    );
 
     const user = users[chatId];
     if (!user?.privateKey) {
-      console.error(`[sellToken] Usuario o privateKey faltante`);
-      return null;
+      throw new Error("User not registered or missing privateKey.");
     }
 
     // ── 1) Elegir endpoint de envío ──
     rpcUrl = getNextRpc();
     console.log(`[sellToken] Usando RPC para envío: ${rpcUrl}`);
 
-    // ── 2) Keypair ──
-    const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
+    // ── 2) Preparar wallet ──
+    const wallet = Keypair.fromSecretKey(
+      new Uint8Array(bs58.decode(user.privateKey))
+    );
 
-    // ── 3) Asegurar ATA usando Helius ──
+    // ── 3) Asegurar ATA con Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
       await ensureAssociatedTokenAccount(wallet, mint, readConnection);
       console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
-      console.warn(`[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
+      console.warn(
+        `[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+      );
       const fallbackRpc = getNextRpc();
       const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
-      console.log(`[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
+      console.log(
+        `[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+      );
       releaseRpc(fallbackRpc);
     }
 
-    // ── 4) Params de orden ──
+    // ── 4) Construir parámetros de orden ──
     const orderParams = {
-      inputMint:  mint,
+      inputMint: mint,
       outputMint: SOL_MINT,
-      amount:     amount.toString(),
-      taker:      wallet.publicKey.toBase58(),
+      amount: amount.toString(),
+      taker: wallet.publicKey.toBase58(),
+      // inyectamos el exact fee aquí:
+      computeUnitPriceMicroLamports: user.swapSettings.priorityFeeLamports
     };
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
-      console.log(`[sellToken] Slippage dinámico activado`);
+      console.log("[sellToken] Slippage dinámico activado");
     } else {
       orderParams.slippageBps = user.swapSettings.slippageBps;
-      console.log(`[sellToken] Slippage fijo: ${orderParams.slippageBps} bps`);
+      console.log(
+        `[sellToken] Slippage fijo: ${orderParams.slippageBps} bps`
+      );
     }
-    console.log(`[sellToken] orderParams:`, orderParams);
 
-    const orderRes = await axios.get("https://lite-api.jup.ag/ultra/v1/order", {
-      params: orderParams,
-      headers: { Accept: "application/json" }
-    });
-    console.log(`[sellToken] orderRes.data:`, orderRes.data);
-    const { unsignedTransaction, requestId, transaction } = orderRes.data || {};
+    // ── 5) Obtener transacción sin firmar ──
+    console.log("[sellToken] orderParams:", orderParams);
+    const orderRes = await axios.get(
+      "https://lite-api.jup.ag/ultra/v1/order",
+      {
+        params: orderParams,
+        headers: { Accept: "application/json" }
+      }
+    );
+    const { unsignedTransaction, transaction, requestId } = orderRes.data || {};
     const txData = (unsignedTransaction || transaction || "").trim();
     console.log(`[sellToken] requestId: ${requestId}, txData length: ${txData.length}`);
     if (!txData || !requestId) {
       throw new Error("Invalid order response from Ultra API for sell.");
     }
 
-    // ── 5) Deserializar e inyectar Exact Fee antes de firmar ──
+    // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
-    console.log(`[sellToken] Tamaño de txBuf: ${txBuf.length}`);
-    let signedTxBase64;
-    try {
-      const vtx = VersionedTransaction.deserialize(txBuf);
+    const vtx = VersionedTransaction.deserialize(txBuf);
+    vtx.sign([wallet]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
-      // Exact Fee (solo si está activado)
-      if (user.swapSettings.useExactFee) {
-        console.log(`[sellToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
-        const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
-        vtx.message.instructions.unshift(feeIx);
-      }
-
-      vtx.sign([wallet]);
-      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-    } catch (err) {
-      console.warn(`[sellToken] Fallback a Transaction legacy:`, err.message);
-      const legacy = Transaction.from(txBuf);
-
-      if (user.swapSettings.useExactFee) {
-        console.log(`[sellToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-        );
-      }
-
-      legacy.sign(wallet);
-      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-    }
-    console.log(`[sellToken] signedTxBase64 length: ${signedTxBase64.length}`);
-
-    // ── 6) Ejecutar con Ultra Execute ──
+    // ── 7) Ejecutar con Ultra Execute ──
     const executePayload = {
-      signedTransaction:         signedTxBase64,
-      requestId:                 requestId,
+      signedTransaction: signedTxBase64,
+      requestId,
       prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
     };
-    console.log(`[sellToken] executePayload:`, executePayload);
+    console.log("[sellToken] executePayload:", executePayload);
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
       { headers: { "Content-Type": "application/json", Accept: "application/json" } }
     );
     const exec = execRes.data || {};
-    console.log(`[sellToken] exec result:`, exec);
+    console.log("[sellToken] exec result:", exec);
     if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-      throw new Error("Invalid execute response for sell: " + JSON.stringify(exec));
+      throw new Error(
+        "Invalid execute response for sell: " + JSON.stringify(exec)
+      );
     }
     const txSignatureFinal = exec.txSignature || exec.signature;
     console.log(`[sellToken] txSignatureFinal: ${txSignatureFinal}`);
 
-    // ── 7) Guardar referencia ──
+    // ── 8) Guardar referencia ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
     Object.assign(buyReferenceMap[chatId][mint], {
-      txSignature:     txSignatureFinal,
+      txSignature: txSignatureFinal,
       executeResponse: exec
     });
-    console.log(`[sellToken] buyReferenceMap actualizado`);
 
-    // ── 8) Cerrar ATAs al vuelo ──
-    setImmediate(() => {
-      console.log(`[sellToken] Cerrando ATAs tras venta`);
-      closeEmptyATAsAfterSell(chatId);
-    });
+    // ── 9) Cerrar ATAs tras la venta ──
+    setImmediate(() => closeEmptyATAsAfterSell(chatId));
 
     return txSignatureFinal;
-
   } catch (error) {
     console.error(`❌ Error in sell attempt ${attempt}:`, error);
     if (attempt < 6) {
-      console.log(`[sellToken] Reintentando en ${500 * Math.pow(2, attempt-1)}ms...`);
-      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt-1)));
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
       return sellToken(chatId, mint, amount, attempt + 1);
     }
     return Promise.reject(error);
