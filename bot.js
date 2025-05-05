@@ -1970,33 +1970,26 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 7) Deserializar, inyectar Exact Fee si corresponde y firmar
-    const txBuf = Buffer.from(unsignedTx, "base64");
-let signedTxBase64;
+   // 7) Deserializar, inyectar Exact Fee si corresponde y firmar
+const txBuf = Buffer.from(unsignedTx, "base64");
 
-// first, see if it's a full VersionedTransaction
-let vtx;
-try {
-  vtx = VersionedTransaction.deserialize(txBuf);
-  console.log("[buyToken] Parsed as full VersionedTransaction");
-} catch {
-  // if that fails, it's (just) a VersionedMessage
-  const msg = VersionedMessage.deserialize(txBuf);
-  console.log("[buyToken] Parsed as VersionedMessage");
-  vtx = new VersionedTransaction(msg);
-}
+// 1️⃣ Deserializa SIEMPRE como mensaje versionado  
+const message = VersionedMessage.deserialize(txBuf);
+console.log("[buyToken] Deserializado con VersionedMessage");
 
-// now inject your exact fee, only if the user asked for it
+// 2️⃣ Construye la transacción a partir del mensaje  
+const vtx = new VersionedTransaction(message);
+
+// 3️⃣ Inyecta Exact Fee si está activado  
 if (user.swapSettings.useExactFee) {
-  console.log(`[buyToken] Injecting Exact Fee: ${user.swapSettings.priorityFeeLamports}`);
-  vtx.message.instructions.unshift(
-    ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-  );
+  console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
+  const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
+  vtx.message.instructions.unshift(feeIx);
 }
 
-// sign & serialize
+// 4️⃣ Firma y serializa  
 vtx.sign([userKeypair]);
-signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // 8) Ejecutar con Ultra Execute usando tarifas configuradas
     const executePayload = {
