@@ -1975,50 +1975,62 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     unsignedTx = unsignedTx.trim();
 
     // 7) Deserializar, inyectar tip Jito si aplica y firmar
-    const txBuf = Buffer.from(unsignedTx, "base64");
-    let signedTxBase64;
-    try {
-      const vtx = VersionedTransaction.deserialize(txBuf);
+    // 7) Deserializar, inyectar tips antes de firmar
+const txBuf = Buffer.from(unsignedTx, "base64");
+let signedTxBase64;
+try {
+  // Primero intentamos deserializar como mensaje versionado
+  let message;
+  try {
+    message = VersionedMessage.deserialize(txBuf);
+    console.log("[buyToken] Deserializado con VersionedMessage");
+  } catch (e) {
+    // Si falla, puede ser una transacción legacy o v0
+    console.warn("[buyToken] No es mensaje versionado, intentando VersionedTransaction.deserialize");
+    const vtxTemp = VersionedTransaction.deserialize(txBuf);
+    message = vtxTemp.message;
+  }
+  // Creamos el VersionedTransaction a partir del mensaje
+  const vtx = new VersionedTransaction(message);
 
-      // ── Inyección Exact Fee ──
-      if (user.swapSettings.useExactFee) {
-        console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
-        vtx.message.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-        );
-      }
+  // ── Inyección Exact Fee (solo si está activado) ──
+  if (user.swapSettings.useExactFee) {
+    console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
+    const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
+    vtx.message.instructions.unshift(feeIx);
+  }
 
-      // ── Inyección Jito Tip ──
-      if (user.swapSettings.jitoTipLamports > 0) {
-        console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-        vtx.message.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
-      }
+  // ── Inyección Jito Tip (si aplica) ──
+  if (user.swapSettings.jitoTipLamports > 0) {
+    console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
+    const computeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
+    vtx.message.instructions.unshift(computeIx);
+  }
 
-      vtx.sign([userKeypair]);
-      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-    } catch {
-      const legacy = Transaction.from(txBuf);
+  // Firmamos y serializamos
+  vtx.sign([userKeypair]);
+  signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+} catch (err) {
+  console.warn("[buyToken] Fallback a Transaction legacy:", err.message);
+  const legacy = Transaction.from(txBuf);
 
-      // exact fee (legacy)
-      if (user.swapSettings.useExactFee) {
-        console.log(`[buyToken] Inyectando Exact Fee compute unit price (legacy): ${user.swapSettings.priorityFeeLamports}`);
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-        );
-      }
+  // legacy también inyecta Exact Fee si corresponde
+  if (user.swapSettings.useExactFee) {
+    console.log(`[buyToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
+    legacy.instructions.unshift(
+      ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+    );
+  }
+  // y el tip de Jito
+  if (user.swapSettings.jitoTipLamports > 0) {
+    legacy.instructions.unshift(
+      ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
+    );
+  }
 
-      // jito tip (legacy)
-      if (user.swapSettings.jitoTipLamports > 0) {
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
-      }
-
-      legacy.sign(userKeypair);
-      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-    }
+  legacy.sign(userKeypair);
+  signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
+}
 
     // 8) Ejecutar con Ultra Execute usando tarifas configuradas
     const executePayload = {
