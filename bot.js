@@ -1299,7 +1299,7 @@ const notifMap = {
     // Jito tip
     lines.push(`• Jito Tip: ${s.jitoTipLamports
       ? (s.jitoTipLamports/1e9).toFixed(6) + ' SOL'
-      : 'Off'}`);
+      : 'Off ❌'}`);
   }
 
   const caption = lines.join("\n");
@@ -1884,7 +1884,6 @@ function getTokenInfo(mintAddress) {
   const tokens = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
-
 // ────────────────────────────────
 // Función para comprar tokens usando Ultra API de Jupiter con Jito
 // ────────────────────────────────
@@ -1980,21 +1979,43 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
+
+      // ── Inyección Exact Fee ──
+      if (user.swapSettings.useExactFee) {
+        console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
+        vtx.message.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+        );
+      }
+
+      // ── Inyección Jito Tip ──
       if (user.swapSettings.jitoTipLamports > 0) {
         console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
         vtx.message.instructions.unshift(
           ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
         );
       }
+
       vtx.sign([userKeypair]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     } catch {
       const legacy = Transaction.from(txBuf);
+
+      // exact fee (legacy)
+      if (user.swapSettings.useExactFee) {
+        console.log(`[buyToken] Inyectando Exact Fee compute unit price (legacy): ${user.swapSettings.priorityFeeLamports}`);
+        legacy.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+        );
+      }
+
+      // jito tip (legacy)
       if (user.swapSettings.jitoTipLamports > 0) {
         legacy.instructions.unshift(
           ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
         );
       }
+
       legacy.sign(userKeypair);
       signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
     }
@@ -2039,7 +2060,6 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
-
 async function getTokenBalance(chatId, mint) {
     try {
         if (!users[chatId] || !users[chatId].walletPublicKey) {
@@ -2136,12 +2156,21 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       throw new Error("Invalid order response from Ultra API for sell.");
     }
 
-    // ── 5) Deserializar e inyectar tip Jito antes de firmar ──
+    // ── 5) Deserializar e inyectar tips antes de firmar ──
     const txBuf = Buffer.from(txData, "base64");
     console.log(`[sellToken] Tamaño de txBuf: ${txBuf.length}`);
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
+
+      // ── Inyección Exact Fee ──
+      if (user.swapSettings.useExactFee) {
+        console.log(`[sellToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
+        const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
+        vtx.message.instructions.unshift(feeIx);
+      }
+
+      // ── Inyección Jito Tip ──
       if (user.swapSettings.jitoTipLamports > 0) {
         const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
           user.swapSettings.jitoTipLamports
@@ -2149,17 +2178,29 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
         vtx.message.instructions.unshift(computeIx);
         console.log(`[sellToken] Inyectada instrucción Jito en VersionedTransaction con tip ${user.swapSettings.jitoTipLamports}`);
       }
+
       vtx.sign([wallet]);
       signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     } catch (err) {
       console.warn(`[sellToken] Fallback a Transaction legacy:`, err.message);
       const legacy = Transaction.from(txBuf);
+
+      // Exact Fee (legacy)
+      if (user.swapSettings.useExactFee) {
+        console.log(`[sellToken] Inyectando Exact Fee compute unit price (legacy): ${user.swapSettings.priorityFeeLamports}`);
+        legacy.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+        );
+      }
+
+      // Jito Tip (legacy)
       if (user.swapSettings.jitoTipLamports > 0) {
         legacy.instructions.unshift(
           ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
         );
         console.log(`[sellToken] Inyectada instrucción Jito en Transaction legacy con tip ${user.swapSettings.jitoTipLamports}`);
       }
+
       legacy.sign(wallet);
       signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
     }
@@ -4806,7 +4847,7 @@ if (state.stage === STAGES.FEE) {
             ],
             [
               { text: "Tip 3", callback_data: "ss_jito_3000000" },
-              { text: "Off",               callback_data: "ss_jito_off"     }
+              { text: "Off ❌",               callback_data: "ss_jito_off"     }
             ],
             [
               { text: "◀️ Back",  callback_data: "ss_back"  },
