@@ -1885,7 +1885,7 @@ function getTokenInfo(mintAddress) {
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
 // ────────────────────────────────
-// Función para comprar tokens usando Ultra API de Jupiter con Jito
+// Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   let rpcUrl;
@@ -1897,12 +1897,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("User not registered or missing privateKey.");
     }
 
-    // ── 1) Elegir endpoint (Jito o Helius) ──
-    if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
-      rpcUrl = "https://rpc.jito.network";
-    } else {
-      rpcUrl = getNextRpc();
-    }
+    // ── 1) Elegir endpoint de envío ──
+    rpcUrl = getNextRpc();
     console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
 
     // 2) Conexión para envío (firma/execution)
@@ -1912,7 +1908,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const userKeypair   = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 4) Crear/asegurar ATA usando Helius RPC (no Jito) ──
+    // ── 4) Crear/asegurar ATA usando Helius RPC ──
     const readRpcUrl     = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
@@ -1927,7 +1923,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       releaseRpc(fallbackRpc);
     }
 
-    // ── 5) Chequear balance usando SOLO Helius (readConnection) ──
+    // ── 5) Chequear balance usando SOLO Helius ──
     let balanceLamports;
     try {
       balanceLamports = await readConnection.getBalance(userPublicKey, "processed");
@@ -1974,63 +1970,40 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-    // 7) Deserializar, inyectar tip Jito si aplica y firmar
-    // 7) Deserializar, inyectar tips antes de firmar
-const txBuf = Buffer.from(unsignedTx, "base64");
-let signedTxBase64;
-try {
-  // Primero intentamos deserializar como mensaje versionado
-  let message;
-  try {
-    message = VersionedMessage.deserialize(txBuf);
-    console.log("[buyToken] Deserializado con VersionedMessage");
-  } catch (e) {
-    // Si falla, puede ser una transacción legacy o v0
-    console.warn("[buyToken] No es mensaje versionado, intentando VersionedTransaction.deserialize");
-    const vtxTemp = VersionedTransaction.deserialize(txBuf);
-    message = vtxTemp.message;
-  }
-  // Creamos el VersionedTransaction a partir del mensaje
-  const vtx = new VersionedTransaction(message);
+    // 7) Deserializar, inyectar Exact Fee si corresponde y firmar
+    const txBuf = Buffer.from(unsignedTx, "base64");
+    let signedTxBase64;
+    try {
+      // Mensaje versionado
+      const message = VersionedMessage.deserialize(txBuf);
+      console.log("[buyToken] Deserializado con VersionedMessage");
+      const vtx = new VersionedTransaction(message);
 
-  // ── Inyección Exact Fee (solo si está activado) ──
-  if (user.swapSettings.useExactFee) {
-    console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
-    const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
-    vtx.message.instructions.unshift(feeIx);
-  }
+      // Exact Fee (sólo si está activado)
+      if (user.swapSettings.useExactFee) {
+        console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
+        const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
+        vtx.message.instructions.unshift(feeIx);
+      }
 
-  // ── Inyección Jito Tip (si aplica) ──
-  if (user.swapSettings.jitoTipLamports > 0) {
-    console.log(`[buyToken] Inyectando Jito tip: ${user.swapSettings.jitoTipLamports}`);
-    const computeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports);
-    vtx.message.instructions.unshift(computeIx);
-  }
+      vtx.sign([userKeypair]);
+      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
-  // Firmamos y serializamos
-  vtx.sign([userKeypair]);
-  signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
-} catch (err) {
-  console.warn("[buyToken] Fallback a Transaction legacy:", err.message);
-  const legacy = Transaction.from(txBuf);
+    } catch {
+      // Fallback a legacy
+      console.warn("[buyToken] Fallback a Transaction legacy");
+      const legacy = Transaction.from(txBuf);
 
-  // legacy también inyecta Exact Fee si corresponde
-  if (user.swapSettings.useExactFee) {
-    console.log(`[buyToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
-    legacy.instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-    );
-  }
-  // y el tip de Jito
-  if (user.swapSettings.jitoTipLamports > 0) {
-    legacy.instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-    );
-  }
+      if (user.swapSettings.useExactFee) {
+        console.log(`[buyToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
+        legacy.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+        );
+      }
 
-  legacy.sign(userKeypair);
-  signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-}
+      legacy.sign(userKeypair);
+      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
+    }
 
     // 8) Ejecutar con Ultra Execute usando tarifas configuradas
     const executePayload = {
@@ -2066,12 +2039,11 @@ try {
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
     return Promise.reject(error);
-
   } finally {
-    // Sólo liberamos el RPC que usamos para envío
     if (rpcUrl) releaseRpc(rpcUrl);
   }
 }
+
 async function getTokenBalance(chatId, mint) {
     try {
         if (!users[chatId] || !users[chatId].walletPublicKey) {
@@ -2102,7 +2074,7 @@ async function getTokenBalance(chatId, mint) {
     }
 }
 
-// Función para vender tokens usando Ultra API de Jupiter con Jito (con logging)
+// Función para vender tokens usando Ultra API de Jupiter (con logging)
 async function sellToken(chatId, mint, amount, attempt = 1) {
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
@@ -2115,29 +2087,26 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       return null;
     }
 
-    // ── 1) Elegir endpoint (Jito o Helius) ──
-    if (user.swapSettings.mode === 'manual' && user.swapSettings.jitoTipLamports > 0) {
-      rpcUrl = "https://rpc.jito.network";
-    } else {
-      rpcUrl = getNextRpc();
-    }
-    console.log(`[sellToken] Usando RPC: ${rpcUrl}`);
+    // ── 1) Elegir endpoint de envío ──
+    rpcUrl = getNextRpc();
+    console.log(`[sellToken] Usando RPC para envío: ${rpcUrl}`);
 
     // ── 2) Keypair ──
     const wallet = Keypair.fromSecretKey(new Uint8Array(bs58.decode(user.privateKey)));
 
-    // ── 3) Asegurar ATA del token a vender usando Helius RPC (evitar Jito para lecturas) ──
+    // ── 3) Asegurar ATA usando Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
     try {
       await ensureAssociatedTokenAccount(wallet, mint, readConnection);
       console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
-      console.warn(`[sellToken] Falló asegurar ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
+      console.warn(`[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
       const fallbackRpc = getNextRpc();
       const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
       console.log(`[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
+      releaseRpc(fallbackRpc);
     }
 
     // ── 4) Params de orden ──
@@ -2168,27 +2137,18 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       throw new Error("Invalid order response from Ultra API for sell.");
     }
 
-    // ── 5) Deserializar e inyectar tips antes de firmar ──
+    // ── 5) Deserializar e inyectar Exact Fee antes de firmar ──
     const txBuf = Buffer.from(txData, "base64");
     console.log(`[sellToken] Tamaño de txBuf: ${txBuf.length}`);
     let signedTxBase64;
     try {
       const vtx = VersionedTransaction.deserialize(txBuf);
 
-      // ── Inyección Exact Fee ──
+      // Exact Fee (solo si está activado)
       if (user.swapSettings.useExactFee) {
         console.log(`[sellToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
         const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
         vtx.message.instructions.unshift(feeIx);
-      }
-
-      // ── Inyección Jito Tip ──
-      if (user.swapSettings.jitoTipLamports > 0) {
-        const computeIx = ComputeBudgetProgram.setComputeUnitPrice(
-          user.swapSettings.jitoTipLamports
-        );
-        vtx.message.instructions.unshift(computeIx);
-        console.log(`[sellToken] Inyectada instrucción Jito en VersionedTransaction con tip ${user.swapSettings.jitoTipLamports}`);
       }
 
       vtx.sign([wallet]);
@@ -2197,20 +2157,11 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       console.warn(`[sellToken] Fallback a Transaction legacy:`, err.message);
       const legacy = Transaction.from(txBuf);
 
-      // Exact Fee (legacy)
       if (user.swapSettings.useExactFee) {
-        console.log(`[sellToken] Inyectando Exact Fee compute unit price (legacy): ${user.swapSettings.priorityFeeLamports}`);
+        console.log(`[sellToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
         legacy.instructions.unshift(
           ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
         );
-      }
-
-      // Jito Tip (legacy)
-      if (user.swapSettings.jitoTipLamports > 0) {
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.jitoTipLamports)
-        );
-        console.log(`[sellToken] Inyectada instrucción Jito en Transaction legacy con tip ${user.swapSettings.jitoTipLamports}`);
       }
 
       legacy.sign(wallet);
@@ -2238,7 +2189,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const txSignatureFinal = exec.txSignature || exec.signature;
     console.log(`[sellToken] txSignatureFinal: ${txSignatureFinal}`);
 
-    // ── 7) Merge en buyReferenceMap sin perder solBeforeBuy ──
+    // ── 7) Guardar referencia ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = buyReferenceMap[chatId][mint] || {};
     Object.assign(buyReferenceMap[chatId][mint], {
@@ -2263,7 +2214,6 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       return sellToken(chatId, mint, amount, attempt + 1);
     }
     return Promise.reject(error);
-
   } finally {
     if (rpcUrl) {
       releaseRpc(rpcUrl);
@@ -4551,7 +4501,7 @@ bot.onText(/^\/ip$/, async (msg) => {
 });
 
 
-// ────────────────────────────────
+/// ────────────────────────────────
 // 2) Estado interno para el flujo
 // ────────────────────────────────
 const STAGES = {
@@ -4559,9 +4509,7 @@ const STAGES = {
   SLIPPAGE:    'slippage',
   SLIP_CUSTOM: 'slip_custom',
   FEE:         'fee',
-  FEE_CUSTOM:  'fee_custom',
-  JITO:        'jito',
-  JITO_CUSTOM: 'jito_custom'
+  FEE_CUSTOM:  'fee_custom'
 };
 
 // ────────────────────────────────
@@ -4578,8 +4526,7 @@ bot.onText(/^\/swapsettings$/, async msg => {
     dynamicSlippage: true,
     slippageBps:     50,         // por defecto 0.5%
     priorityFeeLamports: 6000000,
-    useExactFee:          false,        // <— nueva bandera
-    jitoTipLamports: 0
+    useExactFee:          false  // <— nueva bandera
   };
   users[chatId].swapState = { stage: STAGES.MAIN };
   saveUsers();
@@ -4625,10 +4572,10 @@ bot.on('callback_query', async query => {
   }
 
   // ── Back: volver al menú principal ──
-  if (data === "ss_back") {
+  if (data === 'ss_back') {
     const mainText =
-    `*⚙️ Swap Settings*\n\n` +
-    `Ready to trade? Select your execution mode below to get started!`;
+      `*⚙️ Swap Settings*\n\n` +
+      `Ready to trade? Select your execution mode below to get started!`;
     const mainKeyboard = {
       inline_keyboard: [
         [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
@@ -4645,52 +4592,43 @@ bot.on('callback_query', async query => {
     });
   }
 
-// ── View Current ──
-if (data === 'ss_view') {
-  // 1) Preparamos el texto
-  let viewText = `*Current Swap Settings:*\n\n`;
-
-  if (swapSettings.mode === 'ultraV2') {
-    viewText +=
-      `Mode: 🌟 *Ultra V2 activated!*`;
-  } else {
-    viewText +=
-      `Mode: ⚙️ *Manual*\n` +
-      `• Slippage: ${swapSettings.dynamicSlippage
-                       ? 'Dynamic'
-                       : (swapSettings.slippageBps / 100).toFixed(2) + '%'}\n` +
-      `• Fee Type: ${swapSettings.useExactFee ? 'Exact Fee' : 'Max Cap'}\n` +
-      `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
-      `• Jito Tip: ${swapSettings.jitoTipLamports
-                       ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
-                       : 'Off'}`;
+  // ── View Current ──
+  if (data === 'ss_view') {
+    let viewText = `*Current Swap Settings:*\n\n`;
+    if (swapSettings.mode === 'ultraV2') {
+      viewText += `Mode: 🌟 *Ultra V2 activated!*`;
+    } else {
+      viewText +=
+        `Mode: ⚙️ *Manual*\n` +
+        `• Slippage: ${swapSettings.dynamicSlippage
+                         ? 'Dynamic'
+                         : (swapSettings.slippageBps / 100).toFixed(2) + '%'}\n` +
+        `• Fee Type: ${swapSettings.useExactFee ? 'Exact Fee' : 'Max Cap'}\n` +
+        `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL`;
+    }
+    return bot.editMessageText(viewText, {
+      chat_id:    chatId,
+      message_id: msgId,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "◀️ Back",  callback_data: "ss_back"  }],
+          [{ text: "❌ Close", callback_data: "ss_close" }]
+        ]
+      }
+    });
   }
 
-  // 2) Devolvemos la edición del mensaje dentro del mismo if
-  return bot.editMessageText(viewText, {
-    chat_id:    chatId,
-    message_id: msgId,
-    parse_mode: "Markdown",
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "◀️ Back",  callback_data: "ss_back"  }],
-        [{ text: "❌ Close", callback_data: "ss_close" }]
-      ]
-    }
-  });
-}
-
   // ── Ultra V2 seleccionado ──
-  if (data === "ss_ultra") {
-    const text =
-  `*🚀 Ultra V2* is your all-in-one optimiser for swaps, engineered to maximize success and minimize slippage.\n\n` +
-  `🔧 *Optimised Transaction Landing*  \n` +
-  `Dynamically calibrates fee & slippage to land your TX swiftly and reliably, with built-in MEV protection.\n\n` +
-  `📊 *Real-Time Slippage Estimation (RTSE)*  \n` +
-  `Continuously monitors market depth & volatility to auto-adjust slippage, balancing price impact vs. execution.\n\n` +
-  `⛽️ *Gasless Support*  \n` +
-  `Eligible users can enjoy fee-less trades when SOL balance is low. Never miss a bot opportunity!`;
-
+  if (data === 'ss_ultra') {
+    const ultraText =
+      `*🚀 Ultra V2* is your all-in-one optimiser for swaps, engineered to maximize success and minimize slippage.\n\n` +
+      `🔧 *Optimised Transaction Landing*  \n` +
+      `Dynamically calibrates fee & slippage to land your TX swiftly and reliably, with built-in MEV protection.\n\n` +
+      `📊 *Real-Time Slippage Estimation (RTSE)*  \n` +
+      `Continuously monitors market depth & volatility to auto-adjust slippage, balancing price impact vs. execution.\n\n` +
+      `⛽️ *Gasless Support*  \n` +
+      `Eligible users can enjoy fee-less trades when SOL balance is low. Never miss a bot opportunity!`;
     const keyboard = {
       inline_keyboard: [
         [{ text: "✅ Activate Ultra V2", callback_data: "ss_confirm" }],
@@ -4698,8 +4636,7 @@ if (data === 'ss_view') {
         [{ text: "❌ Close",            callback_data: "ss_close"   }]
       ]
     };
-
-    return bot.editMessageText(text, {
+    return bot.editMessageText(ultraText, {
       chat_id:    chatId,
       message_id: msgId,
       parse_mode: "Markdown",
@@ -4707,261 +4644,147 @@ if (data === 'ss_view') {
     });
   }
 
-    // ── Confirmación de Ultra V2 ──
-if (data === "ss_confirm") {
-  swapSettings.mode = 'ultraV2';
-  // 1) Siempre slippage dinámico
-  swapSettings.dynamicSlippage = true;
-  delete swapSettings.slippageBps;
-  // 2) Desactivar Jito y Exact Fee custom si estaban activos
-  swapSettings.jitoTipLamports = 0;
-  swapSettings.useExactFee    = false;
-  // Limpio el estado de flujo
-  delete users[chatId].swapState;
-  saveUsers();
-  return bot.editMessageText(
-    "✅ *Ultra V2 activated!* Slippage will now be dynamic. Use /swapsettings to review or change.",
-    { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
-  );
-}
-  
-    // ── Manual: iniciar slippage ──
-// ── Manual: iniciar slippage ──
-if (data === 'ss_manual') {
-  swapSettings.mode = 'manual';
-  state.stage       = STAGES.SLIPPAGE;
-  saveUsers();
-  return bot.editMessageText(
-  `*🛠️ Manual Mode*\n` +
-  `You’re in full control—set your own slippage carefully to balance success vs. price impact.\n\n` +
-  `*📉 Slippage Tolerance*\n` +
-  `• *Fixed* (10–20%): Secure execution even with lower fees.\n` +
-  `• *Dynamic*: Auto-adjusts to current liquidity & priority (best paired with higher Priority Fee or Jito).`,
-    {
-      chat_id:    chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "1%",       callback_data: "ss_slip_100"    },
-            { text: "5%",       callback_data: "ss_slip_500"    },
-            { text: "10%",      callback_data: "ss_slip_1000"   }
-          ],
-          [
-            { text: "20%",      callback_data: "ss_slip_2000"   },
-            { text: "Dynamic",  callback_data: "ss_slip_dynamic"}
-          ],
-          [
-            { text: "◀️ Back",   callback_data: "ss_back"        },
-            { text: "❌ Close",  callback_data: "ss_close"       }
-          ]
-        ]
-      }
-    }
-  );
-}
-
-// ── Selección de Slippage ──
-if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
-  if (data === 'ss_slip_dynamic') {
-    swapSettings.dynamicSlippage = true;
+  // ── Confirmación de Ultra V2 ──
+  if (data === 'ss_confirm') {
+    swapSettings.mode             = 'ultraV2';
+    swapSettings.dynamicSlippage  = true;
     delete swapSettings.slippageBps;
-  } else {
-    swapSettings.slippageBps     = parseInt(data.split('_')[2], 10);
-    swapSettings.dynamicSlippage = false;
-  }
-  //  Ahora vamos al paso de Fee Type
-  state.stage = STAGES.FEE;
-  saveUsers();
-  return bot.editMessageText(
-  `*💰 Fee Type*\n\n` +
-  `• _Max Cap_: Let Jupiter automatically minimise your fee based on network conditions.\n` +
-  `• _Exact Fee_: You choose the exact amount to pay for maximum priority.`,
-    {
-      chat_id:    chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "Max Cap",   callback_data: "ss_fee_max"   }],
-          [{ text: "Exact Fee", callback_data: "ss_fee_exact" }],
-          [
-            { text: "◀️ Back", callback_data: "ss_back"  },
-            { text: "❌ Close",callback_data: "ss_close"}
-          ]
-        ]
-      }
-    }
-  );
-}
-
-// ── Selección de Fee Type y Priority Fee ──
-if (state.stage === STAGES.FEE) {
-  // 1) Elegir Max Cap vs Exact Fee
-  if (data === 'ss_fee_max' || data === 'ss_fee_exact') {
-    swapSettings.useExactFee = (data === 'ss_fee_exact');
-    saveUsers();
-    return bot.editMessageText(
-  `*⚡ Priority Fee*\n` +
-  `Pay more to jump ahead in the block and outpace other bots.\n\n` +
-  `🏃 *Speed options:*  \n` +
-  `• Fast:    0.0040 SOL  \n` +
-  `• Turbo:   0.0050 SOL  \n` +
-  `• Extreme: 0.0080 SOL`,
-      {
-        chat_id:    chatId,
-        message_id: msgId,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "Fast",    callback_data: "ss_fee_fast"    },
-              { text: "Turbo",   callback_data: "ss_fee_turbo"   }
-            ],
-            [
-              { text: "Extreme", callback_data: "ss_fee_extreme" }
-            ],
-            [
-              { text: "◀️ Back",   callback_data: "ss_back"  },
-              { text: "❌ Close",  callback_data: "ss_close" }
-            ]
-          ]
-        }
-      }
-    );
-  }
-
-  // 2) Priority Fee fijo (Fast/Turbo/Extreme)
-  if (['ss_fee_fast','ss_fee_turbo','ss_fee_extreme'].includes(data)) {
-    const map = { fast: 4000000, turbo: 6000000, extreme: 8000000 };
-    const key = data.split('_')[2];
-    swapSettings.priorityFeeLamports = map[key];
-    state.stage = STAGES.JITO;
-    saveUsers();
-    // Pasamos al Jito
-    return bot.editMessageText(
-  `*🛡️ Jito (MEV Protection)*\n` +
-  `Route your transaction through Jito’s relayer to guard against frontrunning and sandwich attacks.\n\n` +
-  `💧 *Tip options:*  \n` +
-  `• Tip 1: 0.001 SOL (basic protection)  \n` +
-  `• Tip 2: 0.002 SOL (recommended)      \n` +
-  `• Tip 3: 0.003 SOL (max priority)`,
-      {
-        chat_id:    chatId,
-        message_id: msgId,
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "Tip 1", callback_data: "ss_jito_1000000" },
-              { text: "Tip 2", callback_data: "ss_jito_2000000" }
-            ],
-            [
-              { text: "Tip 3", callback_data: "ss_jito_3000000" },
-              { text: "Off ❌",               callback_data: "ss_jito_off"     }
-            ],
-            [
-              { text: "◀️ Back",  callback_data: "ss_back"  },
-              { text: "❌ Close", callback_data: "ss_close" }
-            ]
-          ]
-        }
-      }
-    );
-  }
-}
-
-  // ── Jito fijo / off ──
-  if (state.stage === STAGES.JITO && data.startsWith('ss_jito_')) {
-    if (data === 'ss_jito_off') {
-      swapSettings.jitoTipLamports = 0;
-    } else {
-      swapSettings.jitoTipLamports = parseInt(data.split('_')[2], 10);
-    }
+    swapSettings.useExactFee      = false;
+    swapSettings.jitoTipLamports  = 0;
     delete users[chatId].swapState;
     saveUsers();
     return bot.editMessageText(
-      `✅ Manual swap settings saved! Slippage: ${(swapSettings.slippageBps/100).toFixed(2)}%, ` +
-      `Fee: ${(swapSettings.priorityFeeLamports/1e9).toFixed(6)} SOL, ` +
-      `Jito Tip: ${swapSettings.jitoTipLamports
-                    ? (swapSettings.jitoTipLamports/1e9).toFixed(6)+' SOL'
-                    : 'Off'}.\n` +
-      `Use /swapsettings to review or change.`,
+      "✅ *Ultra V2 activated!* Slippage will now be dynamic. Use /swapsettings to review or change.",
+      { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
+    );
+  }
+
+  // ── Manual: iniciar slippage ──
+  if (data === 'ss_manual') {
+    swapSettings.mode = 'manual';
+    state.stage       = STAGES.SLIPPAGE;
+    saveUsers();
+    return bot.editMessageText(
+      `*🛠️ Manual Mode*\n` +
+      `You’re in full control—set your own slippage carefully to balance success vs. price impact.\n\n` +
+      `*📉 Slippage Tolerance*\n` +
+      `• *Fixed* (10–20%): Secure execution even with lower fees.\n` +
+      `• *Dynamic*: Auto-adjusts to current liquidity & priority (best paired with higher Priority Fee).`,
       {
         chat_id:    chatId,
         message_id: msgId,
-        parse_mode: "Markdown"
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "1%",       callback_data: "ss_slip_100"    },
+              { text: "5%",       callback_data: "ss_slip_500"    },
+              { text: "10%",      callback_data: "ss_slip_1000"   }
+            ],
+            [
+              { text: "20%",      callback_data: "ss_slip_2000"   },
+              { text: "Dynamic",  callback_data: "ss_slip_dynamic"}
+            ],
+            [
+              { text: "◀️ Back",   callback_data: "ss_back"        },
+              { text: "❌ Close",  callback_data: "ss_close"       }
+            ]
+          ]
+        }
       }
     );
   }
-}); // <-- cierre de bot.on('callback_query'
 
-// ────────────────────────────────
-// 5) Captura de mensajes de texto para custom inputs
-// ────────────────────────────────
-bot.on('message', async msg => {
-  const chatId = msg.chat.id;
-  const text   = msg.text?.trim();
-  if (!text || !users[chatId]?.swapState) return;
-  const state    = users[chatId].swapState;
-  const settings = users[chatId].swapSettings;
-
-  // Slippage custom
-  if (state.stage === STAGES.SLIP_CUSTOM) {
-    const val = Number(text);
-    if (!val || val < 1 || val > 100) {
-      return bot.sendMessage(chatId, "⚠️ Enter a number between 1 and 100.");
+  // ── Selección de Slippage ──
+  if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
+    if (data === 'ss_slip_dynamic') {
+      swapSettings.dynamicSlippage = true;
+      delete swapSettings.slippageBps;
+    } else {
+      swapSettings.slippageBps     = parseInt(data.split('_')[2], 10);
+      swapSettings.dynamicSlippage = false;
     }
-    settings.slippageBps = Math.round(val * 100);
     state.stage = STAGES.FEE;
     saveUsers();
-    // borrar el prompt del usuario
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-    // reenviar prioridad de fee
-    return bot.emit('callback_query', {
-      message: { chat: { id: chatId }, message_id: msg.message_id },
-      data: 'ss_fee_fast',
-      id: null
-    });
-  }
-
-  // Fee custom
-  if (state.stage === STAGES.FEE_CUSTOM) {
-    const sol = Number(text);
-    if (!sol || sol <= 0) {
-      return bot.sendMessage(chatId, "⚠️ Enter a positive SOL value (e.g. 0.002).");
-    }
-    settings.priorityFeeLamports = Math.floor(sol * 1e9);
-    state.stage = STAGES.JITO;
-    saveUsers();
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-    return bot.emit('callback_query', {
-      message: { chat: { id: chatId }, message_id: msg.message_id },
-      data: 'ss_jito_1000000',
-      id: null
-    });
-  }
-
-  // Jito custom
-  if (state.stage === STAGES.JITO_CUSTOM) {
-    const sol = Number(text);
-    if (!sol || sol < 0) {
-      return bot.sendMessage(chatId, "⚠️ Enter a non-negative SOL value (e.g. 0.001).");
-    }
-    settings.jitoTipLamports = Math.floor(sol * 1e9);
-    delete users[chatId].swapState;
-    saveUsers();
-    await bot.deleteMessage(chatId, msg.message_id).catch(() => {});
-    return bot.sendMessage(chatId,
-      `✅ Manual swap settings saved! Slippage: ${(settings.slippageBps/100).toFixed(2)}%, ` +
-      `Fee: ${(settings.priorityFeeLamports/1e9).toFixed(6)} SOL, ` +
-      `Jito Tip: ${(settings.jitoTipLamports/1e9).toFixed(6)} SOL.\n` +
-      `Use /swapsettings to review or change.`,
-      { parse_mode: "Markdown" }
+    return bot.editMessageText(
+      `*💰 Fee Type*\n\n` +
+      `• _Max Cap_: Let Jupiter automatically minimise your fee based on network conditions.\n` +
+      `• _Exact Fee_: You choose the exact amount to pay for maximum priority.`,
+      {
+        chat_id:    chatId,
+        message_id: msgId,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Max Cap",   callback_data: "ss_fee_max"   }],
+            [{ text: "Exact Fee", callback_data: "ss_fee_exact" }],
+            [
+              { text: "◀️ Back", callback_data: "ss_back"  },
+              { text: "❌ Close",callback_data: "ss_close"}
+            ]
+          ]
+        }
+      }
     );
   }
-});
+
+  // ── Selección de Fee Type y Priority Fee ──
+  if (state.stage === STAGES.FEE) {
+    // 1) Elegir Max Cap vs Exact Fee
+    if (data === 'ss_fee_max' || data === 'ss_fee_exact') {
+      swapSettings.useExactFee = (data === 'ss_fee_exact');
+      saveUsers();
+      return bot.editMessageText(
+        `*⚡ Priority Fee*\n` +
+        `Pay more to jump ahead in the block and outpace other bots.\n\n` +
+        `🏃 *Speed options:*  \n` +
+        `• Fast:    0.0040 SOL  \n` +
+        `• Turbo:   0.0050 SOL  \n` +
+        `• Extreme: 0.0080 SOL`,
+        {
+          chat_id:    chatId,
+          message_id: msgId,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "Fast",    callback_data: "ss_fee_fast"    },
+                { text: "Turbo",   callback_data: "ss_fee_turbo"   }
+              ],
+              [
+                { text: "Extreme", callback_data: "ss_fee_extreme" }
+              ],
+              [
+                { text: "◀️ Back",   callback_data: "ss_back"  },
+                { text: "❌ Close",  callback_data: "ss_close" }
+              ]
+            ]
+          }
+        }
+      );
+    }
+
+    // 2) Priority Fee fijo (Fast/Turbo/Extreme)
+    if (['ss_fee_fast','ss_fee_turbo','ss_fee_extreme'].includes(data)) {
+      const map = { fast: 4000000, turbo: 6000000, extreme: 8000000 };
+      const key = data.split('_')[2];
+      swapSettings.priorityFeeLamports = map[key];
+      delete users[chatId].swapState;
+      saveUsers();
+      return bot.editMessageText(
+        `✅ Manual swap settings saved! Slippage: ${(swapSettings.slippageBps/100).toFixed(2)}%, ` +
+        `Fee: ${(swapSettings.priorityFeeLamports/1e9).toFixed(6)} SOL.\n` +
+        `Use /swapsettings to review or change.`,
+        {
+          chat_id:    chatId,
+          message_id: msgId,
+          parse_mode: "Markdown"
+        }
+      );
+    }
+  }
+
+}); // <-- cierre de bot.on('callback_query'
 
 // 🔥 Cargar suscriptores al iniciar
 loadUsers();
