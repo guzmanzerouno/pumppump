@@ -1884,6 +1884,7 @@ function getTokenInfo(mintAddress) {
   const tokens = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
   return tokens[mintAddress] || { symbol: "N/A", name: "N/A" };
 }
+
 // ────────────────────────────────
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
@@ -1916,8 +1917,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
     } catch (err) {
       console.warn(`[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`);
-      const fallbackRpc    = getNextRpc();
-      const fallbackConn   = new Connection(fallbackRpc, "processed");
+      const fallbackRpc  = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
       await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
       console.log(`[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`);
       releaseRpc(fallbackRpc);
@@ -1941,7 +1942,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
     }
 
-    // 6) Parámetros de orden, con slippage dinámico o fijo
+    // ── 6) Parámetros de orden, con slippage dinámico o fijo ──
     const orderParams = {
       inputMint:  "So11111111111111111111111111111111111111112",
       outputMint: mint,
@@ -1970,36 +1971,38 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-// 7) Deserializar, inyectar Exact Fee si corresponde y firmar
-const txBuf = Buffer.from(unsignedTx, "base64");
-let vtx;
+    // ── 7) Deserializar, inyectar Exact Fee si corresponde y firmar ──
+    const txBuf = Buffer.from(unsignedTx, "base64");
+    let signedTxBase64;
 
-// 1️⃣ Intenta siempre VersionedTransaction
-try {
-  vtx = VersionedTransaction.deserialize(txBuf);
-  console.log("[buyToken] Parsed as full VersionedTransaction");
-} catch (e) {
-  console.warn("[buyToken] Fallback to legacy VersionedTransaction:", e.message);
-  // 2️⃣ Si falla, extrae el mensaje y vuelve a armar
-  const msg = VersionedMessage.deserialize(txBuf);
-  vtx = new VersionedTransaction(msg);
-}
+    // Intentar primero como VersionedTransaction completo
+    let vtx;
+    try {
+      vtx = VersionedTransaction.deserialize(txBuf);
+      console.log("[buyToken] Parsed as full VersionedTransaction");
+    } catch {
+      // Si falla, es sólo un VersionedMessage
+      const msg = VersionedMessage.deserialize(txBuf);
+      console.log("[buyToken] Parsed as VersionedMessage");
+      vtx = new VersionedTransaction(msg);
+    }
 
-// 3️⃣ Comprueba priorityFeeLamports antes de inyectar
-if (user.swapSettings.useExactFee) {
-  if (typeof user.swapSettings.priorityFeeLamports !== 'number') {
-    throw new Error("priorityFeeLamports undefined at injection time");
-  }
-  console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
-  const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
-  vtx.message.instructions.unshift(feeIx);
-}
+    // Inyectar Exact Fee (sólo si está activado)
+    if (user.swapSettings.useExactFee) {
+      const cuPrice = user.swapSettings.priorityFeeLamports;
+      console.log("[DEBUG] priorityFeeLamports =", cuPrice);
+      if (typeof cuPrice !== "number") {
+        throw new Error("Invalid computeUnitPrice: " + cuPrice);
+      }
+      const feeIx = ComputeBudgetProgram.setComputeUnitPrice(cuPrice);
+      vtx.message.instructions.unshift(feeIx);
+    }
 
-// 4️⃣ Firma y serialize
-vtx.sign([userKeypair]);
-const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    // Firmar y serializar
+    vtx.sign([userKeypair]);
+    signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
-    // 8) Ejecutar con Ultra Execute usando tarifas configuradas
+    // ── 8) Ejecutar con Ultra Execute usando tarifas configuradas ──
     const executePayload = {
       signedTransaction:         signedTxBase64,
       requestId:                 requestId,
@@ -2017,7 +2020,7 @@ const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
     const txSignature = exec.txSignature || exec.signature;
     console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
 
-    // 9) Guardar referencia para confirmBuy
+    // ── 9) Guardar referencia para confirmBuy ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
@@ -2033,6 +2036,7 @@ const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
     return Promise.reject(error);
+
   } finally {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
