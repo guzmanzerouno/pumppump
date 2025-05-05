@@ -1972,38 +1972,31 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
 
     // 7) Deserializar, inyectar Exact Fee si corresponde y firmar
     const txBuf = Buffer.from(unsignedTx, "base64");
-    let signedTxBase64;
-    try {
-      // Mensaje versionado
-      const message = VersionedMessage.deserialize(txBuf);
-      console.log("[buyToken] Deserializado con VersionedMessage");
-      const vtx = new VersionedTransaction(message);
+let signedTxBase64;
 
-      // Exact Fee (sólo si está activado)
-      if (user.swapSettings.useExactFee) {
-        console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
-        const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
-        vtx.message.instructions.unshift(feeIx);
-      }
+// first, see if it's a full VersionedTransaction
+let vtx;
+try {
+  vtx = VersionedTransaction.deserialize(txBuf);
+  console.log("[buyToken] Parsed as full VersionedTransaction");
+} catch {
+  // if that fails, it's (just) a VersionedMessage
+  const msg = VersionedMessage.deserialize(txBuf);
+  console.log("[buyToken] Parsed as VersionedMessage");
+  vtx = new VersionedTransaction(msg);
+}
 
-      vtx.sign([userKeypair]);
-      signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+// now inject your exact fee, only if the user asked for it
+if (user.swapSettings.useExactFee) {
+  console.log(`[buyToken] Injecting Exact Fee: ${user.swapSettings.priorityFeeLamports}`);
+  vtx.message.instructions.unshift(
+    ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
+  );
+}
 
-    } catch {
-      // Fallback a legacy
-      console.warn("[buyToken] Fallback a Transaction legacy");
-      const legacy = Transaction.from(txBuf);
-
-      if (user.swapSettings.useExactFee) {
-        console.log(`[buyToken] Inyectando Exact Fee legacy: ${user.swapSettings.priorityFeeLamports}`);
-        legacy.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports)
-        );
-      }
-
-      legacy.sign(userKeypair);
-      signedTxBase64 = Buffer.from(legacy.serialize()).toString("base64");
-    }
+// sign & serialize
+vtx.sign([userKeypair]);
+signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // 8) Ejecutar con Ultra Execute usando tarifas configuradas
     const executePayload = {
