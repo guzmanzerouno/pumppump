@@ -1280,19 +1280,41 @@ const notifMap = {
     const currentNotif = notifMap[user.newTokenNotif || "always"];
     lines.push(`🔔 *Alerts:* ${currentNotif}`);
   
-    const caption = lines.join("\n");
-  
-    await bot.sendAnimation(chatId, gifUrl, {
-      caption,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [ { text: "❔ Help",                  url: "https://gemsniping.com/docs" } ],
-          [ { text: "❌ Close",              callback_data: "status_close" } ]
-        ]
-      }
-    });
+    // ────────────────────────────────
+  // Aquí añadimos la sección de Swap Settings
+  // ────────────────────────────────
+  const s = user.swapSettings || {};
+  lines.push(""); 
+  lines.push(`⚙️ *Swap Settings*`);
+  if (s.mode === 'ultraV2') {
+    lines.push(`• Mode: 🌟 Ultra V2 (dynamic slippage)`);
+  } else {
+    lines.push(`• Mode: ⚙️ Manual`);
+    // Slippage
+    lines.push(`• Slippage: ${s.dynamicSlippage ? 'Dynamic' : (s.slippageBps/100).toFixed(2) + '%'}`);
+    // Fee Type
+    lines.push(`• Fee Type: ${s.useExactFee ? 'Exact Fee' : 'Max Cap'}`);
+    // Fee amount
+    lines.push(`• Priority Fee: ${(s.priorityFeeLamports/1e9).toFixed(6)} SOL`);
+    // Jito tip
+    lines.push(`• Jito Tip: ${s.jitoTipLamports
+      ? (s.jitoTipLamports/1e9).toFixed(6) + ' SOL'
+      : 'Off'}`);
+  }
+
+  const caption = lines.join("\n");
+
+  await bot.sendAnimation(chatId, gifUrl, {
+    caption,
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [ { text: "❔ Help",                  url: "https://gemsniping.com/docs" } ],
+        [ { text: "❌ Close",              callback_data: "status_close" } ]
+      ]
+    }
   });
+});
 
 // ─────────────────────────────────────────────
 // callback para cerrar el mensaje de /status
@@ -4502,7 +4524,7 @@ bot.onText(/^\/swapsettings$/, async msg => {
     // Ambos campos han de existir:
     dynamicSlippage: true,
     slippageBps:     50,         // por defecto 0.5%
-    priorityFeeLamports: 5000000,
+    priorityFeeLamports: 6000000,
     useExactFee:          false,        // <— nueva bandera
     jitoTipLamports: 0
   };
@@ -4572,46 +4594,48 @@ bot.on('callback_query', async query => {
 
   // ── View Current ──
   if (data === 'ss_view') {
-    let text = `*Current Swap Settings:*\n\n`;
+  let text = `*Current Swap Settings:*\n\n`;
 
-    if (swapSettings.mode === 'ultraV2') {
-      text += `Mode: 🌟 *Ultra V2 activated!*`;
-    } else {
-      text += `Mode: ⚙️ *Manual*\n` +
-              `• Slippage: ${(swapSettings.slippageBps / 100).toFixed(2)}%\n` +
-              `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
-              `• Jito Tip: ${swapSettings.jitoTipLamports
-                             ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
-                             : 'Off'}`;
-    }
-
-    return bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: msgId,
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "◀️ Back",  callback_data: "ss_back"  }],
-          [{ text: "❌ Close", callback_data: "ss_close" }]
-        ]
-      }
-    });
+  if (swapSettings.mode === 'ultraV2') {
+    text +=
+      `Mode: 🌟 *Ultra V2 activated!*\n` +
+      `• Slippage: Dynamic`; // Ultra V2 siempre dinámica
+  } else {
+    text +=
+      `Mode: ⚙️ *Manual*\n` +
+      `• Slippage: ${swapSettings.dynamicSlippage
+                       ? 'Dynamic'
+                       : (swapSettings.slippageBps / 100).toFixed(2) + '%'}\n` +
+      `• Fee Type: ${swapSettings.useExactFee ? 'Exact Fee' : 'Max Cap'}\n` +
+      `• Fee: ${(swapSettings.priorityFeeLamports / 1e9).toFixed(6)} SOL\n` +
+      `• Jito Tip: ${swapSettings.jitoTipLamports
+                       ? (swapSettings.jitoTipLamports / 1e9).toFixed(6) + ' SOL'
+                       : 'Off'}`;
   }
+
+  return bot.editMessageText(text, {
+    chat_id:      chatId,
+    message_id:   msgId,
+    parse_mode:   "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "◀️ Back",  callback_data: "ss_back"  }],
+        [{ text: "❌ Close", callback_data: "ss_close" }]
+      ]
+    }
+  });
+}
 
   // ── Ultra V2 seleccionado ──
   if (data === "ss_ultra") {
-    const text =
-`*Ultra V2* is designed to help you get the most out of every swap by optimising for the transaction’s success rate and slippage.
-
-➤ *Optimised Transaction Landing*  
-Ultra V2 dynamically fine-tunes the optimal settings required to land your transaction fast and successfully, while offering MEV mitigation.
-
-➤ *Real-Time Slippage Estimation (RTSE)*  
-RTSE analyses current market conditions, monitors price impact and volatility,  
-and adjusts slippage settings automatically to balance success vs. price protection.
-
-➤ *Gasless Support*  
-If you don’t have enough SOL for fees, Ultra V2 can offer you a gasless trade when eligible.`;
+    const ultraV2Text =
+  `*🚀 Ultra V2* is your all-in-one optimiser for swaps, engineered to maximize success and minimize slippage.\n\n` +
+  `🔧 *Optimised Transaction Landing*  \n` +
+  `Dynamically calibrates fee & slippage to land your TX swiftly and reliably, with built-in MEV protection.\n\n` +
+  `📊 *Real-Time Slippage Estimation (RTSE)*  \n` +
+  `Continuously monitors market depth & volatility to auto-adjust slippage, balancing price impact vs. execution.\n\n` +
+  `⛽️ *Gasless Support*  \n` +
+  `Eligible users can enjoy fee-less trades when SOL balance is low. Never miss a bot opportunity!`;
 
     const keyboard = {
       inline_keyboard: [
@@ -4654,8 +4678,11 @@ if (data === 'ss_manual') {
   state.stage       = STAGES.SLIPPAGE;
   saveUsers();
   return bot.editMessageText(
-    `*Manual Mode*\nYou have full control—please proceed with caution.\n\n` +
-    `*Max Slippage*\nChoose a fixed slippage tolerance:`,
+  `*🛠️ Manual Mode*\n` +
+  `You’re in full control—set your own slippage carefully to balance success vs. price impact.\n\n` +
+  `*📉 Slippage Tolerance*\n` +
+  `• *Fixed* (10–20%): Secure execution even with lower fees.\n` +
+  `• *Dynamic*: Auto-adjusts to current liquidity & priority (best paired with higher Priority Fee or Jito).`,
     {
       chat_id:    chatId,
       message_id: msgId,
@@ -4694,8 +4721,9 @@ if (state.stage === STAGES.SLIPPAGE && data.startsWith('ss_slip_')) {
   state.stage = STAGES.FEE;
   saveUsers();
   return bot.editMessageText(
-    `*Fee Type*\n\nFor _Max Cap_, Jupiter will intelligently minimize your fees.\n` +
-    `Use _Exact Fee_ to specify your own fee value:`,
+  `*💰 Fee Type*\n\n` +
+  `• _Max Cap_: Let Jupiter automatically minimise your fee based on network conditions.\n` +
+  `• _Exact Fee_: You choose the exact amount to pay for maximum priority.`,
     {
       chat_id:    chatId,
       message_id: msgId,
@@ -4721,7 +4749,12 @@ if (state.stage === STAGES.FEE) {
     swapSettings.useExactFee = (data === 'ss_fee_exact');
     saveUsers();
     return bot.editMessageText(
-      `*Priority Fee*\nChoose how much you want to pay:`,
+  `*⚡ Priority Fee*\n` +
+  `Pay more to jump ahead in the block and outpace other bots.\n\n` +
+  `🏃 *Speed options:*  \n` +
+  `• Fast:    0.0040 SOL  \n` +
+  `• Turbo:   0.0050 SOL  \n` +
+  `• Extreme: 0.0080 SOL`,
       {
         chat_id:    chatId,
         message_id: msgId,
@@ -4729,9 +4762,11 @@ if (state.stage === STAGES.FEE) {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "Fast (0.0035 SOL)",    callback_data: "ss_fee_fast"    },
-              { text: "Turbo (0.0055 SOL)",   callback_data: "ss_fee_turbo"   },
-              { text: "Extreme (0.0075 SOL)", callback_data: "ss_fee_extreme" }
+              { text: "Fast",    callback_data: "ss_fee_fast"    },
+              { text: "Turbo",   callback_data: "ss_fee_turbo"   }
+            ],
+            [
+              { text: "Extreme", callback_data: "ss_fee_extreme" }
             ],
             [
               { text: "◀️ Back",   callback_data: "ss_back"  },
@@ -4745,14 +4780,19 @@ if (state.stage === STAGES.FEE) {
 
   // 2) Priority Fee fijo (Fast/Turbo/Extreme)
   if (['ss_fee_fast','ss_fee_turbo','ss_fee_extreme'].includes(data)) {
-    const map = { fast: 3500000, turbo: 5500000, extreme: 7500000 };
+    const map = { fast: 4000000, turbo: 6000000, extreme: 8000000 };
     const key = data.split('_')[2];
     swapSettings.priorityFeeLamports = map[key];
     state.stage = STAGES.JITO;
     saveUsers();
     // Pasamos al Jito
     return bot.editMessageText(
-      `*Jito (MEV Protection)*\nSend via Jito relayer to reduce MEV risk:`,
+  `*🛡️ Jito (MEV Protection)*\n` +
+  `Route your transaction through Jito’s relayer to guard against frontrunning and sandwich attacks.\n\n` +
+  `💧 *Tip options:*  \n` +
+  `• Tip 1: 0.001 SOL (basic protection)  \n` +
+  `• Tip 2: 0.002 SOL (recommended)      \n` +
+  `• Tip 3: 0.003 SOL (max priority)`,
       {
         chat_id:    chatId,
         message_id: msgId,
@@ -4760,11 +4800,11 @@ if (state.stage === STAGES.FEE) {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "Tip 1 (0.001 SOL)", callback_data: "ss_jito_1000000" },
-              { text: "Tip 2 (0.002 SOL)", callback_data: "ss_jito_2000000" }
+              { text: "Tip 1", callback_data: "ss_jito_1000000" },
+              { text: "Tip 2", callback_data: "ss_jito_2000000" }
             ],
             [
-              { text: "Tip 3 (0.003 SOL)", callback_data: "ss_jito_3000000" },
+              { text: "Tip 3", callback_data: "ss_jito_3000000" },
               { text: "Off",               callback_data: "ss_jito_off"     }
             ],
             [
