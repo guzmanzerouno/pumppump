@@ -1970,24 +1970,32 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     }
     unsignedTx = unsignedTx.trim();
 
-   // 7) Deserializar, inyectar Exact Fee si corresponde y firmar
+// 7) Deserializar, inyectar Exact Fee si corresponde y firmar
 const txBuf = Buffer.from(unsignedTx, "base64");
+let vtx;
 
-// 1️⃣ Deserializa SIEMPRE como mensaje versionado  
-const message = VersionedMessage.deserialize(txBuf);
-console.log("[buyToken] Deserializado con VersionedMessage");
+// 1️⃣ Intenta siempre VersionedTransaction
+try {
+  vtx = VersionedTransaction.deserialize(txBuf);
+  console.log("[buyToken] Parsed as full VersionedTransaction");
+} catch (e) {
+  console.warn("[buyToken] Fallback to legacy VersionedTransaction:", e.message);
+  // 2️⃣ Si falla, extrae el mensaje y vuelve a armar
+  const msg = VersionedMessage.deserialize(txBuf);
+  vtx = new VersionedTransaction(msg);
+}
 
-// 2️⃣ Construye la transacción a partir del mensaje  
-const vtx = new VersionedTransaction(message);
-
-// 3️⃣ Inyecta Exact Fee si está activado  
+// 3️⃣ Comprueba priorityFeeLamports antes de inyectar
 if (user.swapSettings.useExactFee) {
+  if (typeof user.swapSettings.priorityFeeLamports !== 'number') {
+    throw new Error("priorityFeeLamports undefined at injection time");
+  }
   console.log(`[buyToken] Inyectando Exact Fee compute unit price: ${user.swapSettings.priorityFeeLamports}`);
   const feeIx = ComputeBudgetProgram.setComputeUnitPrice(user.swapSettings.priorityFeeLamports);
   vtx.message.instructions.unshift(feeIx);
 }
 
-// 4️⃣ Firma y serializa  
+// 4️⃣ Firma y serialize
 vtx.sign([userKeypair]);
 const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
