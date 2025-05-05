@@ -1287,7 +1287,7 @@ const notifMap = {
   lines.push(""); 
   lines.push(`⚙️ *Swap Settings*`);
   if (s.mode === 'ultraV2') {
-    lines.push(`• Mode: 🌟 Ultra V2 (dynamic slippage)`);
+    lines.push(`• Mode: 🌟 Ultra V2 activated!`);
   } else {
     lines.push(`• Mode: ⚙️ Manual`);
     // Slippage
