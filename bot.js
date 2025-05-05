@@ -4532,8 +4532,8 @@ bot.onText(/^\/swapsettings$/, async msg => {
   saveUsers();
   // Mostrar menú principal
   await bot.sendMessage(chatId,
-    `*Swap Settings*\n\n` +
-    `Select how you want me to execute your swaps:`,
+`*⚙️ Swap Settings*\n\n` +
+`Ready to trade? Select your execution mode below to get started!`,
     {
       parse_mode: "Markdown",
       reply_markup: {
@@ -4574,8 +4574,8 @@ bot.on('callback_query', async query => {
   // ── Back: volver al menú principal ──
   if (data === "ss_back") {
     const mainText =
-      `*Swap Settings*\n\n` +
-      `Select how you want me to execute your swaps:`;
+    `*⚙️ Swap Settings*\n\n` +
+    `Ready to trade? Select your execution mode below to get started!`;
     const mainKeyboard = {
       inline_keyboard: [
         [{ text: "🌟 Ultra V2 (Recommended)", callback_data: "ss_ultra" }],
@@ -4599,8 +4599,7 @@ if (data === 'ss_view') {
 
   if (swapSettings.mode === 'ultraV2') {
     viewText +=
-      `Mode: 🌟 *Ultra V2 activated!*\n` +
-      `• Slippage: Dynamic`; // Ultra V2 siempre dinámica
+      `Mode: 🌟 *Ultra V2 activated!*`;
   } else {
     viewText +=
       `Mode: ⚙️ *Manual*\n` +
