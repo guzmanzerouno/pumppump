@@ -4630,7 +4630,7 @@ if (data === 'ss_view') {
 
   // ── Ultra V2 seleccionado ──
   if (data === "ss_ultra") {
-    const ultraV2Text =
+    const text =
   `*🚀 Ultra V2* is your all-in-one optimiser for swaps, engineered to maximize success and minimize slippage.\n\n` +
   `🔧 *Optimised Transaction Landing*  \n` +
   `Dynamically calibrates fee & slippage to land your TX swiftly and reliably, with built-in MEV protection.\n\n` +
