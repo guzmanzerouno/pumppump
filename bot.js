@@ -4592,16 +4592,17 @@ bot.on('callback_query', async query => {
     });
   }
 
-  // ── View Current ──
-  if (data === 'ss_view') {
-  let text = `*Current Swap Settings:*\n\n`;
+// ── View Current ──
+if (data === 'ss_view') {
+  // 1) Preparamos el texto
+  let viewText = `*Current Swap Settings:*\n\n`;
 
   if (swapSettings.mode === 'ultraV2') {
-    text +=
+    viewText +=
       `Mode: 🌟 *Ultra V2 activated!*\n` +
       `• Slippage: Dynamic`; // Ultra V2 siempre dinámica
   } else {
-    text +=
+    viewText +=
       `Mode: ⚙️ *Manual*\n` +
       `• Slippage: ${swapSettings.dynamicSlippage
                        ? 'Dynamic'
@@ -4613,10 +4614,11 @@ bot.on('callback_query', async query => {
                        : 'Off'}`;
   }
 
-  return bot.editMessageText(text, {
-    chat_id:      chatId,
-    message_id:   msgId,
-    parse_mode:   "Markdown",
+  // 2) Devolvemos la edición del mensaje dentro del mismo if
+  return bot.editMessageText(viewText, {
+    chat_id:    chatId,
+    message_id: msgId,
+    parse_mode: "Markdown",
     reply_markup: {
       inline_keyboard: [
         [{ text: "◀️ Back",  callback_data: "ss_back"  }],
