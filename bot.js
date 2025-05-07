@@ -1889,6 +1889,7 @@ function getTokenInfo(mintAddress) {
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
+  const FIXED_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
   let rpcUrl;
   try {
     console.log(
@@ -1911,9 +1912,24 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     );
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 3) Asegurar Helius ──
+    // ── 3) Asegurar ATA con Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
+    try {
+      await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
+      console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    } catch (err) {
+      console.warn(
+        `[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+      );
+      const fallbackRpc = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
+      await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
+      console.log(
+        `[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+      );
+      releaseRpc(fallbackRpc);
+    }
 
     // ── 4) Chequear balance ──
     let balanceLamports;
@@ -1948,18 +1964,11 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: mint,
       amount: Math.floor(amountSOL * 1e9).toString(),
-      taker: userPublicKey.toBase58()
+      taker: userPublicKey.toBase58(),
+      computeUnitPriceMicroLamports: FIXED_FEE_LAMPORTS
     };
     
-    // Apply exact fee settings if enabled
-    if (user.swapSettings.useExactFee) {
-      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
-      console.log(`[buyToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
-    } else {
-      // For max cap, we still need to set a reasonable compute budget
-      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
-      console.log(`[buyToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
-    }
+    console.log(`[buyToken] Using fixed fee: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
@@ -1999,8 +2008,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
     };
+    console.log(`[buyToken] Using fixed fee for execution: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
@@ -2090,21 +2100,21 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 3) Asegurar ATA con Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
-    // try {
-    //   await ensureAssociatedTokenAccount(wallet, mint, readConnection);
-    //   console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
-    // } catch (err) {
-    //   console.warn(
-    //     `[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
-    //   );
-    //   const fallbackRpc = getNextRpc();
-    //   const fallbackConn = new Connection(fallbackRpc, "processed");
-    //   await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
-    //   console.log(
-    //     `[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
-    //   );
-    //   releaseRpc(fallbackRpc);
-    // }
+    try {
+      await ensureAssociatedTokenAccount(wallet, mint, readConnection);
+      console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    } catch (err) {
+      console.warn(
+        `[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+      );
+      const fallbackRpc = getNextRpc();
+      const fallbackConn = new Connection(fallbackRpc, "processed");
+      await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
+      console.log(
+        `[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+      );
+      releaseRpc(fallbackRpc);
+    }
 
     // ── 4) Construir parámetros de orden ──
     const orderParams = {
