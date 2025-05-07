@@ -1964,11 +1964,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: mint,
       amount: Math.floor(amountSOL * 1e9).toString(),
-      taker: userPublicKey.toBase58(),
-      computeUnitPriceMicroLamports: FIXED_FEE_LAMPORTS
+      taker: userPublicKey.toBase58()
     };
     
-    console.log(`[buyToken] Using fixed fee: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[buyToken] Order params:`, JSON.stringify(orderParams, null, 2));
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
@@ -2008,9 +2007,10 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
+      prioritizationFeeLamports: FIXED_FEE_LAMPORTS,
+      computeUnitPriceMicroLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
     };
-    console.log(`[buyToken] Using fixed fee for execution: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[buyToken] Execute payload:`, JSON.stringify(executePayload, null, 2));
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
@@ -2117,6 +2117,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     }
 
     // ── 4) Construir parámetros de orden ──
+    const FIXED_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
     const orderParams = {
       inputMint: mint,
       outputMint: SOL_MINT,
@@ -2124,15 +2125,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       taker: wallet.publicKey.toBase58()
     };
     
-    // Apply exact fee settings if enabled
-    if (user.swapSettings.useExactFee) {
-      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
-      console.log(`[sellToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
-    } else {
-      // For max cap, we still need to set a reasonable compute budget
-      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
-      console.log(`[sellToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
-    }
+    console.log(`[sellToken] Using fixed fee: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[sellToken] Slippage dinámico activado");
@@ -2169,9 +2162,10 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
+      prioritizationFeeLamports: FIXED_FEE_LAMPORTS,
+      computeUnitPriceMicroLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
     };
-    console.log("[sellToken] executePayload:", executePayload);
+    console.log("[sellToken] Execute payload:", JSON.stringify(executePayload, null, 2));
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
