@@ -1911,9 +1911,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     );
     const userPublicKey = userKeypair.publicKey;
 
-    // // ── 3) Asegurar ATA con Helius ──
-    // const readRpcUrl = getNextRpc();
-    // const readConnection = new Connection(readRpcUrl, "processed");
+    // ── 3) Asegurar ATA con Helius ──
+    const readRpcUrl = getNextRpc();
+    const readConnection = new Connection(readRpcUrl, "processed");
     // try {
     //   await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
     //   console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
