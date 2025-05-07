@@ -1889,7 +1889,8 @@ function getTokenInfo(mintAddress) {
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
+  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
+  const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   let rpcUrl;
   try {
     console.log(
@@ -1950,11 +1951,12 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       outputMint: mint,
       amount: Math.floor(amountSOL * 1e9).toString(),
       taker: userPublicKey.toBase58(),
-      // Always use exact fee of 0.006 SOL
-      computeUnitPriceMicroLamports: Math.floor(EXACT_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+      // Set both parameters for exact fee
+      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
     };
     
-    console.log(`[buyToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[buyToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
@@ -1994,9 +1996,11 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
+      // Include both parameters for exact fee
+      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
       prioritizationFeeLamports: EXACT_FEE_LAMPORTS
     };
-    console.log(`[buyToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[buyToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
@@ -2062,7 +2066,8 @@ async function getTokenBalance(chatId, mint) {
 }
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
-  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
+  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
+  const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
   try {
@@ -2094,11 +2099,12 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       outputMint: SOL_MINT,
       amount: amount.toString(),
       taker: wallet.publicKey.toBase58(),
-      // Always use exact fee of 0.006 SOL
-      computeUnitPriceMicroLamports: Math.floor(EXACT_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+      // Set both parameters for exact fee
+      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
     };
     
-    console.log(`[sellToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[sellToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[sellToken] Slippage dinámico activado");
@@ -2135,9 +2141,11 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
+      // Include both parameters for exact fee
+      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
       prioritizationFeeLamports: EXACT_FEE_LAMPORTS
     };
-    console.log(`[sellToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    console.log(`[sellToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
