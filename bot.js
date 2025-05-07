@@ -3,7 +3,9 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
-import { Connection, Keypair, VersionedTransaction, ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -1887,7 +1889,6 @@ function getTokenInfo(mintAddress) {
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-  const FIXED_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
   let rpcUrl;
   try {
     console.log(
@@ -1910,24 +1911,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     );
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 3) Asegurar ATA con Helius ──
+    // ── 3) Asegurar Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
-    try {
-      await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
-      console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
-    } catch (err) {
-      console.warn(
-        `[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
-      );
-      const fallbackRpc = getNextRpc();
-      const fallbackConn = new Connection(fallbackRpc, "processed");
-      await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
-      console.log(
-        `[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
-      );
-      releaseRpc(fallbackRpc);
-    }
 
     // ── 4) Chequear balance ──
     let balanceLamports;
@@ -1965,7 +1951,15 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       taker: userPublicKey.toBase58()
     };
     
-    console.log(`[buyToken] Order params:`, JSON.stringify(orderParams, null, 2));
+    // Apply exact fee settings if enabled
+    if (user.swapSettings.useExactFee) {
+      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
+      console.log(`[buyToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
+    } else {
+      // For max cap, we still need to set a reasonable compute budget
+      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
+      console.log(`[buyToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
+    }
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
@@ -1998,20 +1992,6 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     // ── 7) Firmar la transacción ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    
-    // Add compute budget instruction for exact fee
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitPrice({
-      microLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
-    });
-    
-    // Add the compute budget instruction to the transaction
-    vtx.message.staticAccountKeys.unshift(computeBudgetIx.programId);
-    vtx.message.instructions.unshift({
-      programIdIndex: 0,
-      accountKeyIndexes: [],
-      data: computeBudgetIx.data
-    });
-    
     vtx.sign([userKeypair]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
@@ -2019,9 +1999,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
+      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
     };
-    console.log(`[buyToken] Execute payload:`, JSON.stringify(executePayload, null, 2));
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
@@ -2111,24 +2090,23 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 3) Asegurar ATA con Helius ──
     const readRpcUrl = getNextRpc();
     const readConnection = new Connection(readRpcUrl, "processed");
-    try {
-      await ensureAssociatedTokenAccount(wallet, mint, readConnection);
-      console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
-    } catch (err) {
-      console.warn(
-        `[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
-      );
-      const fallbackRpc = getNextRpc();
-      const fallbackConn = new Connection(fallbackRpc, "processed");
-      await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
-      console.log(
-        `[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
-      );
-      releaseRpc(fallbackRpc);
-    }
+    // try {
+    //   await ensureAssociatedTokenAccount(wallet, mint, readConnection);
+    //   console.log(`[sellToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    // } catch (err) {
+    //   console.warn(
+    //     `[sellToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+    //   );
+    //   const fallbackRpc = getNextRpc();
+    //   const fallbackConn = new Connection(fallbackRpc, "processed");
+    //   await ensureAssociatedTokenAccount(wallet, mint, fallbackConn);
+    //   console.log(
+    //     `[sellToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+    //   );
+    //   releaseRpc(fallbackRpc);
+    // }
 
     // ── 4) Construir parámetros de orden ──
-    const FIXED_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee
     const orderParams = {
       inputMint: mint,
       outputMint: SOL_MINT,
@@ -2136,7 +2114,15 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       taker: wallet.publicKey.toBase58()
     };
     
-    console.log(`[sellToken] Using fixed fee: ${FIXED_FEE_LAMPORTS} lamports (0.006 SOL)`);
+    // Apply exact fee settings if enabled
+    if (user.swapSettings.useExactFee) {
+      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
+      console.log(`[sellToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
+    } else {
+      // For max cap, we still need to set a reasonable compute budget
+      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
+      console.log(`[sellToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
+    }
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[sellToken] Slippage dinámico activado");
@@ -2166,20 +2152,6 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    
-    // Add compute budget instruction for exact fee
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitPrice({
-      microLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
-    });
-    
-    // Add the compute budget instruction to the transaction
-    vtx.message.staticAccountKeys.unshift(computeBudgetIx.programId);
-    vtx.message.instructions.unshift({
-      programIdIndex: 0,
-      accountKeyIndexes: [],
-      data: computeBudgetIx.data
-    });
-    
     vtx.sign([wallet]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
@@ -2187,9 +2159,9 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
+      prioritizationFeeLamports: user.swapSettings.priorityFeeLamports
     };
-    console.log("[sellToken] Execute payload:", JSON.stringify(executePayload, null, 2));
+    console.log("[sellToken] executePayload:", executePayload);
     const execRes = await axios.post(
       "https://lite-api.jup.ag/ultra/v1/execute",
       executePayload,
