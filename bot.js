@@ -1953,7 +1953,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       taker: userPublicKey.toBase58(),
       // Set both parameters for exact fee
       computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS,
+      swapMode: "ExactIn"
     };
     
     console.log(`[buyToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
@@ -2101,7 +2102,8 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       taker: wallet.publicKey.toBase58(),
       // Set both parameters for exact fee
       computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS,
+      swapMode: "ExactIn"
     };
     
     console.log(`[sellToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
