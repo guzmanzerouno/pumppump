@@ -3,9 +3,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
-import { Connection } from "@solana/web3.js";
-import { ComputeBudgetProgram } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -2000,6 +1998,20 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     // ── 7) Firmar la transacción ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
+    
+    // Add compute budget instruction for exact fee
+    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+    });
+    
+    // Add the compute budget instruction to the transaction
+    vtx.message.staticAccountKeys.unshift(computeBudgetIx.programId);
+    vtx.message.instructions.unshift({
+      programIdIndex: 0,
+      accountKeyIndexes: [],
+      data: computeBudgetIx.data
+    });
+    
     vtx.sign([userKeypair]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
@@ -2007,8 +2019,7 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: FIXED_FEE_LAMPORTS,
-      computeUnitPriceMicroLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
     };
     console.log(`[buyToken] Execute payload:`, JSON.stringify(executePayload, null, 2));
     const execRes = await axios.post(
@@ -2155,6 +2166,20 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
+    
+    // Add compute budget instruction for exact fee
+    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+    });
+    
+    // Add the compute budget instruction to the transaction
+    vtx.message.staticAccountKeys.unshift(computeBudgetIx.programId);
+    vtx.message.instructions.unshift({
+      programIdIndex: 0,
+      accountKeyIndexes: [],
+      data: computeBudgetIx.data
+    });
+    
     vtx.sign([wallet]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
@@ -2162,8 +2187,7 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const executePayload = {
       signedTransaction: signedTxBase64,
       requestId,
-      prioritizationFeeLamports: FIXED_FEE_LAMPORTS,
-      computeUnitPriceMicroLamports: Math.floor(FIXED_FEE_LAMPORTS / 1400000) // Convert to micro-lamports per CU
+      prioritizationFeeLamports: FIXED_FEE_LAMPORTS
     };
     console.log("[sellToken] Execute payload:", JSON.stringify(executePayload, null, 2));
     const execRes = await axios.post(
