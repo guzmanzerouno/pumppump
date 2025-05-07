@@ -1911,24 +1911,24 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     );
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 3) Asegurar ATA con Helius ──
-    const readRpcUrl = getNextRpc();
-    const readConnection = new Connection(readRpcUrl, "processed");
-    try {
-      await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
-      console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
-    } catch (err) {
-      console.warn(
-        `[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
-      );
-      const fallbackRpc = getNextRpc();
-      const fallbackConn = new Connection(fallbackRpc, "processed");
-      await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
-      console.log(
-        `[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
-      );
-      releaseRpc(fallbackRpc);
-    }
+    // // ── 3) Asegurar ATA con Helius ──
+    // const readRpcUrl = getNextRpc();
+    // const readConnection = new Connection(readRpcUrl, "processed");
+    // try {
+    //   await ensureAssociatedTokenAccount(userKeypair, mint, readConnection);
+    //   console.log(`[buyToken] ATA asegurada con Helius en ${readRpcUrl}`);
+    // } catch (err) {
+    //   console.warn(
+    //     `[buyToken] Falló ATA en ${readRpcUrl}: ${err.message}, intentando siguiente RPC`
+    //   );
+    //   const fallbackRpc = getNextRpc();
+    //   const fallbackConn = new Connection(fallbackRpc, "processed");
+    //   await ensureAssociatedTokenAccount(userKeypair, mint, fallbackConn);
+    //   console.log(
+    //     `[buyToken] ATA asegurada con Helius fallback en ${fallbackRpc}`
+    //   );
+    //   releaseRpc(fallbackRpc);
+    // }
 
     // ── 4) Chequear balance ──
     let balanceLamports;
