@@ -1963,10 +1963,18 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: mint,
       amount: Math.floor(amountSOL * 1e9).toString(),
-      taker: userPublicKey.toBase58(),
-      // inyectamos el exact fee aquí:
-      computeUnitPriceMicroLamports: user.swapSettings.priorityFeeLamports
+      taker: userPublicKey.toBase58()
     };
+    
+    // Apply exact fee settings if enabled
+    if (user.swapSettings.useExactFee) {
+      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
+      console.log(`[buyToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
+    } else {
+      // For max cap, we still need to set a reasonable compute budget
+      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
+      console.log(`[buyToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
+    }
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[buyToken] Usando slippage dinámico");
@@ -2118,10 +2126,18 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
       inputMint: mint,
       outputMint: SOL_MINT,
       amount: amount.toString(),
-      taker: wallet.publicKey.toBase58(),
-      // inyectamos el exact fee aquí:
-      computeUnitPriceMicroLamports: user.swapSettings.priorityFeeLamports
+      taker: wallet.publicKey.toBase58()
     };
+    
+    // Apply exact fee settings if enabled
+    if (user.swapSettings.useExactFee) {
+      orderParams.computeUnitPriceMicroLamports = user.swapSettings.priorityFeeLamports;
+      console.log(`[sellToken] Using exact fee: ${user.swapSettings.priorityFeeLamports} lamports`);
+    } else {
+      // For max cap, we still need to set a reasonable compute budget
+      orderParams.computeUnitPriceMicroLamports = Math.min(user.swapSettings.priorityFeeLamports, 1000000); // Cap at 1M lamports
+      console.log(`[sellToken] Using max cap fee: ${orderParams.computeUnitPriceMicroLamports} lamports`);
+    }
     if (user.swapSettings.dynamicSlippage) {
       orderParams.dynamicSlippage = true;
       console.log("[sellToken] Slippage dinámico activado");
@@ -4688,9 +4704,16 @@ bot.on('callback_query', async query => {
     state.stage = STAGES.FEE;
     saveUsers();
     return bot.editMessageText(
-      `*💰 Fee Type*\n\n` +
+      `*💰 Fee Settings*\n\n` +
+      `• Mode: ${swapSettings.useExactFee ? '🔴 Exact Fee' : '🔵 Max Cap'}\n` +
+      `• Current Fee: ${(swapSettings.priorityFeeLamports/1e9).toFixed(6)} SOL\n\n` +
       `• _Max Cap_: Let Jupiter automatically minimise your fee based on network conditions.\n` +
       `• _Exact Fee_: You choose the exact amount to pay for maximum priority.`,
+      // Show warning for high fees in exact fee mode
+      ...(swapSettings.useExactFee && swapSettings.priorityFeeLamports > 10000000 ? [{
+        text: "⚠️ Warning: High fee selected. This will be expensive!",
+        show_alert: true
+      }] : []),
       {
         chat_id:    chatId,
         message_id: msgId,
@@ -4750,6 +4773,14 @@ bot.on('callback_query', async query => {
       const map = { fast: 4000000, turbo: 6000000, extreme: 8000000 };
       const key = data.split('_')[2];
       swapSettings.priorityFeeLamports = map[key];
+      
+      // Show warning for high fees in exact fee mode
+      if (swapSettings.useExactFee && swapSettings.priorityFeeLamports > 10000000) { // 0.01 SOL
+        await bot.answerCallbackQuery(query.id, {
+          text: "⚠️ Warning: High fee selected. This will be expensive!",
+          show_alert: true
+        });
+      }
       delete users[chatId].swapState;
       saveUsers();
       return bot.editMessageText(
