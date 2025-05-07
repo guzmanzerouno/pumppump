@@ -1891,7 +1891,10 @@ function getTokenInfo(mintAddress) {
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
+  const JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote";
+  const JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap";
   let rpcUrl;
+
   try {
     console.log(
       `[buyToken] Iniciando compra para chat ${chatId}, mint ${mint}, amountSOL ${amountSOL}, intento ${attempt}`
@@ -1945,92 +1948,74 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       );
     }
 
-    // ── 5) Construir parámetros de orden ──
-    const orderParams = {
-      inputMint: "So11111111111111111111111111111111111111112",
-      outputMint: mint,
-      amount: Math.floor(amountSOL * 1e9).toString(),
-      taker: userPublicKey.toBase58(),
-      // Set both parameters for exact fee
-      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-      prioritizationFeeLamports: EXACT_FEE_LAMPORTS,
-      swapMode: "ExactIn"
-    };
-    
-    console.log(`[buyToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
-    if (user.swapSettings.dynamicSlippage) {
-      orderParams.dynamicSlippage = true;
-      console.log("[buyToken] Usando slippage dinámico");
-    } else {
-      orderParams.slippageBps = user.swapSettings.slippageBps;
-      console.log(
-        `[buyToken] Usando slippage fijo: ${user.swapSettings.slippageBps} bps`
-      );
+    // ── 5) Obtener cotización ──
+    console.log(`[buyToken] Obteniendo cotización para ${amountSOL} SOL de ${mint}...`);
+    const quoteResponse = await axios.get(JUPITER_QUOTE_URL, {
+      params: {
+        inputMint: "So11111111111111111111111111111111111111112", // SOL
+        outputMint: mint,
+        amount: Math.floor(amountSOL * 1e9).toString(),
+        slippageBps: user.swapSettings.dynamicSlippage ? 50 : user.swapSettings.slippageBps,
+        feeBps: 0,
+        computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE
+      }
+    });
+
+    if (!quoteResponse.data) {
+      throw new Error("Failed to get quote from Jupiter API");
     }
 
     // ── 6) Obtener transacción sin firmar ──
-    const orderRes = await axios.get(
-      "https://lite-api.jup.ag/ultra/v1/order",
+    console.log(`[buyToken] Obteniendo transacción sin firmar...`);
+    const swapResponse = await axios.post(
+      JUPITER_SWAP_URL,
       {
-        params: orderParams,
-        headers: { Accept: "application/json" }
+        quoteResponse: quoteResponse.data,
+        userPublicKey: userPublicKey.toBase58(),
+        wrapAndUnwrapSol: true,
+        computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE
+      },
+      {
+        headers: { 'Content-Type': 'application/json' }
       }
     );
-    if (!orderRes.data) {
-      throw new Error("Failed to receive order details from Ultra API.");
-    }
-    let unsignedTx =
-      orderRes.data.unsignedTransaction || orderRes.data.transaction;
-    const requestId = orderRes.data.requestId;
-    if (!unsignedTx || !requestId) {
-      throw new Error("Invalid order response from Ultra API.");
-    }
-    unsignedTx = unsignedTx.trim();
 
     // ── 7) Firmar la transacción ──
-    const txBuf = Buffer.from(unsignedTx, "base64");
-    const vtx = VersionedTransaction.deserialize(txBuf);
-    vtx.sign([userKeypair]);
-    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    console.log(`[buyToken] Firmando transacción...`);
+    const swapTransactionBuf = Buffer.from(swapResponse.data.swapTransaction, 'base64');
+    const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+    transaction.sign([userKeypair]);
 
-    // ── 8) Ejecutar con Ultra Execute ──
-    const executePayload = {
-      signedTransaction: signedTxBase64,
-      requestId,
-      // Include both parameters for exact fee
-      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
-    };
-    console.log(`[buyToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
-    const execRes = await axios.post(
-      "https://lite-api.jup.ag/ultra/v1/execute",
-      executePayload,
-      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
-    );
-    const exec = execRes.data || {};
-    if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
-      throw new Error(
-        "Invalid execute response from Ultra API: " + JSON.stringify(exec)
-      );
-    }
-    const txSignature = exec.txSignature || exec.signature;
-    console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
+    // ── 8) Enviar transacción ──
+    console.log(`[buyToken] Enviando transacción...`);
+    const rawTransaction = transaction.serialize();
+    const txSignature = await connection.sendRawTransaction(rawTransaction);
+    console.log(`[buyToken] Transacción enviada, signature: ${txSignature}`);
 
-    // ── 9) Guardar referencia ──
+    // ── 9) Confirmar transacción ──
+    await connection.confirmTransaction(txSignature, 'confirmed');
+    console.log(`[buyToken] Transacción confirmada: ${txSignature}`);
+
+    // ── 10) Guardar referencia ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
-      executeResponse: exec
+      executeResponse: {
+        status: "Success",
+        txSignature: txSignature,
+        signature: txSignature
+      }
     };
 
     return txSignature;
+
   } catch (error) {
     console.error(`❌ Error in purchase attempt ${attempt}:`, error);
     if (attempt < 6) {
       await new Promise((r) => setTimeout(r, 500));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
-    return Promise.reject(error);
+    throw error;
   } finally {
     if (rpcUrl) releaseRpc(rpcUrl);
   }
