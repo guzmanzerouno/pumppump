@@ -5,7 +5,6 @@ import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
 import { Connection } from "@solana/web3.js";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import { Jupiter } from '@jup-ag/core';
 import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
@@ -1893,8 +1892,6 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
   const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   let rpcUrl;
-  let connection;
-
   try {
     console.log(
       `[buyToken] Iniciando compra para chat ${chatId}, mint ${mint}, amountSOL ${amountSOL}, intento ${attempt}`
@@ -1905,101 +1902,137 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
       throw new Error("User not registered or missing privateKey.");
     }
 
-    // ── 1) Set up connection and wallet ──
+    // ── 1) Elegir endpoint de envío ──
     rpcUrl = getNextRpc();
     console.log(`[buyToken] Usando RPC para envío: ${rpcUrl}`);
-    connection = new Connection(rpcUrl, "confirmed");
-    
+
+    // 2) Conexión para firma/execution
+    const connection = new Connection(rpcUrl, "processed");
     const userKeypair = Keypair.fromSecretKey(
       new Uint8Array(bs58.decode(user.privateKey))
     );
     const userPublicKey = userKeypair.publicKey;
 
-    // ── 2) Check balance (keep existing balance check logic) ──
+    // ── 3) Asegurar Helius ──
+    const readRpcUrl = getNextRpc();
+    const readConnection = new Connection(readRpcUrl, "processed");
+
+    // ── 4) Chequear balance ──
     let balanceLamports;
     try {
-      balanceLamports = await connection.getBalance(userPublicKey, "processed");
+      balanceLamports = await readConnection.getBalance(
+        userPublicKey,
+        "processed"
+      );
     } catch (err) {
-      console.error(`[buyToken] getBalance falló en ${rpcUrl}:`, err);
+      console.error(`[buyToken] getBalance falló en ${readRpcUrl}:`, err);
       const fallbackRpc2 = getNextRpc();
       const fallbackConn2 = new Connection(fallbackRpc2, "processed");
-      balanceLamports = await fallbackConn2.getBalance(userPublicKey, "processed");
-      console.log(`[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports / 1e9} SOL`);
+      balanceLamports = await fallbackConn2.getBalance(
+        userPublicKey,
+        "processed"
+      );
+      console.log(
+        `[buyToken] Balance fallback en ${fallbackRpc2}: ${balanceLamports / 1e9} SOL`
+      );
       releaseRpc(fallbackRpc2);
     }
-    
     const balanceSOL = balanceLamports / 1e9;
     console.log(`[buyToken] Balance SOL = ${balanceSOL}`);
     if (balanceSOL < amountSOL) {
-      throw new Error(`Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`);
+      throw new Error(
+        `Not enough SOL. Balance: ${balanceSOL}, Required: ${amountSOL}`
+      );
     }
 
-    // ── 3) Initialize Jupiter SDK ──
-    const jupiter = await Jupiter.load({
-      connection,
-      cluster: 'mainnet-beta',
-      user: userPublicKey,
-    });
-
-    // ── 4) Set up swap parameters ──
-    const inputToken = jupiter.tokenMap.get('So11111111111111111111111111111111111111112'); // SOL
-    const outputToken = jupiter.tokenMap.get(mint);
+    // ── 5) Construir parámetros de orden ──
+    const orderParams = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: mint,
+      amount: Math.floor(amountSOL * 1e9).toString(),
+      taker: userPublicKey.toBase58(),
+      // Set both parameters for exact fee
+      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS,
+      swapMode: "ExactIn"
+    };
     
-    if (!inputToken || !outputToken) {
-      throw new Error('Failed to load token information from Jupiter');
+    console.log(`[buyToken] Using exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
+    if (user.swapSettings.dynamicSlippage) {
+      orderParams.dynamicSlippage = true;
+      console.log("[buyToken] Usando slippage dinámico");
+    } else {
+      orderParams.slippageBps = user.swapSettings.slippageBps;
+      console.log(
+        `[buyToken] Usando slippage fijo: ${user.swapSettings.slippageBps} bps`
+      );
     }
 
-    const slippage = user.swapSettings.dynamicSlippage ? 0.5 : (user.swapSettings.slippageBps / 100);
-    console.log(`[buyToken] Using ${user.swapSettings.dynamicSlippage ? 'dynamic' : 'fixed'} slippage: ${slippage}%`);
-
-    // ── 5) Find best route ──
-    const routes = await jupiter.computeRoutes({
-      inputMint: new PublicKey(inputToken.address),
-      outputMint: new PublicKey(outputToken.address),
-      amount: Math.floor(amountSOL * 1e9), // in lamports
-      slippage,
-      feeBps: 0,
-      onlyDirectRoutes: false,
-      computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-    });
-
-    if (!routes.routesInfos || routes.routesInfos.length === 0) {
-      throw new Error('No valid routes found for this swap');
+    // ── 6) Obtener transacción sin firmar ──
+    const orderRes = await axios.get(
+      "https://lite-api.jup.ag/ultra/v1/order",
+      {
+        params: orderParams,
+        headers: { Accept: "application/json" }
+      }
+    );
+    if (!orderRes.data) {
+      throw new Error("Failed to receive order details from Ultra API.");
     }
+    let unsignedTx =
+      orderRes.data.unsignedTransaction || orderRes.data.transaction;
+    const requestId = orderRes.data.requestId;
+    if (!unsignedTx || !requestId) {
+      throw new Error("Invalid order response from Ultra API.");
+    }
+    unsignedTx = unsignedTx.trim();
 
-    // ── 6) Execute swap ──
-    const { execute } = await jupiter.exchange({
-      routeInfo: routes.routesInfos[0],
+    // ── 7) Firmar la transacción ──
+    const txBuf = Buffer.from(unsignedTx, "base64");
+    const vtx = VersionedTransaction.deserialize(txBuf);
+    vtx.sign([userKeypair]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+
+    // ── 8) Ejecutar con Ultra Execute ──
+    const executePayload = {
+      signedTransaction: signedTxBase64,
+      requestId,
+      // Include both parameters for exact fee
       computeUnitPriceMicroLamports: COMPUTE_UNIT_PRICE,
-    });
+      prioritizationFeeLamports: EXACT_FEE_LAMPORTS
+    };
+    console.log(`[buyToken] Execute payload with exact fee: ${EXACT_FEE_LAMPORTS} lamports (0.006 SOL), computeUnitPrice: ${COMPUTE_UNIT_PRICE} µL/CU`);
+    const execRes = await axios.post(
+      "https://lite-api.jup.ag/ultra/v1/execute",
+      executePayload,
+      { headers: { "Content-Type": "application/json", Accept: "application/json" } }
+    );
+    const exec = execRes.data || {};
+    if (exec.status !== "Success" || !(exec.txSignature || exec.signature)) {
+      throw new Error(
+        "Invalid execute response from Ultra API: " + JSON.stringify(exec)
+      );
+    }
+    const txSignature = exec.txSignature || exec.signature;
+    console.log(`[buyToken] Ejecutado con éxito, signature: ${txSignature}`);
 
-    const result = await execute();
-    const txSignature = result.txid;
-    console.log(`[buyToken] Transaction executed successfully: ${txSignature}`);
-
-    // ── 7) Save reference (maintaining same structure as original) ──
+    // ── 9) Guardar referencia ──
     buyReferenceMap[chatId] = buyReferenceMap[chatId] || {};
     buyReferenceMap[chatId][mint] = {
       txSignature,
-      executeResponse: {
-        status: "Success",
-        txSignature: txSignature,
-        signature: txSignature
-      }
+      executeResponse: exec
     };
 
     return txSignature;
-
   } catch (error) {
     console.error(`❌ Error in purchase attempt ${attempt}:`, error);
     if (attempt < 6) {
       await new Promise((r) => setTimeout(r, 500));
       return buyToken(chatId, mint, amountSOL, attempt + 1);
     }
-    throw error; // Re-throw to maintain same error handling
+    return Promise.reject(error);
   } finally {
     if (rpcUrl) releaseRpc(rpcUrl);
-    if (connection) releaseRpc(connection.rpcEndpoint);
   }
 }
 
@@ -2032,7 +2065,6 @@ async function getTokenBalance(chatId, mint) {
         return 0;
     }
 }
-
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
   const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
@@ -2711,7 +2743,131 @@ async function analyzeTransaction(signature, forceCheck = false) {
       }
     }
   }
+
+  // En tu scope global
+const followers = {
+    // leaderChatId: Set([followerChatId, ...])
+  };
+
+  function getParticipants(leaderId) {
+    const set = followers[leaderId] || new Set();
+    return [ leaderId, ...Array.from(set) ];
+  }
+
+// /follow <leaderId>
+bot.onText(/\/follow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId] ||= new Set();
+    followers[leaderId].add(followerId);
+    bot.sendMessage(followerId, `✅ Now following ${leaderId}.`);
+  });
   
+  // /unfollow <leaderId>
+  bot.onText(/\/unfollow (\d+)/, (msg, match) => {
+    const followerId = msg.chat.id;
+    const leaderId   = Number(match[1]);
+    followers[leaderId]?.delete(followerId);
+    bot.sendMessage(followerId, `❌ Unfollowed ${leaderId}.`);
+  });
+
+// Ejecuta compra en paralelo para todos los participantes
+async function executeParallelBuy(participants, mint, amountSOL) {
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🛒 Processing purchase of ${amountSOL} SOL for ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar compra
+        const txSignature = await buyToken(chatId, mint, amountSOL);
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ The purchase could not be completed.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Fetch swap details
+        const swapDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+        if (!swapDetails) {
+          return bot.editMessageText(
+            `⚠️ Swap details could not be retrieved. Transaction: [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        await confirmBuy(chatId, swapDetails, messageId, txSignature);
+  
+      } catch (error) {
+        console.error(`Error in parallel buy for ${chatId}:`, error);
+        await bot.sendMessage(chatId, `❌ Purchase error: ${error.message || error}`);
+      }
+    }));
+  }
+  
+  // Ejecuta venta en paralelo para todos los participantes
+  async function executeParallelSell(participants, mint, sellType) {
+    const label = sellType === "50" ? "50%" : "100%";
+    await Promise.all(participants.map(async chatId => {
+      try {
+        // 1) Mensaje inicial
+        const sent = await bot.sendMessage(
+          chatId,
+          `🔄 Processing sale of ${label} of your ${mint}…`
+        );
+        const messageId = sent.message_id;
+  
+        // 2) Ejecutar la venta (con reintentos si quieres replicar tu lógica original)
+        let txSignature = null;
+        for (let i = 0; i < 3 && !txSignature; i++) {
+          txSignature = await sellToken(chatId, mint, sellType);
+          if (!txSignature) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!txSignature) {
+          return bot.editMessageText(
+            `❌ Sell failed for ${mint}. Please check server logs.`,
+            { chat_id: chatId, message_id }
+          );
+        }
+  
+        // 3) Obtener detalles (hasta 5 intentos)
+        let sellDetails = null;
+        for (let i = 0; i < 5 && !sellDetails; i++) {
+          sellDetails = await getSwapDetailsHybrid(txSignature, mint, chatId);
+          if (!sellDetails) await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!sellDetails) {
+          return bot.editMessageText(
+            `⚠️ Sell details could not be retrieved.\n🔗 [View in Solscan](https://solscan.io/tx/${txSignature})`,
+            {
+              chat_id: chatId,
+              message_id,
+              parse_mode: "Markdown",
+              disable_web_page_preview: true
+            }
+          );
+        }
+  
+        // 4) Confirmación final
+        // (si necesitas pasar el soldAmount, extráelo tal como en el handler individual)
+        await confirmSell(chatId, sellDetails, null, messageId, txSignature, mint);
+  
+      } catch (err) {
+        console.error(`Error in parallel sell for ${chatId}:`, err);
+        await bot.sendMessage(chatId, `❌ Sell error: ${err.message || err}`);
+      }
+    }));
+  }
 
  // Comando /autobuy
 bot.onText(/\/autobuy/, async (msg) => {
@@ -3168,6 +3324,14 @@ bot.on("callback_query", async (query) => {
   
     const [_, expectedTokenMint, sellType] = data.split("_");
   
+    // 1) Si tiene seguidores, hacemos parallel sell y salimos
+    const participants = getParticipants(chatId);
+    if (participants.length > 1) {
+      return executeParallelSell(participants, expectedTokenMint, sellType);
+    }
+  
+    // … de aquí en adelante, tu flujo individual EXACTO …
+  
     // asegurarnos de que exista la clave
     if (!users[chatId]?.privateKey) {
       await bot.sendMessage(chatId, "⚠️ Error: Private key not found.");
@@ -3415,6 +3579,13 @@ async function confirmSell(
   
       const [_, mint, amountStr] = data.split("_");
       const amountSOL = parseFloat(amountStr);
+  
+      // 2) Si tiene seguidores, lanzamos compras en paralelo y salimos
+      const participants = getParticipants(chatId);
+      if (participants.length > 1) {
+        await executeParallelBuy(participants, mint, amountSOL);
+        return;
+      }
   
       // 💰 2b) Chequeo de balance antes de “Processing”
       try {
