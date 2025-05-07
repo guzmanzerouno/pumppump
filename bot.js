@@ -3,7 +3,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
-import { Connection, Keypair, VersionedTransaction, ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, VersionedTransaction, ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
