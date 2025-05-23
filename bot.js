@@ -2690,12 +2690,12 @@ async function analyzeTransaction(signature, forceCheck = false) {
         { text: "📊 Chart+Txns",   url: `https://app.gemsniping.com/solana/${mint}` }
       ],
       [
-        { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
         { text: "💰 0.2 Sol",  callback_data: `buy_${mint}_0.2` },
         { text: "💰 0.3 Sol",  callback_data: `buy_${mint}_0.3` }
       ],
       [
-        { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+        { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
         { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
         { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
       ],
@@ -3155,12 +3155,12 @@ bot.on('callback_query', async (query) => {
                 { text: "📊 Chart+Txns", url: `https://app.gemsniping.com/solana/${mint}` }
               ],
               [
-                { text: "💰 0.01 Sol", callback_data: `buy_${mint}_0.01` },
+                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
                 { text: "💰 0.2 Sol", callback_data: `buy_${mint}_0.2` },
                 { text: "💰 0.3 Sol", callback_data: `buy_${mint}_0.3` }
       ],
       [
-                { text: "💰 0.1 Sol", callback_data: `buy_${mint}_0.1` },
+                { text: "💰 0.5 Sol", callback_data: `buy_${mint}_0.5` },
                 { text: "💰 1.0 Sol", callback_data: `buy_${mint}_1.0` },
                 { text: "💰 2.0 Sol", callback_data: `buy_${mint}_2.0` }
               ],
