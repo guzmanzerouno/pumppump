@@ -1889,7 +1889,10 @@ function getTokenInfo(mintAddress) {
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
+  const user = users[chatId];
+  // Lee el priority fee exacto desde la configuración del usuario
+  const userPriorityFee = user && user.swapSettings && user.swapSettings.useExactFee ? (user.swapSettings.priorityFeeLamports || 6000000) : 6000000;
+  const EXACT_FEE_LAMPORTS = userPriorityFee;
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   let rpcUrl;
   try {
@@ -2067,7 +2070,10 @@ async function getTokenBalance(chatId, mint) {
 }
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
-  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
+  const user = users[chatId];
+  // Lee el priority fee exacto desde la configuración del usuario
+  const userPriorityFee = user && user.swapSettings && user.swapSettings.useExactFee ? (user.swapSettings.priorityFeeLamports || 6000000) : 6000000;
+  const EXACT_FEE_LAMPORTS = userPriorityFee;
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
