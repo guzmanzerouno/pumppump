@@ -12,8 +12,26 @@ import {
   TransactionMessage,
   SystemProgram,
   sendAndConfirmTransaction,
-  VersionedTransaction
+  VersionedTransaction,
+  TransactionInstruction
 } from "@solana/web3.js";
+
+// Utilidad para reconstruir instrucciones versionadas universalmente
+function decodeInstructions(message) {
+  const accountKeys = message.staticAccountKeys;
+  return message.compiledInstructions.map(ix => {
+    return new TransactionInstruction({
+      programId: accountKeys[ix.programIndex],
+      keys: ix.accountKeyIndexes.map(idx => ({
+        pubkey: accountKeys[idx],
+        isSigner: message.isAccountSigner(idx),
+        isWritable: message.isAccountWritable(idx)
+      })),
+      data: ix.data
+    });
+  });
+}
+
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
