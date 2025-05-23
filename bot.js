@@ -2003,13 +2003,15 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     const vtx = VersionedTransaction.deserialize(txBuf);
     // Reconstruye el mensaje con la instrucción de fee al inicio
     const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    const originalMsg = vtx.message;
+    const messageV0 = vtx.message;
+    const accountKeys = messageV0.staticAccountKeys;
+    const originalInstructions = messageV0.compiledInstructions.map(ix => messageV0.getInstruction(ix));
     const newMsg = new TransactionMessage({
-      payerKey: originalMsg.staticAccountKeys[0],
-      recentBlockhash: originalMsg.recentBlockhash,
+      payerKey: accountKeys[0],
+      recentBlockhash: messageV0.recentBlockhash,
       instructions: [
         computeUnitIx,
-        ...originalMsg.getInstructions({ accountKeys: originalMsg.staticAccountKeys })
+        ...originalInstructions
       ],
     }).compileToV0Message();
     const newVtx = new VersionedTransaction(newMsg);
@@ -2164,13 +2166,15 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     const vtx = VersionedTransaction.deserialize(txBuf);
     // Reconstruye el mensaje con la instrucción de fee al inicio
     const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    const originalMsg = vtx.message;
+    const messageV0 = vtx.message;
+    const accountKeys = messageV0.staticAccountKeys;
+    const originalInstructions = messageV0.compiledInstructions.map(ix => messageV0.getInstruction(ix));
     const newMsg = new TransactionMessage({
-      payerKey: originalMsg.staticAccountKeys[0],
-      recentBlockhash: originalMsg.recentBlockhash,
+      payerKey: accountKeys[0],
+      recentBlockhash: messageV0.recentBlockhash,
       instructions: [
         computeUnitIx,
-        ...originalMsg.getInstructions({ accountKeys: originalMsg.staticAccountKeys })
+        ...originalInstructions
       ],
     }).compileToV0Message();
     const newVtx = new VersionedTransaction(newMsg);
