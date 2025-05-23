@@ -3,35 +3,9 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
-import {
-  Connection,
-  ComputeBudgetProgram,
-  Keypair,
-  PublicKey,
-  Transaction,
-  TransactionMessage,
-  SystemProgram,
-  sendAndConfirmTransaction,
-  VersionedTransaction,
-  TransactionInstruction
-} from "@solana/web3.js";
-
-// Utilidad para reconstruir instrucciones versionadas universalmente
-function decodeInstructions(message) {
-  const accountKeys = message.staticAccountKeys;
-  return message.compiledInstructions.map(ix => {
-    return new TransactionInstruction({
-      programId: accountKeys[ix.programIndex],
-      keys: ix.accountKeyIndexes.map(idx => ({
-        pubkey: accountKeys[idx],
-        isSigner: message.isAccountSigner(idx),
-        isWritable: message.isAccountWritable(idx)
-      })),
-      data: ix.data
-    });
-  });
-}
-
+import { Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -1915,10 +1889,7 @@ function getTokenInfo(mintAddress) {
 // Función para comprar tokens usando Ultra API de Jupiter
 // ────────────────────────────────
 async function buyToken(chatId, mint, amountSOL, attempt = 1) {
-  const user = users[chatId];
-  // Lee el priority fee exacto desde la configuración del usuario
-  const userPriorityFee = user && user.swapSettings && user.swapSettings.useExactFee ? (user.swapSettings.priorityFeeLamports || 6000000) : 6000000;
-  const EXACT_FEE_LAMPORTS = userPriorityFee;
+  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   let rpcUrl;
   try {
@@ -2019,22 +1990,8 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     // ── 7) Firmar la transacción ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    // Reconstruye el mensaje con la instrucción de fee al inicio
-    const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    const messageV0 = vtx.message;
-    const accountKeys = messageV0.staticAccountKeys;
-    const originalInstructions = messageV0.compiledInstructions.map(ix => messageV0.getInstruction(ix));
-    const newMsg = new TransactionMessage({
-      payerKey: accountKeys[0],
-      recentBlockhash: messageV0.recentBlockhash,
-      instructions: [
-        computeUnitIx,
-        ...originalInstructions
-      ],
-    }).compileToV0Message();
-    const newVtx = new VersionedTransaction(newMsg);
-    newVtx.sign([userKeypair]);
-    const signedTxBase64 = Buffer.from(newVtx.serialize()).toString("base64");
+    vtx.sign([userKeypair]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // ── 8) Ejecutar con Ultra Execute ──
     const executePayload = {
@@ -2110,10 +2067,7 @@ async function getTokenBalance(chatId, mint) {
 }
 // Función para vender tokens usando Ultra API de Jupiter
 async function sellToken(chatId, mint, amount, attempt = 1) {
-  const user = users[chatId];
-  // Lee el priority fee exacto desde la configuración del usuario
-  const userPriorityFee = user && user.swapSettings && user.swapSettings.useExactFee ? (user.swapSettings.priorityFeeLamports || 6000000) : 6000000;
-  const EXACT_FEE_LAMPORTS = userPriorityFee;
+  const EXACT_FEE_LAMPORTS = 6000000; // 0.006 SOL fixed fee in lamports
   const COMPUTE_UNIT_PRICE = Math.floor(EXACT_FEE_LAMPORTS / 1400000); // Convert to micro-lamports per CU
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   let rpcUrl;
@@ -2182,22 +2136,8 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    // Reconstruye el mensaje con la instrucción de fee al inicio
-    const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    const messageV0 = vtx.message;
-    const accountKeys = messageV0.staticAccountKeys;
-    const originalInstructions = messageV0.compiledInstructions.map(ix => messageV0.getInstruction(ix));
-    const newMsg = new TransactionMessage({
-      payerKey: accountKeys[0],
-      recentBlockhash: messageV0.recentBlockhash,
-      instructions: [
-        computeUnitIx,
-        ...originalInstructions
-      ],
-    }).compileToV0Message();
-    const newVtx = new VersionedTransaction(newMsg);
-    newVtx.sign([wallet]);
-    const signedTxBase64 = Buffer.from(newVtx.serialize()).toString("base64");
+    vtx.sign([wallet]);
+    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
     // ── 7) Ejecutar con Ultra Execute ──
     const executePayload = {
