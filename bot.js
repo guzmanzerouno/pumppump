@@ -1993,6 +1993,9 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     // ── 7) Firmar la transacción ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
+    // Inserta la instrucción de priority fee al inicio
+    const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
+    vtx.message.instructions = [computeUnitIx, ...vtx.message.instructions.filter(ix => ix.programId.toBase58() !== ComputeBudgetProgram.programId.toBase58())];
     vtx.sign([userKeypair]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
@@ -2142,6 +2145,9 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
+    // Inserta la instrucción de priority fee al inicio
+    const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
+    vtx.message.instructions = [computeUnitIx, ...vtx.message.instructions.filter(ix => ix.programId.toBase58() !== ComputeBudgetProgram.programId.toBase58())];
     vtx.sign([wallet]);
     const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
 
