@@ -3,9 +3,17 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import WebSocket from "ws";
 import fs from "fs";
 import TelegramBot from "node-telegram-bot-api";
-import { Connection } from "@solana/web3.js";
-import { ComputeBudgetProgram } from "@solana/web3.js";
-import { Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, VersionedMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  ComputeBudgetProgram,
+  Keypair,
+  PublicKey,
+  Transaction,
+  TransactionMessage,
+  SystemProgram,
+  sendAndConfirmTransaction,
+  VersionedTransaction
+} from "@solana/web3.js";
 import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { DateTime } from "luxon";
 import bs58 from "bs58";
@@ -1993,11 +2001,20 @@ async function buyToken(chatId, mint, amountSOL, attempt = 1) {
     // ── 7) Firmar la transacción ──
     const txBuf = Buffer.from(unsignedTx, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    // Inserta la instrucción de priority fee al inicio
+    // Reconstruye el mensaje con la instrucción de fee al inicio
     const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    vtx.message.instructions = [computeUnitIx, ...vtx.message.instructions.filter(ix => ix.programId.toBase58() !== ComputeBudgetProgram.programId.toBase58())];
-    vtx.sign([userKeypair]);
-    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    const originalMsg = vtx.message;
+    const newMsg = new TransactionMessage({
+      payerKey: originalMsg.staticAccountKeys[0],
+      recentBlockhash: originalMsg.recentBlockhash,
+      instructions: [
+        computeUnitIx,
+        ...originalMsg.getInstructions({ accountKeys: originalMsg.staticAccountKeys })
+      ],
+    }).compileToV0Message();
+    const newVtx = new VersionedTransaction(newMsg);
+    newVtx.sign([userKeypair]);
+    const signedTxBase64 = Buffer.from(newVtx.serialize()).toString("base64");
 
     // ── 8) Ejecutar con Ultra Execute ──
     const executePayload = {
@@ -2145,11 +2162,20 @@ async function sellToken(chatId, mint, amount, attempt = 1) {
     // ── 6) Firmar la transacción ──
     const txBuf = Buffer.from(txData, "base64");
     const vtx = VersionedTransaction.deserialize(txBuf);
-    // Inserta la instrucción de priority fee al inicio
+    // Reconstruye el mensaje con la instrucción de fee al inicio
     const computeUnitIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: EXACT_FEE_LAMPORTS });
-    vtx.message.instructions = [computeUnitIx, ...vtx.message.instructions.filter(ix => ix.programId.toBase58() !== ComputeBudgetProgram.programId.toBase58())];
-    vtx.sign([wallet]);
-    const signedTxBase64 = Buffer.from(vtx.serialize()).toString("base64");
+    const originalMsg = vtx.message;
+    const newMsg = new TransactionMessage({
+      payerKey: originalMsg.staticAccountKeys[0],
+      recentBlockhash: originalMsg.recentBlockhash,
+      instructions: [
+        computeUnitIx,
+        ...originalMsg.getInstructions({ accountKeys: originalMsg.staticAccountKeys })
+      ],
+    }).compileToV0Message();
+    const newVtx = new VersionedTransaction(newMsg);
+    newVtx.sign([wallet]);
+    const signedTxBase64 = Buffer.from(newVtx.serialize()).toString("base64");
 
     // ── 7) Ejecutar con Ultra Execute ──
     const executePayload = {
